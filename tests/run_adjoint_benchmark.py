@@ -3,6 +3,7 @@ write a numbered figure to ResultsFig/explicit/ and the results table to notes/7
     PYTHONPATH=src:tests python tests/run_adjoint_benchmark.py
 """
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -21,7 +22,7 @@ CASES = [('unrolled', 'cpu', 3.0, 4e-4), ('adjoint', 'cpu', 3.0, 4e-4),
 rows = []
 for m, dev, es, T in CASES:
     p = subprocess.run([PY, str(ROOT / 'tests' / 'study_adjoint_benchmark.py'), m, dev, str(es), str(T)],
-                       capture_output=True, text=True, env={'PYTHONPATH': f"{ROOT/'src'}:{ROOT/'tests'}", 'PATH': '/usr/bin:/bin'})
+                       capture_output=True, text=True, env={**os.environ, 'PYTHONPATH': f"{ROOT/'src'}:{ROOT/'tests'}"})
     line = [l for l in p.stdout.splitlines() if l.startswith('{')]
     if line:
         rows.append(json.loads(line[-1]))
