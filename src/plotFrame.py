@@ -5,8 +5,35 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 
-def animate_frame(frame, U, path, times=None, max_frames=80, elev=20, azim=-60, title='', extra=None, fps=15):
-    """U: (n_rec, N, 3) displacement history. Writes a GIF of the deformed centrelines (true scale).
+def draw_tubes(ax, P, conn, radii, colors=None, n_theta=16):
+    """Draw every element as a cylinder of its true radius (explicit counterpart of frameFE3
+    plotStructure(thicknessPlot=True)), plus a sphere at each element end so the capsule surface is visible."""
+    radii = np.asarray(radii)
+    th = np.linspace(0, 2 * np.pi, n_theta)
+    for e, (a, b) in enumerate(conn):
+        p0, p1 = P[a], P[b]
+        v = p1 - p0
+        L = np.linalg.norm(v)
+        v = v / L
+        nv = np.array([1.0, 0, 0]) if abs(v[0]) < 0.9 else np.array([0, 1.0, 0])
+        n1 = np.cross(v, nv)
+        n1 /= np.linalg.norm(n1)
+        n2 = np.cross(v, n1)
+        t, T = np.meshgrid(np.linspace(0, L, 2), th)
+        r = radii[e]
+        X, Y, Z = [p0[i] + v[i] * t + r * np.cos(T) * n1[i] + r * np.sin(T) * n2[i] for i in range(3)]
+        c = 'tab:blue' if colors is None else colors[e]
+        ax.plot_surface(X, Y, Z, color=c, shade=True, linewidth=0, alpha=0.9)
+        for pe in (p0, p1):
+            u_, v_ = np.meshgrid(np.linspace(0, 2 * np.pi, 10), np.linspace(0, np.pi, 6))
+            ax.plot_surface(pe[0] + r * np.cos(u_) * np.sin(v_), pe[1] + r * np.sin(u_) * np.sin(v_),
+                            pe[2] + r * np.cos(v_), color=c, shade=True, linewidth=0, alpha=0.9)
+
+
+def animate_frame(frame, U, path, times=None, max_frames=80, elev=20, azim=-60, title='', extra=None, fps=15,
+                  radii=None, colors=None):
+    """U: (n_rec, N, 3) displacement history. Writes a GIF of the deformed structure (true scale).
+    radii (ne,): draw tubes of the true beam radius (thickness plot) instead of centrelines.
     extra(ax, k) may draw more per frame (e.g. a contact plane)."""
     X = frame.X.detach().cpu().numpy()
     conn = frame.conn.cpu().numpy()
@@ -21,9 +48,11 @@ def animate_frame(frame, U, path, times=None, max_frames=80, elev=20, azim=-60, 
     def draw(k):
         ax.clear()
         x = P[k]
-        seg = x[conn]
-        for s in seg:
-            ax.plot(s[:, 0], s[:, 1], s[:, 2], 'b-', lw=1.5)
+        if radii is not None:
+            draw_tubes(ax, x, conn, radii, colors)
+        else:
+            for s in x[conn]:
+                ax.plot(s[:, 0], s[:, 1], s[:, 2], 'b-', lw=1.5)
         ax.plot(X[conn][:, :, 0].T, X[conn][:, :, 1].T, X[conn][:, :, 2].T, color='0.8', lw=0.6)
         if extra is not None:
             extra(ax, idx[k])
