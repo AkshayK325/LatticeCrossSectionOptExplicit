@@ -17,7 +17,7 @@ torch.set_default_dtype(torch.float64)
 MAT = project_material()   # EPU 45; elastic tests use its long-term E
 OUT = pathlib.Path(__file__).resolve().parents[1] / 'ResultsFig' / 'explicit'
 DEFAULT = {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2, 'zeta': 1.0}
-R_DEFAULT = 1.5      # legacy notebook circle radius upper bound (max_x = 1.5)
+R_DEFAULT = 0.8      # user choice 2026-10-01: r = 0.8 (d = 1.6 mm); r = 1.6 (d = 3.2) too large for this system
 
 
 @pytest.fixture(scope='module')
@@ -73,6 +73,15 @@ def test_drop_bottom_bonded_and_no_fly_off(drop):
     assert h['u'][:, rig['bot']].abs().max() == 0                 # bonded to the rigid bottom plate
     assert h['z_plate'].max() < 3.0                               # top plate stays on the lattice (mm)
     assert h['v_imp'][-1] > 0                                     # impactor separates and goes up
+
+
+@pytest.mark.xfail(strict=True, reason='r = 0.8 cannot stop 1 J: beams pass through each other until beam-beam '
+                                      'contact (plan Day 4); remove this mark when that lands')
+def test_drop_no_crush_through(drop):
+    """Top plate must stop above the compacted lattice (~2 layers of beams, 2*d), not pass the bottom plate."""
+    rig, h = drop
+    H = rig['fr'].X[rig['top'][0], 2].item()
+    assert -h['z_plate'].min() < H - 2 * (2 * R_DEFAULT), (-h['z_plate'].min(), H)
 
 
 def test_drop_energy_balance(drop):
@@ -163,8 +172,8 @@ if __name__ == '__main__':
 
     U = h['u'].clone()
     U[:, -1] = 0                                                   # impactor drawn as a plate, not a node
-    animate_frame(fr, U, numbered(OUT, 'drop_1J_6ms_r1.5.gif'), times=h['t'], elev=10, azim=-60, extra=plates,
-                  title='1 J, 6 m/s, r = 1.5 mm, bonded bottom', max_frames=70)
+    animate_frame(fr, U, numbered(OUT, 'drop_1J_6ms_r0.8.gif'), times=h['t'], elev=10, azim=-60, extra=plates,
+                  title='1 J, 6 m/s, r = 0.8 mm, bonded bottom', max_frames=70)
     fig, ax = plt.subplots(1, 3, figsize=(16, 4))
     t = h['t'] * 1e3
     ax[0].plot(t, h['F_imp'], label='impactor–plate')
@@ -180,4 +189,4 @@ if __name__ == '__main__':
     ax[2].set(xlabel='t [ms]', ylabel='energy [J]', title='energy budget')
     ax[2].legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(numbered(OUT, 'drop_1J_6ms_r1.5_histories.png'), dpi=130)
+    fig.savefig(numbered(OUT, 'drop_1J_6ms_r0.8_histories.png'), dpi=130)
