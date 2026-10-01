@@ -505,10 +505,17 @@ def _line_friction(lc, x, v, mu, m, dt):
     vr = vp - vq
     vt = vr - (vr * nrm).sum(1, keepdim=True) * nrm
     ia, ib = a[:, None].expand(-1, lc.nq).reshape(-1), b[:, None].expand(-1, lc.nq).reshape(-1)
-    meff = torch.minimum(torch.minimum(m[n1[ia]], m[n2[ia]]), torch.minimum(m[n1[ib]], m[n2[ib]]))
+    xa = xi.expand(len(a), -1).reshape(-1)
+    tb = t.reshape(-1)
+    # effective mass of the stick constraint: reduced mass of the two contact points (masses interpolated from
+    # the element nodes). Smooth in the design (a min over node masses has multi-way ties at symmetric lattice
+    # nodes -> non-differentiable kinks) and <= either point mass, so the stability bound stays conservative.
+    mp = (1 - xa) * m[n1[ia]] + xa * m[n2[ia]]
+    mq = (1 - tb) * m[n1[ib]] + tb * m[n2[ib]]
+    meff = mp * mq / (mp + mq)
     Ft = coulomb(Fn[keep], vt[keep], mu, meff[keep], dt)
-    xa = xi.expand(len(a), -1).reshape(-1)[keep][:, None]
-    tb = t.reshape(-1)[keep][:, None]
+    xa = xa[keep][:, None]
+    tb = tb[keep][:, None]
     ia, ib = ia[keep], ib[keep]
     f = f.index_add(0, n1[ia], (1 - xa) * Ft).index_add(0, n2[ia], xa * Ft)
     f = f.index_add(0, n1[ib], -(1 - tb) * Ft).index_add(0, n2[ib], -tb * Ft)

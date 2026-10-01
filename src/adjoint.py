@@ -15,13 +15,14 @@ import torch
 
 from explicitFE import rodrigues
 
-FIELDS = ('u', 'v', 'R', 'w', 'a', 'al', 'q', 'fp', 'Fb')
+FIELDS = ('u', 'v', 'R', 'w', 'a', 'al', 'q', 'fp', 'Fb', 'Fi')   # Fb: bottom reaction, Fi: impactor force
 
 
 class DropStepper:
     """Pure step map for a drop rig (latticeSetup.drop_rig) with a replayed dt schedule.
 
-    J_fn(Fb, h) -> per-step objective increment (placeholder until the objective is chosen)."""
+    J_fn: per-step increment. Either the legacy J_fn(Fb, h) (scalar), or terms(zin, zout, h) -> tensor (k,) of
+    additive quantities S_k = sum_n terms_n (see objectives.py); the objective is then g(S, theta)."""
 
     def __init__(self, rig, schedule, J_fn):
         self.rig, self.h = rig, [float(x) for x in schedule]
@@ -53,7 +54,8 @@ class DropStepper:
             a = a.index_copy(0, tie, ((self.m3[tie] * a[tie]).sum(0) / self.m3[tie].sum()).expand(len(tie), 3))
         al = -fth / self.j3
         Fb = fu[self.rig['bot'], 2].sum()
-        return a.masked_fill(self.keep_u, 0.0), al.masked_fill(self.keep_r, 0.0), q_new, f_inf, Fb
+        Fi = fc[self.rig['imp'], 2]                              # impactor-plate contact force (resisting > 0)
+        return a.masked_fill(self.keep_u, 0.0), al.masked_fill(self.keep_r, 0.0), q_new, f_inf, Fb, Fi
 
     def initial_state(self):
         fr, rig = self.fr, self.rig
@@ -65,23 +67,30 @@ class DropStepper:
         q = torch.zeros_like(self.law.q)
         fp = torch.zeros_like(self.law.f_prev)
         self.law.step_dt = 0.0
-        a, al, _, _, Fb = self._accel(u, R, v, w, q, fp)        # initial accel does not commit history
-        return dict(u=u, v=v, R=R, w=w, a=a, al=al, q=q, fp=fp, Fb=Fb)
+        a, al, _, _, Fb, Fi = self._accel(u, R, v, w, q, fp)    # initial accel does not commit history
+        return dict(u=u, v=v, R=R, w=w, a=a, al=al, q=q, fp=fp, Fb=Fb, Fi=Fi)
 
     def step(self, z, n):
         """(z_{n+1}, L_n). L_n = J_fn(Fb_n, h_n) uses the state at the start of the step (as dropGrad)."""
         h = self.h[n]
         self.law.step_dt = h
         self.rig['dt_now']['h'] = h
-        L = self.J_fn(z['Fb'], h)
         v = z['v'] + 0.5 * h * z['a']
         w = z['w'] + 0.5 * h * z['al']
         u = z['u'] + h * v
         R = rodrigues(h * w) @ z['R']
-        a, al, q, fp, Fb = self._accel(u, R, v, w, z['q'], z['fp'])
+        a, al, q, fp, Fb, Fi = self._accel(u, R, v, w, z['q'], z['fp'])
         v = v + 0.5 * h * a
         w = w + 0.5 * h * al
-        return dict(u=u, v=v, R=R, w=w, a=a, al=al, q=q, fp=fp, Fb=Fb), L
+        zout = dict(u=u, v=v, R=R, w=w, a=a, al=al, q=q, fp=fp, Fb=Fb, Fi=Fi)
+        L = self.terms(z, zout, h)
+        return zout, L
+
+    def terms(self, zin, zout, h):
+        try:
+            return self.J_fn(zin, zout, h)
+        except TypeError:                                        # legacy J_fn(Fb, h): placeholder objective
+            return self.J_fn(zin['Fb'], h)
 
 
 def _detach(z):
@@ -95,29 +104,43 @@ def forward_J(stepper):
         J = 0.0
         for n in range(len(stepper.h)):
             z, L = stepper.step(z, n)
-            J += float(L)
-    return J
+            J = J + L
+    return J if not torch.is_tensor(J) or J.dim() > 0 else float(J)
 
 
-def checkpointed_adjoint(stepper, theta, K=None):
+def checkpointed_adjoint(stepper, theta, K=None, outer=None):
     """J and dJ/dtheta (list of tensors, same shapes as theta) via the checkpointed discrete adjoint.
     theta: tensors that the rig depends on (e.g. per-element radii); they must require grad and the
-    rig must have been built from them (so the step graph reaches them)."""
+    rig must have been built from them (so the step graph reaches them).
+    outer: J = outer(S, theta) for additive accumulators S = sum_n terms_n (vector). The reverse sweep then runs
+    with per-step weights w = dJ/dS (exact chain rule), plus the direct dJ/dtheta of outer. Default: J = sum(S)."""
     N = len(stepper.h)
     K = K or max(1, int(round(math.sqrt(N))))
     # ---- forward sweep: checkpoints only (state + contact bookkeeping), no graph
     ckpt = {}
     with torch.no_grad():
         z = stepper.initial_state()
-        J = 0.0
+        S = 0.0
         for n in range(N):
             if n % K == 0:
                 ckpt[n] = (_detach(z), stepper.aux_get())
             z, L = stepper.step(z, n)
-            J += float(L)
+            S = S + L
+    S = torch.as_tensor(S, dtype=z['u'].dtype).reshape(-1)
+    g = [torch.zeros_like(t) for t in theta]
+    if outer is None:
+        J, wS = S.sum().item(), torch.ones_like(S)
+    else:                                                       # weights dJ/dS and the direct dJ/dtheta
+        Sg = S.clone().requires_grad_(True)
+        with torch.enable_grad():
+            Jt = outer(Sg, theta)
+            grads = torch.autograd.grad(Jt, [Sg] + list(theta), allow_unused=True, retain_graph=True)
+        J, wS = Jt.item(), grads[0].detach()
+        for t_i, gr in enumerate(grads[1:]):
+            if gr is not None:
+                g[t_i] = g[t_i] + gr.detach()
     # ---- reverse sweep
     lam = {k: torch.zeros_like(z[k]) for k in FIELDS}            # dJ/dz_N = 0 (J has no terminal term)
-    g = [torch.zeros_like(t) for t in theta]
     starts = sorted(ckpt)
     for s in reversed(starts):
         e = min(s + K, N)
@@ -136,7 +159,8 @@ def checkpointed_adjoint(stepper, theta, K=None):
             zin = {k: states[i - s][k].clone().requires_grad_(True) for k in FIELDS}
             with torch.enable_grad():
                 zout, L = stepper.step(zin, n)
-                pairs = [(zout[k], lam[k]) for k in FIELDS] + [(L, torch.ones_like(L))]
+                Lw = (wS * L.reshape(-1)).sum()                    # weighted per-step objective increment
+                pairs = [(zout[k], lam[k]) for k in FIELDS] + [(Lw, torch.ones_like(Lw))]
                 pairs = [(o, go) for o, go in pairs if o.requires_grad]   # skip outputs independent of z, theta
                 outs, gouts = [o for o, _ in pairs], [go for _, go in pairs]
                 # retain_graph: the design -> section-property graph built once with the rig is shared by

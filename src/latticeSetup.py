@@ -84,7 +84,8 @@ def circle_sections(r, nu=None):
 # impactor and top plate (scalar gap law from contact.py).
 
 def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
-             start='gap', lattice_contact=True, contact_model='line', fibre=True, mu=0.5, freeze=None):
+             start='gap', lattice_contact=True, contact_model='line', fibre=True, mu=0.5, freeze=None,
+             crush=False):
     """law: a gap law, or a dict of contact.calibrate() kwargs (lets 'crit_damped' get the reduced mass).
     r_elem (ne,) radii [mm]. plate_mass [t] (default 2 mm aluminium 38x38: 7.8 g). gap0 [mm] initial
     impactor-plate gap.
@@ -102,6 +103,8 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
                        integrated along the beams; 'capsule': contact.SelfContact (one Hertz point per beam pair).
     mu:                Coulomb friction coefficient for beam-beam and beam-plate contact (line model; 0 = off).
     fibre:             large-strain (fibre-integrated Yeoh) bending and torsion in the section law.
+    crush:             constant-velocity crush (standard SEA test): impactor mass 1 t, so the top plate keeps
+                       ~v0 whatever the lattice does (energy_J ignored); stop at the target stroke via T.
     freeze:            a nominal rig: reuse its design-dependent constants (impactor mass and contact law,
                        contact smoothing eps, joint-exclusion set, plate-contact node sets) so that a perturbed
                        design differs from the nominal ONLY through r_elem (needed for AD vs FD and adjoints)."""
@@ -127,6 +130,8 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     m = m.clone()
     if start in ('co_moving', 'merged'):
         M -= (m[top].sum().item() + plate_mass)          # plate + tied top nodes move with the impactor
+    if crush:
+        M = 1.0                                          # 1 t at 6 m/s: velocity loss over the crush is negligible
     if freeze is not None:
         M = freeze['M']
     m[imp], j[imp] = M, 1.0                                      # impactor rotations are fixed below
