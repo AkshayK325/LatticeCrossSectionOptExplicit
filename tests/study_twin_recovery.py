@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 dev = sys.argv[1] if len(sys.argv) > 1 else 'cuda'
+OPT = sys.argv[2] if len(sys.argv) > 2 else 'lbfgsb'     # 'lbfgsb' (scipy L-BFGS-B, line search) or 'mma'
 torch.set_default_device(dev)
 torch.set_default_dtype(torch.float64)
 from latticeSetup import example3, symmetry_groups, n_design_rows
@@ -76,11 +77,18 @@ def no_constraint(x):
 
 
 t_start = time.time()
-res = custom_minimize(obj, x0=np.array(to_x(g0)).reshape(-1, 1), bounds=Bounds([0.0] * 3, [1.0] * 3), method='MMA',
-                      constraintCall=no_constraint,
-                      options={'maxiter': 20, 'miniter': 5, 'kkttol': 1e-6, 'move_limit': 0.2, 'disp': True,
-                               'mma_subsolves': 1})
-g_opt = np.array(to_r(res.x.reshape(-1)))
+if OPT == 'mma':
+    res = custom_minimize(obj, x0=np.array(to_x(g0)).reshape(-1, 1), bounds=Bounds([0.0] * 3, [1.0] * 3), method='MMA',
+                          constraintCall=no_constraint,
+                          options={'maxiter': 20, 'miniter': 5, 'kkttol': 1e-6, 'move_limit': 0.2, 'disp': True,
+                                   'mma_subsolves': 1})
+    x_opt = res.x.reshape(-1)
+else:
+    from scipy.optimize import minimize
+    res = minimize(lambda xv: (lambda f, g: (f[0], g.reshape(-1)))(*obj(xv)), x0=np.array(to_x(g0)), jac=True,
+                   method='L-BFGS-B', bounds=[(0.0, 1.0)] * 3, options={'maxiter': 25, 'ftol': 1e-10, 'gtol': 1e-8})
+    x_opt = res.x
+g_opt = np.array(to_r(x_opt))
 wall = time.time() - t_start
 
 # ---------------------------------------------------------------- report (after the run)
@@ -106,10 +114,10 @@ for k in range(3):
 ax[2].set(xlabel='function evaluation', ylabel='radius [mm]', title='design (dotted: true)')
 ax[2].legend(fontsize=8)
 fig.tight_layout()
-fp = numbered(ROOT / 'ResultsFig' / 'explicit', 'twin_recovery_fd_mse.png')
+fp = numbered(ROOT / 'ResultsFig' / 'explicit', f'twin_recovery_fd_mse_{OPT}.png')
 fig.savefig(fp, dpi=130)
 json.dump(dict(g_true=g_true, g0=g0, g_opt=g_opt.tolist(), hist=hist, wall_s=wall),
-          open(numbered(ROOT / 'ResultsFig' / 'explicit', 'twin_recovery_fd_mse.json'), 'w'), indent=1)
+          open(numbered(ROOT / 'ResultsFig' / 'explicit', f'twin_recovery_fd_mse_{OPT}.json'), 'w'), indent=1)
 err = np.abs(np.array(g_opt) - np.array(g_true))
 md = [
     '# 8 — Twin recovery: MMA + exact adjoint gradients recover a design from its F–δ curve', '',
@@ -117,7 +125,7 @@ md = [
     f'- Rig: EPU 45 drop, 0.75 J, 6 m/s, 3 mm mesh, {T*1e3:.0f} ms, fibre visco-hyperelastic beams, line + plate contact, μ = 0.5.',
     f'- Design: Midplane symmetry, 3 group radii; MMA on normalised x in [0, 1] (radius = {R_RANGE[0]} + {R_RANGE[1]-R_RANGE[0]:.1f} x, denormalised inside the objective), J scaled by J(x0). Target curve from the design {g_true}; start {g0}.',
     '- Objective: normalised MSE between the impactor force–stroke loading branch and the target.',
-    '- Gradients: checkpointed discrete adjoint (exact).', '',
+    f'- Gradients: checkpointed discrete adjoint (exact). Optimizer: {OPT} on normalised x in [0, 1].', '',
     f'![twin](../ResultsFig/explicit/{fp.name})', '',
     '| | group 0 | group 1 | group 2 |', '|---|---|---|---|',
     f'| true | {g_true[0]} | {g_true[1]} | {g_true[2]} |',
