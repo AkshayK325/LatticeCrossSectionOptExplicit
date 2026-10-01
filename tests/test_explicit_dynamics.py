@@ -50,7 +50,7 @@ def static_tip_shape(c, w_tip):
 def energy_cb(c):
     def cb(n, t, state, fint):
         u, v, R, w = state
-        _, _, d, f_loc = fint
+        _, _, d, f_loc = fint[:4]
         ke = 0.5 * (c['m'] * (v**2).sum(1)).sum() + 0.5 * (c['j'] * (w**2).sum(1)).sum()
         return {'E': (ke + strain_energy(d, f_loc)).item(), 'tip': u[-1].clone()}
     return cb

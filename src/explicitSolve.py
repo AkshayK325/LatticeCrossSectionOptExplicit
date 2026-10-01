@@ -15,9 +15,14 @@ def strain_energy(d, f_loc):
 
 
 def simulate(frame, law, m, j, dt, n_steps, u0=None, v0=None, R0=None, w0=None,
-             fix_u=None, fix_r=None, f_ext=None, damping=0.0, record_every=1, callback=None):
+             fix_u=None, fix_r=None, f_ext=None, contact=None, tie=None, damping=0.0, record_every=1,
+             callback=None, t_end=None):
     """Run n_steps. fix_u / fix_r: bool masks (N,3) of fixed translation / rotation DOFs (held at u0/R0).
-    f_ext(t) -> (F (N,3), Mom (N,3)) or None. damping: mass-proportional coefficient alpha (1/s).
+    f_ext(t) -> (F (N,3), Mom (N,3)) or None. contact(u) -> F (N,3) or None.
+    tie: node indices moving as one rigid translating body (e.g. a bonded impactor plate; put its mass into m
+    on those nodes and fix their rotations). damping: mass-proportional coefficient alpha (1/s).
+    dt: float, a per-step sequence (replay a recorded schedule), or a callable dt(step, u, R) (adaptive);
+    with a callable, n_steps may be None and t_end sets the duration. hist['dt'] holds the steps used.
     callback(step, t, state, fint) -> dict of scalars to record. Returns dict of recorded histories."""
     N, dtype = frame.N, frame.X.dtype
     z = torch.zeros(N, 3, dtype=dtype)
@@ -32,31 +37,44 @@ def simulate(frame, law, m, j, dt, n_steps, u0=None, v0=None, R0=None, w0=None,
     def accel(t, u, R, v, w):
         fu, fth, d, f_loc = frame.internal_force(u, R, law)
         Fx, Mx = (z, z) if f_ext is None else f_ext(t)
-        a = (Fx - fu) / m3 - damping * v
+        fc = z if contact is None else contact(u)
+        a = (Fx + fc - fu) / m3 - damping * v
+        if tie is not None:
+            a = a.index_copy(0, tie, ((m3[tie] * a[tie]).sum(0) / m3[tie].sum()).expand(len(tie), 3))
         al = (Mx - fth) / j3 - damping * w
-        return a.masked_fill(keep_u, 0.0), al.masked_fill(keep_r, 0.0), (fu, fth, d, f_loc)
+        return a.masked_fill(keep_u, 0.0), al.masked_fill(keep_r, 0.0), (fu, fth, d, f_loc, fc)
 
-    hist = {'t': [], 'u': [], 'R': []}
+    def step_dt(n):
+        if callable(dt):
+            return dt(n, u.detach(), R.detach())
+        return float(dt[n]) if hasattr(dt, '__len__') else dt
+
+    if n_steps is None:
+        n_steps = len(dt) if hasattr(dt, '__len__') else 10**9
+    hist = {'t': [], 'u': [], 'R': [], 'dt': []}
     t = 0.0
     a, al, fint = accel(t, u, R, v, w)
     for n in range(n_steps + 1):
-        if n % record_every == 0:
+        done = n == n_steps or (t_end is not None and t >= t_end)
+        if n % record_every == 0 or done:
             hist['t'].append(t)
             hist['u'].append(u.detach().clone())
             hist['R'].append(R.detach().clone())
             if callback is not None:
                 for k, val in callback(n, t, (u, v, R, w), fint).items():
                     hist.setdefault(k, []).append(val)
-        if n == n_steps:
+        if done:
             break
-        v = v + 0.5 * dt * a
-        w = w + 0.5 * dt * al
-        u = u + dt * v
-        R = rodrigues(dt * w) @ R
-        t += dt
+        h = step_dt(n)
+        hist['dt'].append(h)
+        v = v + 0.5 * h * a
+        w = w + 0.5 * h * al
+        u = u + h * v
+        R = rodrigues(h * w) @ R
+        t += h
         a, al, fint = accel(t, u, R, v, w)
-        v = v + 0.5 * dt * a
-        w = w + 0.5 * dt * al
+        v = v + 0.5 * h * a
+        w = w + 0.5 * h * al
     hist['u'] = torch.stack(hist['u'])
     hist['R'] = torch.stack(hist['R'])
     hist['state'] = (u, v, R, w)
