@@ -187,10 +187,16 @@ if __name__ == '__main__':
     ax[0].plot(t, -h['F_bottom'], label='bottom reaction')
     ax[0].set(xlabel='t [ms]', ylabel='force [N]', title='forces')
     ax[0].legend()
-    ax[1].plot(-h['z_plate'], h['F_imp'])
+    ax[1].plot(-h['z_plate'], h['F_imp'], label='with beam-beam + plate contact')
+    rig_off = drop_rig(lat, r, DEFAULT, MAT, start='co_moving', gap0=0.1, energy_J=ENERGY_J, lattice_contact=False)
+    h_off = run_drop(rig_off, T=8e-3)
+    ax[1].plot(-h_off['z_plate'], h_off['F_imp'], '--', color='0.5', label='no lattice contact (crush-through)')
+    ax[1].axvline(rig['fr'].X[rig['top'][0], 2].item(), color='k', lw=0.8, ls=':', label='lattice height H')
+    ax[1].legend(fontsize=7)
     ax[1].set(xlabel='top-plate stroke [mm]', ylabel='impactor force [N]', title='force–stroke')
     for k, lab in (('KE', 'kinetic'), ('U', 'stored (long-term strain)'), ('E_diss_material', 'material (Prony) dissipation'),
-                   ('Phi', 'contact potential'), ('Wd', 'contact damping')):
+                   ('Phi', 'impactor contact potential'), ('Wd', 'impactor contact damping'),
+                   ('Phi_lat', 'lattice contact potential')):
         ax[2].plot(t, h[k] / 1e3, label=lab)
     ax[2].plot(t, h['E_tot'] / 1e3, 'k--', label='total')
     ax[2].set(xlabel='t [ms]', ylabel='energy [J]', title='energy budget')
