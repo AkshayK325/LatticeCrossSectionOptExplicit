@@ -47,6 +47,7 @@ hist = {'J': [], 'g': [], 'time': []}
 
 
 def obj(gv):
+    gv = np.asarray(gv, dtype=float).reshape(-1)                                # MMA passes (n,) or (n, 1)
     t0 = time.time()
     J, gx = value_and_grad(rows(gv), spec)
     gg = np.array([gx[torch.as_tensor(g)].sum().item() for g in groups])      # chain rule rows -> groups
