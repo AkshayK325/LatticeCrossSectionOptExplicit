@@ -121,8 +121,9 @@ materials:
       instantaneous E0 = E_inf/(1 - g1) = 342.9 MPa (table quotes ~341). Explicit time steps must use E0.
       Consistency notes (checked 2026-10-01, see notes/4_):
         - E_inf 14.4 MPa agrees with the TDS tensile modulus 17 MPa (ASTM D412, 500 mm/min ~ long-term).
-        - Yeoh set is STIFFER than the TDS tension curve: 5.5 / 11.3 / 40.8 MPa vs 3 / 4 / 9 MPa at
-          50 / 100 / 200 % strain (x1.8 / x2.8 / x4.5). Possibly fitted to compression data; unverified.
+        - Yeoh + Prony are COMPRESSION-calibrated (publications in notes/0_, confirmed by the user 2026-10-01),
+          so they are stiffer than the TDS tension curve (5.5 / 11.3 / 40.8 vs 3 / 4 / 9 MPa at 50 / 100 /
+          200 % tensile strain): expected tension/compression asymmetry, not an inconsistency.
         - 1-term Prony (tau = 52 us) gives E' = 14.4 MPa at 1 Hz, but Carbon DMA reports ~65 MPa at room
           temperature (Tg = 30 C): slow viscoelasticity near Tg is not represented. At 1 kHz the model
           gives E' = 46 MPa, tan(delta) = 2.1 (strong damping at impact frequencies).
@@ -145,4 +146,4 @@ materials:
       - "Carbon, EPU 45 Technical Data Sheet (density 1060 kg/m3, tensile modulus 17 MPa, DMA, Tg)"
       - "Le Barbenchon & Lissner (2024), Materials Letters 359:135823, doi:10.1016/j.matlet.2023.135823 (EPU45 compression, rate dependence)"
       - "Xu, Ji, Feng, Lin, Li (2025), Thin-Walled Structures 218:114036, doi:10.1016/j.tws.2025.114036 (EPU45 helmet liners, 4-5 m/s impact)"
-      - "Yeoh and Prony parameter values: user-compiled table (notes/0_Fix material from publication.md); the originating publication for these fitted constants still needs a citation"
+      - "Yeoh and Prony constants: compression-calibrated values from the EPU 45 publications above (table in notes/0_Fix material from publication.md, Xu et al. 2025 section; Le Barbenchon & Lissner 2024 compression data)"
