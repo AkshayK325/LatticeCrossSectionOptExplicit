@@ -84,7 +84,7 @@ def circle_sections(r, nu=None):
 # impactor and top plate (scalar gap law from contact.py).
 
 def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
-             start='gap', lattice_contact=True, contact_model='line', fibre=True, mu=0.5):
+             start='gap', lattice_contact=True, contact_model='line', fibre=True, mu=0.5, freeze=None):
     """law: a gap law, or a dict of contact.calibrate() kwargs (lets 'crit_damped' get the reduced mass).
     r_elem (ne,) radii [mm]. plate_mass [t] (default 2 mm aluminium 38x38: 7.8 g). gap0 [mm] initial
     impactor-plate gap.
@@ -98,10 +98,13 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     start='merged':    impactor rigidly bonded to the plate (one rigid body, no contact): zero jump by
                        construction, but the impactor can never separate on rebound.
     lattice_contact: beam-to-beam contact and node-to-plate Hertz contact of every non-bonded node with both
-                       plates. contact_model 'line' (default): contact.LineContact, line-contact density
+                       plates (True), or only one of them ('self' / 'plates', for diagnostics). contact_model 'line' (default): contact.LineContact, line-contact density
                        integrated along the beams; 'capsule': contact.SelfContact (one Hertz point per beam pair).
     mu:                Coulomb friction coefficient for beam-beam and beam-plate contact (line model; 0 = off).
-    fibre:             large-strain (fibre-integrated Yeoh) bending and torsion in the section law."""
+    fibre:             large-strain (fibre-integrated Yeoh) bending and torsion in the section law.
+    freeze:            a nominal rig: reuse its design-dependent constants (impactor mass and contact law,
+                       contact smoothing eps, joint-exclusion set, plate-contact node sets) so that a perturbed
+                       design differs from the nominal ONLY through r_elem (needed for AD vs FD and adjoints)."""
     from explicitFE import Frame, lumped_mass, adaptive_dt
     from contact import law_tangent, contact_dt_cap, potential_force
     Xr, connr = lat['Xr'], lat['connr']
@@ -124,6 +127,8 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     m = m.clone()
     if start in ('co_moving', 'merged'):
         M -= (m[top].sum().item() + plate_mass)          # plate + tied top nodes move with the impactor
+    if freeze is not None:
+        M = freeze['M']
     m[imp], j[imp] = M, 1.0                                      # impactor rotations are fixed below
     m[top] += plate_mass / len(top)
     fix_u = torch.zeros(fr.N, 3, dtype=torch.bool)
@@ -134,6 +139,8 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     top_t, t0 = torch.as_tensor(top), int(top[0])
     m_plate = m[top].sum().item()
     mu_red = 1 / (1 / M + 1 / m_plate)                           # impactor-plate reduced mass (not friction mu)
+    if freeze is not None:
+        law = freeze['law']
     if isinstance(law, dict):
         from contact import calibrate
         law = calibrate(mu=mu_red, v_ref=v0, **law)
@@ -147,7 +154,10 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         from contact import SelfContact, node_radius, hertz_potential, hertz_tangent
         if contact_model == 'line':
             from contact import LineContact
-            sc = LineContact(fr, r_elem, lat['beam_of_elem'], mat['E0'], mat['nu'], beam_conn=lat['conn'])
+            sc = LineContact(fr, r_elem, lat['beam_of_elem'], mat['E0'], mat['nu'], beam_conn=lat['conn'],
+                             eps=None if freeze is None else freeze['self_contact'].eps)
+            if freeze is not None:
+                sc.excluded, sc.n_excluded_points = freeze['self_contact'].excluded, freeze['self_contact'].n_excluded_points
         else:
             sc = SelfContact(fr, r_elem, mat['E0'], mat['nu'], beam_of_elem=lat['beam_of_elem'])
         rn = node_radius(fr, A)
@@ -156,15 +166,22 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         lat_nodes = np.arange(len(Xr))
         bc = torch.as_tensor(np.setdiff1d(lat_nodes, bot))
         tc = torch.as_tensor(np.setdiff1d(lat_nodes, top))
-        bc = bc[(fr.X[bc, 2] - zb - rn[bc]) > 0]                # drop nodes already touching (none expected)
-        tc = tc[(zt - fr.X[tc, 2] - rn[tc]) > 0]
+        with torch.no_grad():
+            bc = bc[(fr.X[bc, 2] - zb - rn[bc]) > 0]            # drop nodes already touching (none expected)
+            tc = tc[(zt - fr.X[tc, 2] - rn[tc]) > 0]
+        if freeze is not None:
+            bc, tc = freeze['bc'], freeze['tc']
         eps_c = sc.eps
 
+        use_self, use_plates = lattice_contact in (True, 'self'), lattice_contact in (True, 'plates')
+
         def phi_lat(x):
-            Phi_s, g_s = sc.energy(x)
+            Phi_s, g_s = sc.energy(x) if use_self else (x.sum() * 0.0, x[:0, 0])
             gb = x[bc, 2] - zb - rn[bc]
             gt = x[t0, 2] - x[tc, 2] - rn[tc]                   # top-plate face = tied top-node plane
-            Phi = Phi_s + hertz_potential(gb, kp[bc], eps_c).sum() + hertz_potential(gt, kp[tc], eps_c).sum()
+            Phi = Phi_s
+            if use_plates:
+                Phi = Phi + hertz_potential(gb, kp[bc], eps_c).sum() + hertz_potential(gt, kp[tc], eps_c).sum()
             return Phi, (g_s, gb, gt)
 
     dt_now = {'h': 1e-6}
@@ -245,7 +262,8 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     return dict(fr=fr, A=A, I=I, beam_law=beam_law, law=law, m=m, j=j, M=M, imp=imp, top=top_t, bot=bot,
                 fix_u=fix_u, fix_r=fix_r, contact=contact, tie=tie, gap=gap, dt_fn=dt_fn, v_init=v_init, gap0=gap0,
                 v0=v0, plate_mass=plate_mass, phi_lat=phi_lat, self_contact=sc, friction=friction, mu=mu,
-                last=last)
+                last=last, dt_now=dt_now, bc=bc if lattice_contact else None, tc=tc if lattice_contact else None,
+                r_elem=r_elem)
 
 
 def run_drop(rig, T=8e-3, record=True):

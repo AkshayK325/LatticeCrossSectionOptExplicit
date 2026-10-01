@@ -291,7 +291,7 @@ def potential_force(phi_fn, x):
     dx = torch.zeros_like(x, requires_grad=True)
     with torch.enable_grad():
         Phi, extra = phi_fn(x + dx)
-        need = torch.is_grad_enabled() and x.requires_grad
+        need = torch.is_grad_enabled()     # Phi may depend on design tensors (radii) even if x does not
         g, = torch.autograd.grad(Phi, dx, create_graph=need, allow_unused=True)
     f = torch.zeros_like(x) if g is None else -g
     return f, Phi, extra
@@ -381,8 +381,9 @@ class LineContact:
         pa0, pa1 = x[n1[a]], x[n2[a]]
         p = pa0[:, None, :] + self.xi[None, :, None] * (pa1 - pa0)[:, None, :]     # (m, nq, 3)
         q0, d = x[n1[b]], x[n2[b]] - x[n1[b]]
-        with torch.no_grad():
-            t = (((p - q0[:, None, :]) * d[:, None, :]).sum(-1) / (d * d).sum(-1)[:, None]).clamp(0, 1)
+        # t is kept in the graph: the force (first derivative) would be exact with t detached (envelope
+        # theorem), but the contact STIFFNESS needs dt/dx; detaching it made trajectory gradients wrong (1e-3)
+        t = (((p - q0[:, None, :]) * d[:, None, :]).sum(-1) / (d * d).sum(-1)[:, None]).clamp(0, 1)
         Q = q0[:, None, :] + t[..., None] * d[:, None, :]
         dist = torch.sqrt(((p - Q) ** 2).sum(-1) + 1e-30)                           # (m, nq)
         pid = a[:, None] * self.nq + torch.arange(self.nq)[None, :]
@@ -456,8 +457,7 @@ def _line_friction(lc, x, v, mu, m, dt):
     xi = lc.xi[None, :]
     p = x[n1[a]][:, None, :] + xi[..., None] * (x[n2[a]] - x[n1[a]])[:, None, :]
     q0, dq = x[n1[b]], x[n2[b]] - x[n1[b]]
-    with torch.no_grad():
-        t = (((p - q0[:, None, :]) * dq[:, None, :]).sum(-1) / (dq * dq).sum(-1)[:, None]).clamp(0, 1)
+    t = (((p - q0[:, None, :]) * dq[:, None, :]).sum(-1) / (dq * dq).sum(-1)[:, None]).clamp(0, 1)  # in graph
     Q = q0[:, None, :] + t[..., None] * dq[:, None, :]
     dist = torch.sqrt(((p - Q) ** 2).sum(-1) + 1e-30)
     gap = dist - lc.r[a][:, None] - lc.r[b][:, None]

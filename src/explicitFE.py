@@ -44,7 +44,9 @@ def log_so3(Q):
 class Frame:
     """Fixed geometry/topology. X (N,3), conn (ne,2) numpy arrays (already refined)."""
 
-    def __init__(self, X, conn, dtype=torch.float64, device='cpu'):
+    def __init__(self, X, conn, dtype=None, device=None):
+        dtype = torch.get_default_dtype() if dtype is None else dtype      # follow torch.set_default_device/
+        device = torch.get_default_device() if device is None else device  # dtype (GPU runs)
         self.X = torch.as_tensor(X, dtype=dtype, device=device)
         self.conn = torch.as_tensor(conn, dtype=torch.long, device=device)
         self.n1, self.n2 = self.conn[:, 0], self.conn[:, 1]
@@ -131,7 +133,7 @@ def stable_dt(frame, law, m, j, courant=0.8, iters=100, seed=0, u=None, R=None, 
     on the tangent at state (u, R) (default: reference state; K v via a JVP of internal_force).
     Free-free (no BCs): an upper bound on omega for any support, so the dt is safe.
     phi_extra(x) -> (Phi, extra): additional potential (contact) whose Hessian is added to the tangent."""
-    g = torch.Generator().manual_seed(seed)
+    g = torch.Generator(device=frame.X.device).manual_seed(seed)
     dtype = frame.X.dtype
     s = torch.cat((m[:, None].expand(-1, 3), j[:, None].expand(-1, 3)), dim=0).reshape(-1) ** -0.5
     R0 = torch.eye(3, dtype=dtype).expand(frame.N, 3, 3).contiguous() if R is None else R.detach()
