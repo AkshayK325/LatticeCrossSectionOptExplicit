@@ -1,0 +1,592 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb,amsfonts,bm}
+\usepackage{booktabs,array,longtable}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\mat}[1]{\mathbf{#1}}
+\newcommand{\skw}[1]{[\,#1\,]_{\times}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\softplus}{\operatorname{softplus}}
+\newcommand{\relu}{\operatorname{relu}}
+
+\title{Differentiable explicit impact model of visco-hyperelastic beam lattices with frictional contact\\[4pt]
+\large Physics, contact, material, element, time integration, test rig and exact sensitivities}
+\author{Model documentation\\[2pt]\small code: \texttt{src/explicitFE.py}, \texttt{explicitSolve.py}, \texttt{contact.py}, \texttt{latticeSetup.py},\\
+\small \texttt{material.py}, \texttt{adjoint.py}, \texttt{objectives.py}, \texttt{optimizeDrop.py}}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document describes the current simulation model used to compute the impact response of additively
+manufactured beam lattices and its exact design sensitivities. A lattice of slender struts made of an
+elastomeric polyurethane (Carbon EPU~45) is bonded to a rigid base plate and capped by a rigid top plate; a
+rigid impactor carrying a prescribed kinetic energy loads the top plate. The struts are modelled with a
+corotational three-dimensional Timoshenko beam element whose section law is visco-hyperelastic (Yeoh
+hyperelasticity integrated over the cross-section, quasi-linear Prony viscoelasticity). Contact between struts
+is represented by a line-contact density integrated along the beams, contact with both plates by Hertzian node
+contact, and the impactor--plate interaction by a critically damped Hertz law; regularised Coulomb friction acts
+at every contact. The equations of motion are integrated with an explicit central-difference (velocity Verlet)
+scheme with an exact exponential-map rotation update and an adaptive stable time step. Design gradients are
+obtained with a checkpointed discrete adjoint of the time-stepping scheme. All model components are written in
+PyTorch, so every force is differentiable with respect to positions, rotations and section properties.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%=====================================================================================================
+\section{Units, notation and overview}
+\label{sec:units}
+All quantities use the consistent set \textbf{mm, N, s, tonne (t), MPa}: $1\,\mathrm{t\,mm\,s^{-2}} = 1$\,N,
+$1$\,J $=1000$\,N\,mm and a density of $1\,\mathrm{kg\,m^{-3}} = 10^{-12}\,\mathrm{t\,mm^{-3}}$.
+Vectors are bold, $\skw{\vect{a}}$ is the skew matrix with $\skw{\vect{a}}\vect{b} = \vect{a}\times\vect{b}$,
+and $\exp(\skw{\vect{\theta}})$ is the rotation by the rotation vector $\vect{\theta}$.
+$\softplus(s)=\ln(1+e^{s})$, $\sigma(s) = 1/(1+e^{-s})$ and $\relu(s)=\max(s,0)$.
+
+The model has the following parts, described in turn:
+\begin{enumerate}
+\item material (Section~\ref{sec:material}): EPU~45 visco-hyperelastic constants;
+\item lattice geometry, sections and design variables (Section~\ref{sec:geometry});
+\item corotational Timoshenko beam element (Section~\ref{sec:element});
+\item section law: fibre-integrated Yeoh hyperelasticity with Prony viscoelasticity (Section~\ref{sec:section});
+\item inertia (Section~\ref{sec:mass});
+\item test rig and boundary conditions: bonded base plate, tied top plate, impactor (Section~\ref{sec:rig});
+\item contact: impactor--plate, beam--beam, beam--plate, friction (Section~\ref{sec:contact});
+\item explicit time integration and the stable time step (Section~\ref{sec:time});
+\item energy accounting (Section~\ref{sec:energy});
+\item response measures, objectives and exact sensitivities (Section~\ref{sec:sens});
+\item verification (Section~\ref{sec:verification}) and limitations (Section~\ref{sec:limits}).
+\end{enumerate}
+
+%=====================================================================================================
+\section{Material: Carbon EPU 45}
+\label{sec:material}
+EPU~45 is an elastomeric polyurethane printed by digital light synthesis (DLS). Its response is strongly
+rate-dependent and dissipative. The model uses a hyperelastic long-term response with a single relaxation term.
+
+\subsection{Constants}
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{0.36\textwidth}p{0.33\textwidth}p{0.24\textwidth}}
+\toprule
+quantity & value & note\\
+\midrule
+density $\rho$ & $1.06\times10^{-9}\,\mathrm{t\,mm^{-3}}$ ($1060\,\mathrm{kg\,m^{-3}}$) & Carbon TDS (ASTM D792)\\
+Yeoh $C_{10}, C_{20}, C_{30}$ & $2.4,\ 0.15,\ 0.02$\,MPa & long-term, compression-calibrated\\
+compressibility $D_i$ & $\approx 0$ & nearly incompressible\\
+Prony $g_1$, $k_1$ & $0.958$, $0$ & shear relaxation only\\
+Prony $\tau_1$ & $5.2\times 10^{-5}$\,s & \\
+Poisson ratio $\nu$ & $0.49$ & assumed\\
+long-term modulus $E_\infty = 6C_{10}$ & $14.4$\,MPa & small-strain limit of Yeoh\\
+instantaneous modulus $E_0 = E_\infty/(1-g_1)$ & $342.9$\,MPa & governs the explicit time step\\
+shear moduli $G_\infty$, $G_0$ & $E/(2(1+\nu))$ & \\
+\bottomrule
+\end{tabular}
+\caption{EPU 45 constants (\texttt{config/materials.yaml}, entry \texttt{EPU\_45}; \texttt{material.epu45()}).}
+\label{tab:material}
+\end{table}
+
+$E_\infty$ agrees with the manufacturer's tensile modulus (17\,MPa at 500\,mm/min, i.e.\ close to the relaxed
+state). The Yeoh constants are calibrated in compression; they are stiffer than the tensile data sheet at large
+tensile strain (5.5/11.3/40.8\,MPa vs.\ 3/4/9\,MPa at 50/100/200\,\% strain), which is the expected
+tension/compression asymmetry of such fits. With one Prony term the storage and loss moduli are
+\begin{equation}
+E'(\omega) = E_\infty + (E_0-E_\infty)\frac{\omega^2\tau_1^2}{1+\omega^2\tau_1^2},\qquad
+E''(\omega) = (E_0-E_\infty)\frac{\omega\tau_1}{1+\omega^2\tau_1^2},
+\end{equation}
+giving $\tan\delta = E''/E' = 0.73$ at 100\,Hz and $2.1$ at 1\,kHz, i.e.\ strong damping at impact
+frequencies. (At 1\,Hz the model gives $E'=14.4$\,MPa, whereas the manufacturer's DMA reports
+$\approx 65$\,MPa near $T_g=30\,^\circ$C; the slow viscoelasticity close to $T_g$ is not represented.)
+
+\subsection{Yeoh hyperelasticity}
+For an incompressible Yeoh solid the strain-energy density is
+\begin{equation}
+W(\bar I_1) = C_{10}(\bar I_1-3) + C_{20}(\bar I_1-3)^2 + C_{30}(\bar I_1-3)^3 .
+\end{equation}
+For uniaxial stretch $\lambda$, $\bar I_1 - 3 = \lambda^2 + 2/\lambda - 3$ and the nominal (first Piola) stress is
+\begin{equation}
+P(\lambda) = 2\left(\lambda - \lambda^{-2}\right)\left[C_{10} + 2C_{20}(\bar I_1-3) + 3C_{30}(\bar I_1-3)^2\right],
+\qquad \left.\frac{\dd P}{\dd\lambda}\right|_{\lambda=1} = 6C_{10} = E_\infty .
+\label{eq:yeoh-uniaxial}
+\end{equation}
+$P\to-\infty$ as $\lambda\to 0$, so a strut element cannot be compressed to zero length.
+For simple shear $\gamma$, $\bar I_1 - 3 = \gamma^2$ and $\tau = 2\gamma\left[C_{10}+2C_{20}\gamma^2+3C_{30}\gamma^4\right]$.
+
+%=====================================================================================================
+\section{Lattice, cross-sections and design variables}
+\label{sec:geometry}
+\subsection{Lattice}
+The lattice is the C4 cubic cell of the original optimisation study (exampleCase~3), $3\times3\times1$ cells of
+size $12.7$\,mm, i.e.\ a $38.1\times38.1\times12.7$\,mm coupon with 168 nodes and 276 struts (strut lengths
+2.6--6.4\,mm). Each strut is subdivided into elements of target length $h_e$ (number of elements per strut
+$=\operatorname{round}(L/h_e)$); $h_e=1$\,mm (1332 elements) is the converged results mesh, $h_e=3$\,mm
+(444 elements) is used for fast tests. The mapping element$\to$strut is kept (\texttt{beam\_of\_elem}).
+
+\subsection{Circular sections}
+Each element has a solid circular section of radius $r$:
+\begin{equation}
+A = \pi r^2,\quad A_{s} = \kappa A,\quad I_y = I_z = \tfrac{\pi}{4}r^4,\quad J = I_y + I_z,\qquad
+\kappa = \frac{6(1+\nu)}{7+6\nu} = 0.899 \ \text{(Cowper)} .
+\end{equation}
+Struts are short and stout ($L/r = 3$--$8$), so the shear coefficient matters.
+
+\subsection{Design variables and symmetry}
+Design rows $\vect{x}\in[0,1]^{n}$ are mapped to radii by $r = r_{\min} + (r_{\max}-r_{\min})\,x$ inside the
+objective (e.g.\ $[r_{\min}, r_{\max}] = [0.4, 1.2]$\,mm), then expanded by a symmetry rule
+(\emph{Independent}: one row per strut; \emph{Unitcell}: one row per strut of the unit cell, repeated;
+\emph{OneValue}: a single radius; \emph{Midplane}: three groups by height), and finally to every element of
+each strut. The expansion is linear, so its derivative is exact.
+
+%=====================================================================================================
+\section{Corotational Timoshenko beam element}
+\label{sec:element}
+\subsection{Kinematic state}
+Each node carries its position $\vect{x}_a = \vect{X}_a + \vect{u}_a$ and a rotation $\mat{R}_a\in SO(3)$
+measured from the reference configuration. No element-level state is stored.
+
+For element $e=(1,2)$ with reference axes $\mat{T}^0 = [\vect{e}^0_1, \vect{e}^0_2, \vect{e}^0_3]^\top$
+(axis 1 along the chord; axis 2 from the global axis least aligned with the chord), the current nodal triads are
+$\mat{t}_a = \mat{R}_a \mat{T}^{0\top}$ (columns $\vect{n}^a_x, \vect{n}^a_y, \vect{n}^a_z$).
+
+\subsection{Element frame}
+\begin{equation}
+L = \lVert \vect{x}_2-\vect{x}_1\rVert,\quad
+\vect{e}_1 = \frac{\vect{x}_2-\vect{x}_1}{L},\quad
+\vect{q} = \tfrac12\left(\vect{n}^1_y + \vect{n}^2_y\right),\quad
+\vect{e}_3 = \frac{\vect{e}_1\times\vect{q}}{\lVert \vect{e}_1\times\vect{q}\rVert},\quad
+\vect{e}_2 = \vect{e}_3\times\vect{e}_1 .
+\end{equation}
+This frame follows Battini and Pacoste~\cite{battini2002} and needs no stored state.
+
+\subsection{Local deformations}
+The rotation of node $a$ relative to the element frame, $\mat{Q}_a = \mat{E}^\top\mat{t}_a$ with
+$\mat{E} = [\vect{e}_1,\vect{e}_2,\vect{e}_3]$, is converted to a rotation vector by the logarithm
+\begin{equation}
+\vect{a} = \tfrac12\operatorname{vec}\left(\mat{Q}_a-\mat{Q}_a^\top\right),\quad s = \lVert\vect{a}\rVert = \sin\phi,
+\quad c = \tfrac12(\operatorname{tr}\mat{Q}_a - 1) = \cos\phi,\quad
+\vect{\theta}_a = \vect{a}\,\frac{\operatorname{atan2}(s,c)}{s}.
+\label{eq:log}
+\end{equation}
+This form is smooth for $\phi\in[0,\pi)$. (The arcsine form used in the earlier linear code stiffens like
+$1/\cos\phi$ and diverges at $90^\circ$ element-relative rotation, which occurs during crushing.)
+The six local deformations are
+\begin{equation}
+\vect{d} = \left(\Delta L,\ r_x,\ r_{y1},\ r_{z1},\ r_{y2},\ r_{z2}\right),\quad
+\Delta L = L - L_0,\quad r_x = \theta^{2}_x-\theta^{1}_x,\quad r_{ya}=\theta^{a}_y,\ r_{za}=\theta^{a}_z .
+\end{equation}
+
+\subsection{Internal force by virtual work}
+With local resultants $\vect{f}_\mathrm{loc}(\vect{d}) = (N, T, M_{y1}, M_{z1}, M_{y2}, M_{z2})$ from the section
+law (Section~\ref{sec:section}), the global nodal forces and moments are the exact virtual-work transpose
+\begin{equation}
+\begin{bmatrix}\vect{f}_u\\ \vect{f}_\theta\end{bmatrix}
+= \left(\frac{\partial\vect{d}}{\partial(\vect{u},\delta\vect{\theta})}\right)^{\!\top}\vect{f}_\mathrm{loc},
+\qquad \mat{R}_a \leftarrow \left(\mat{I} + \skw{\delta\vect{\theta}_a}\right)\mat{R}_a ,
+\label{eq:fint}
+\end{equation}
+i.e.\ a vector--Jacobian product computed by automatic differentiation, with rotational variations taken as
+spatial spins. For an elastic law, $\vect{f}_\mathrm{loc} = \partial\Pi/\partial\vect{d}$ and
+(\ref{eq:fint}) is the exact gradient of the strain energy, so the explicit dynamics conserves energy. The
+geometric (P--$\delta$) stiffness is included automatically.
+
+\subsection{Linear Timoshenko resultants}
+The small-strain part of the section law is the exact two-node Timoshenko element (per bending plane, with
+$\Omega = EI/(G A_s L_0^2)$, $\mu = 1+12\Omega$, $\lambda=1+3\Omega$, $\gamma = 1-6\Omega$):
+\begin{equation}
+N = \frac{EA}{L_0}\Delta L,\quad T = \frac{GJ}{L_0}r_x,\quad
+\begin{bmatrix}M_1\\M_2\end{bmatrix} = \frac{2EI}{\mu L_0}
+\begin{bmatrix}2\lambda & \gamma\\ \gamma & 2\lambda\end{bmatrix}
+\begin{bmatrix}r_1\\r_2\end{bmatrix} .
+\label{eq:timo}
+\end{equation}
+Its small-displacement tangent equals the classical 12$\times$12 Timoshenko stiffness to $10^{-9}$.
+
+%=====================================================================================================
+\section{Section law: fibre-integrated Yeoh with Prony viscoelasticity}
+\label{sec:section}
+\subsection{Large-strain long-term response}
+Axial stretch, bending and torsion all use the Yeoh law, integrated over the cross-section. From the local
+deformations the element strains are
+\begin{equation}
+\varepsilon_0 = \frac{\Delta L}{L_0},\quad \kappa_y = \frac{r_{y2}-r_{y1}}{L_0},\quad
+\kappa_z = \frac{r_{z2}-r_{z1}}{L_0},\quad \vartheta = \frac{r_x}{L_0},
+\end{equation}
+and a fibre at section coordinates $(y,z)$ has stretch and torsional shear
+\begin{equation}
+\lambda_f = 1 + \varepsilon_0 - y\kappa_z + z\kappa_y,\qquad \gamma_f = \vartheta\sqrt{y^2+z^2},\qquad
+\bar I_1 - 3 = \lambda_f^2 + 2/\lambda_f - 3 + \gamma_f^2 .
+\end{equation}
+The element energy is
+\begin{equation}
+U_\mathrm{fib}(\vect{d}) = L_0 \int_{A} W\!\left(\bar I_1\right)\dd A \approx
+L_0\, r^2 \sum_{k} w_k W\!\left(\bar I_1(y_k,z_k)\right),
+\end{equation}
+evaluated with a polar quadrature: 4 Gauss--Legendre rings ($\int_0^1 f(s)\,s\dd s$) $\times$ 16 angles.
+$U_\mathrm{quad}$ is the same integral with the small-strain limit $W\to C_{10}(3\varepsilon^2+\gamma^2)$.
+The long-term resultants are
+\begin{equation}
+\vect{f}_\infty(\vect{d}) = \vect{f}_\mathrm{lin}(\vect{d}) +
+\frac{\partial}{\partial\vect{d}}\Big(U_\mathrm{fib}(\vect{d}) - U_\mathrm{quad}(\vect{d})\Big),
+\label{eq:finf}
+\end{equation}
+with $\vect{f}_\mathrm{lin}$ from (\ref{eq:timo}) using $E_\infty, G_\infty$. At small strain the correction
+vanishes and the validated linear Timoshenko element is recovered (including its shear flexibility); at large
+strain axial, bending and torsional responses follow Yeoh, including the net axial force that pure bending
+produces because of the tension/compression asymmetry. Transverse shear remains linear. The law is
+conservative. This is the corotational fibre approach (e.g.\ \cite{battini2002}) with a hyperelastic fibre law;
+see also geometrically exact beams~\cite{simo1985}.
+
+\subsection{Quasi-linear (Fung) viscoelasticity}
+With $\beta_i = g_i/(1-\sum_j g_j)$, the total resultants are
+$\vect{f}_\mathrm{loc} = \vect{f}_\infty + \sum_i \vect{q}_i$, and each Prony branch is driven by increments
+of the long-term resultants over a step of length $h$:
+\begin{equation}
+\vect{q}_i^{\,n+1} = a_i\,\vect{q}_i^{\,n} + \beta_i\,b_i\left(\vect{f}_\infty^{\,n+1}-\vect{f}_\infty^{\,n}\right),
+\qquad a_i = e^{-h/\tau_i},\quad b_i = \frac{1-a_i}{h/\tau_i} = -\frac{\operatorname{expm1}(-h/\tau_i)}{h/\tau_i}.
+\label{eq:prony}
+\end{equation}
+This is exact for a constant rate within the step. For $h\to0$, $b_i\to1$ and the response is instantaneous,
+$\vect{f}_\mathrm{loc} = (E_0/E_\infty)\vect{f}_\infty$ to first order, which is the stiffness the stable time
+step must use. The branch histories $(\vect{q}_i,\vect{f}_\infty^{\,n})$ are part of the state.
+
+%=====================================================================================================
+\section{Inertia}
+\label{sec:mass}
+Lumped translational mass per element end $\rho A L_0/2$. Rotary inertia per element end (scalar, isotropic)
+\begin{equation}
+j_e = \frac{\rho L_0}{2}\max\!\left(I_y + I_z,\ \frac{A L_0^2}{12}\right),
+\end{equation}
+the standard explicit rotary-inertia scaling (it only activates for $L_0 > \sqrt{6}\,r$, i.e.\ not on the
+1\,mm results mesh). With isotropic nodal rotary inertia the rotational equation is $j\,\dot{\vect\omega} =
+\vect{m}$ with no gyroscopic term.
+
+%=====================================================================================================
+\section{Test rig and boundary conditions}
+\label{sec:rig}
+The rig reproduces a drop-weight test on a coupon bonded between two plates:
+\begin{itemize}
+\item \textbf{Base plate (bonded, rigid, fixed).} All nodes on the bottom face ($z=0$) have all six degrees of
+freedom fixed.
+\item \textbf{Top plate (bonded, rigid).} All nodes on the top face are tied into one rigid body that
+translates (rotations fixed). Its mass is the plate mass ($2$\,mm aluminium, $7.8$\,g) plus the lumped mass of
+the tied nodes. The tie is imposed on accelerations: for tied set $\mathcal{T}$,
+$\vect{a}_a \leftarrow \sum_{b\in\mathcal T} m_b\vect{a}_b / \sum_{b\in\mathcal T} m_b$ for all $a\in\mathcal T$,
+so the plate moves under the resultant of all forces on its nodes.
+\item \textbf{Impactor.} A rigid body with one translational degree of freedom ($z$), a separate node without
+elements, interacting with the top plate only through contact (Section~\ref{sec:impactor-contact}).
+\item \textbf{Loading: co-moving start.} At $t=0$ the impactor and the top plate move together at
+$v_0 = 6$\,m/s towards the base, with an impactor--plate gap of $0.1$\,mm, and the impactor mass is set so
+that the total kinetic energy equals the impact energy $E_\mathrm{imp}$ ($0.75$\,J):
+\begin{equation}
+M = \frac{2E_\mathrm{imp}}{v_0^2} - m_\mathrm{plate} .
+\end{equation}
+This takes the (plastic) impactor--plate collision as completed, i.e.\ the plate acts as the striker face.
+The contact force then builds up continuously as the lattice decelerates the plate and releases continuously on
+rebound. (Starting from rest with a gap gives a rigid--rigid collision, a force spike and rattling of the light
+plate; this is physical but not what is measured.)
+\item \textbf{Crush mode.} For constant-velocity crushing (the standard specific-energy test) the impactor mass
+is set to $1$\,t, so the plate keeps $v_0$ independently of the lattice; the run stops at the target stroke.
+\item Gravity is neglected ($\Delta v = g\,t \approx 0.1$\,m/s over 10\,ms).
+\end{itemize}
+
+%=====================================================================================================
+\section{Contact and friction}
+\label{sec:contact}
+All normal contact laws use the smooth penetration
+\begin{equation}
+\delta(g) = \varepsilon\,\softplus(-g/\varepsilon) ,
+\end{equation}
+which tends to $\max(-g,0)$ for $|g|\gg\varepsilon$ and is $C^\infty$. Unless stated otherwise
+$\varepsilon = 0.05\,r_{\min}$. Under light load contact therefore acts within $\approx2\varepsilon$ of
+geometric touching (the regularisation width).
+
+\subsection{Impactor--plate contact: critically damped Hertz law}
+\label{sec:impactor-contact}
+With gap $g = g_0 + u_{z,\mathrm{imp}} - u_{z,\mathrm{plate}}$ and gap rate $\dot g$, the contact force on the
+impactor is
+\begin{equation}
+f = k\,\delta^{3/2} - c(\delta)\,\dot g,\qquad c(\delta) = 2\zeta\sqrt{k_t\,\mu_r},\quad k_t = \tfrac32 k\,\delta^{1/2},
+\quad \mu_r = \frac{M\,m_\mathrm{plate}}{M+m_\mathrm{plate}},\quad \zeta = 1,
+\end{equation}
+followed by a smooth positive part that is exactly zero at $f=0$:
+\begin{equation}
+F = \max\!\left(0,\ \tfrac12\left(f + \sqrt{f^2 + s^2}\right) - \tfrac12 s\right),\qquad s = 0.01\,k\,\delta^{3/2}.
+\end{equation}
+$k$ is calibrated so that the law carries $F_\mathrm{ref} = 2000$\,N at $\delta_\mathrm{ref} = 0.2$\,mm
+($k = F_\mathrm{ref}/\delta_\mathrm{ref}^{3/2}$, $\varepsilon = 0.1\,\delta_\mathrm{ref}$). The damping, tuned
+to the impactor--plate contact mode itself, removes the ringing of the light plate between the heavy impactor
+and the soft lattice. It vanishes as $\delta^{1/4}$ at onset (continuous force), and the positive part prevents
+sticky tension at separation. Alternatives implemented for comparison: linear penalty, Hertz, Hunt--Crossley
+\cite{hunt1975,lankarani1990} and an IPC log-barrier \cite{li2020ipc}.
+
+\subsection{Beam--beam contact: line-contact density}
+\label{sec:beam-beam}
+Every element is a capsule: its centreline segment with radius $r_e$. Rather than one point force per pair of
+segments, contact is a \emph{density integrated along the beams}.
+
+\paragraph{Quadrature points.} Each element $a$ carries $n_q = \lceil L_{\max}/h_q\rceil$ points
+$\vect{p}_{a,k} = \vect{x}_{a_1} + \xi_k(\vect{x}_{a_2}-\vect{x}_{a_1})$, $\xi_k = (k+\tfrac12)/n_q$, with
+tributary length $w_a = L_{0,a}/n_q$ ($h_q = 0.1$\,mm).
+
+\paragraph{Gap to another beam.} For a point $\vect p$ and an element $b$ with end points $\vect q_0$,
+$\vect q_0 + \vect d_b$, the projection is
+$t = \operatorname{clamp}\left((\vect p-\vect q_0)\cdot\vect d_b/(\vect d_b\cdot\vect d_b),\,0,\,1\right)$, and
+the gap of point $(a,k)$ to beam $B$ (all candidate elements of $B$) is the distance to the polyline minus both
+radii,
+\begin{equation}
+g_{a,k}^{B} = \min_{b\in B}\ \left\lVert \vect p_{a,k} - \vect q_0^b - t\,\vect d_b\right\rVert - r_a - r_B .
+\end{equation}
+Taking the minimum over the elements of $B$ (rather than summing over element pairs) avoids counting a contact
+twice where two elements of $B$ share a node. $t$ is kept in the derivative: the force (first derivative) would
+be exact with $t$ frozen (envelope theorem), but the contact \emph{stiffness}, needed for trajectory
+sensitivities, contains $\partial t/\partial\vect x$.
+
+\paragraph{Potential.}
+\begin{equation}
+\Phi_\mathrm{bb} = \frac12\sum_{a,k}\sum_{B\neq\mathrm{beam}(a)} w_a\,\frac{k_\ell}{2}\,\delta\!\left(g_{a,k}^{B}\right)^2,
+\qquad k_\ell = \frac{E^*}{2},\quad E^* = \frac{E_0}{2(1-\nu^2)},
+\end{equation}
+and the nodal forces are $-\partial\Phi_\mathrm{bb}/\partial\vect x$ (automatic differentiation), so the
+contact is conservative. The factor $\tfrac12$ accounts for each contact zone being integrated from both beams.
+
+\paragraph{Line and point contact from one law.} Two parallel beams overlapping over a length $\ell$ carry
+$F = k_\ell\,\delta\,\ell$ (line contact). For two crossed cylinders of radius $R$ the capsule gap along one
+beam is $g(x) \approx -\delta + x^2/(4R)$, and integrating the density over the contact zone gives
+\begin{equation}
+F = \int k_\ell\left(\delta - \frac{x^2}{4R}\right)_{\!+}\dd x = \frac{4}{3}\,k_\ell\,\sqrt{4R}\,\delta^{3/2}
+= \frac{4}{3}E^*\sqrt{R}\,\delta^{3/2}\quad\text{for } k_\ell = E^*/2,
+\end{equation}
+i.e.\ exactly the Hertz law for crossed cylinders~\cite{johnson1985}, without using it. (Numerically: 0.99,
+0.98, 0.97 of Hertz at $\delta = 0.02$, $0.05$, $0.1$\,mm.)
+
+\paragraph{Exclusions (geometric, mesh independent).}
+\begin{enumerate}
+\item A beam does not contact itself.
+\item A (point, beam) combination already overlapping in the reference configuration ($g\le0$) never contacts.
+\item Joint crotch: if the two beams share a lattice node, a (point, beam) combination whose reference gap is
+below one radius is treated as joint material. Otherwise any joint rotation drives the crotch surfaces into
+``contact'' and double counts the joint stiffness, which the beam element already provides.
+\end{enumerate}
+Contact between struts of the same joint further out (folding struts) remains active.
+
+\paragraph{Candidate search.} Element pairs from different beams with segment--segment gap below a margin
+($1$\,mm) are kept in a Verlet list. It is refreshed when any node has moved more than half the margin since
+the last refresh, so no pair can close unseen. For each step only the pairs whose segment gap is below
+$6\varepsilon$ are evaluated point by point; beyond this the potential is below $e^{-12}$ of the contact
+scale. Both choices are deterministic functions of the state (needed for the adjoint).
+
+\subsection{Beam--plate contact}
+Every non-bonded lattice node $a$ contacts both plates with a Hertz potential of a sphere of the nodal radius
+$r_a$ (largest radius of the attached elements) on a rigid flat:
+\begin{equation}
+\Phi_\mathrm{pl} = \sum_{a} \frac{2}{5}k_a\,\delta(g_a)^{5/2},\qquad k_a = \frac43\frac{E_0}{1-\nu^2}\sqrt{r_a},
+\qquad g_a^\mathrm{base} = z_a - r_a,\quad g_a^\mathrm{top} = z_\mathrm{plate} - z_a - r_a .
+\end{equation}
+The reaction on the top plate enters the plate's equation of motion through $z_\mathrm{plate}$.
+
+\subsection{Friction}
+Coulomb friction with $\mu = 0.5$ acts at every contacting line-contact point and plate contact. With normal
+force $F_n$ (from the same potential) and tangential slip velocity $\vect v_t$ between the two contacting
+material points (the point on beam $a$ and its closest point on beam $b$, or node and plate),
+\begin{equation}
+\vect F_t = -\mu F_n\,\frac{\vect v_t}{\sqrt{\lVert\vect v_t\rVert^2 + v_\varepsilon^2}},\qquad
+v_\varepsilon = \max\!\left(v_{\varepsilon 0},\ \frac{2\mu F_n h}{m_\mathrm{eff}}\right),\quad v_{\varepsilon0} = 1\,\mathrm{mm/s},
+\end{equation}
+with $m_\mathrm{eff} = m_p m_q/(m_p+m_q)$ the reduced mass of the two contact points (masses interpolated from
+the element nodes). The equivalent viscous coefficient $\mu F_n/v_\varepsilon$ never exceeds
+$m_\mathrm{eff}/(2h)$, so near stick the explicit step stays stable and the law acts as a stick constraint for
+slip speeds below $\approx\mu F_n h/m_\mathrm{eff}$; under real slip it is Coulomb's $\mu F_n$. The forces are
+applied with the interpolation weights at both contact points (equal and opposite).
+
+%=====================================================================================================
+\section{Explicit time integration}
+\label{sec:time}
+\subsection{Velocity Verlet with exponential-map rotations}
+With nodal accelerations $\vect a = (\vect f_\mathrm{ext}+\vect f_\mathrm{c}-\vect f_u)/m$ and angular
+accelerations $\vect\alpha = -\vect f_\theta/j$ (fixed degrees of freedom masked), one step of length $h_n$ is
+\begin{align}
+\vect v^{n+1/2} &= \vect v^n + \tfrac{h_n}{2}\vect a^n, & \vect\omega^{n+1/2} &= \vect\omega^n + \tfrac{h_n}{2}\vect\alpha^n,\\
+\vect u^{n+1} &= \vect u^n + h_n\vect v^{n+1/2}, & \mat R^{n+1} &= \exp\!\left(\skw{h_n\vect\omega^{n+1/2}}\right)\mat R^n,\\
+\vect a^{n+1},\ \vect\alpha^{n+1} &= \text{forces at } (\vect u^{n+1}, \mat R^{n+1}, \vect v^{n+1/2}), &&\\
+\vect v^{n+1} &= \vect v^{n+1/2} + \tfrac{h_n}{2}\vect a^{n+1}, & \vect\omega^{n+1} &= \vect\omega^{n+1/2} + \tfrac{h_n}{2}\vect\alpha^{n+1},
+\end{align}
+followed by the Prony update (\ref{eq:prony}). The exponential map is evaluated with the Rodrigues formula in a
+form that is smooth at zero rotation,
+$\exp(\skw{\vect w}) = \mat I + \operatorname{sinc}(r)\skw{\vect w} + \tfrac12\operatorname{sinc}(r/2)^2\skw{\vect w}^2$,
+$r = \lVert\vect w\rVert$. One force evaluation per step; velocity-dependent forces (damping, friction) see
+the half-step velocity.
+
+\subsection{Stable time step}
+The step is adapted every step as
+\begin{equation}
+h_n = \min\!\left(\frac{2C}{\sqrt{\omega_\mathrm{beam}^2 + \omega_\mathrm{c}^2}},\ h_\mathrm{cap}\right),\qquad C = 0.7,
+\end{equation}
+where:
+\begin{itemize}
+\item $\omega_\mathrm{beam}^2 = \lambda_{\max}(\mat M^{-1/2}\mat K\mat M^{-1/2})$ of the current tangent is
+estimated by a warm-started power iteration (Jacobian--vector products of the internal force, free--free,
+i.e.\ an upper bound for any support), refreshed every 20 steps. With $h\ll\tau_1$ the Prony law makes the
+tangent the instantaneous ($E_0$) one.
+\item $\omega_\mathrm{c}$ collects contact stiffnesses. For the impactor law,
+$\omega = \sqrt{k_t/\mu_r}/(\sqrt{1+\zeta^2}-\zeta)$ (damped central-difference limit). For line and plate
+contact, every quadrature point's exact stiffness
+$\tfrac12 w_a k_\ell(\sigma^2 + \delta\sigma(1-\sigma)/\varepsilon)$ is summed per element and per node (a
+row-sum bound, which covers nodes in several contacts at once), giving $\sqrt{2K_\mathrm{node}/m_\mathrm{node}}$.
+\item $h_\mathrm{cap}$ is a kinematic cap: near contact, the relative approach per step is limited to
+$0.1\ell$ ($\ell = \delta_\mathrm{ref}$ for the impactor law, $2\varepsilon$ for lattice contact), so the force
+cannot jump from zero to a large value within one step. The stiffness-based estimate cannot see this, because
+the stiffness is zero just before contact.
+\end{itemize}
+If $h_n$ falls below $10^{-3}$ of its initial value the run stops (instability guard). Typical values: $h\approx
+4\times10^{-6}$\,s on the 1\,mm mesh with $E_0$; an 8\,ms drop takes $\approx 7400$ steps.
+
+%=====================================================================================================
+\section{Energy accounting}
+\label{sec:energy}
+The energy balance is monitored as
+\begin{multline}
+E_\mathrm{tot} = \underbrace{\tfrac12\sum m\lVert\vect v\rVert^2 + \tfrac12\sum j\lVert\vect\omega\rVert^2}_{\text{kinetic}}\\
++ \underbrace{\sum_n \tfrac12(\vect f_\mathrm{loc}^n + \vect f_\mathrm{loc}^{n+1})\cdot(\vect d^{n+1}-\vect d^n)}_{\text{internal work (stored + dissipated)}}\\
++ \Phi_\mathrm{imp} + W_\mathrm{damp,imp} + \Phi_\mathrm{bb} + \Phi_\mathrm{pl} + W_\mathrm{fric},
+\end{multline}
+where $W_\mathrm{fric} = -\sum_n \tfrac12(\vect F_t^n+\vect F_t^{n+1})\cdot(\vect u^{n+1}-\vect u^n)$ is the
+work of the friction forces actually applied. The material dissipation is the internal work minus the stored
+long-term energy (fibre Yeoh plus quadratic parts).
+
+%=====================================================================================================
+\section{Response measures, objectives and exact sensitivities}
+\label{sec:sens}
+\subsection{Response curve and objectives}
+The response is the impactor force $F$ versus top-plate stroke $\delta$. Per step,
+$\Delta\delta = \delta^{n+1}-\delta^n$, $\bar F = \tfrac12(F^n+F^{n+1})$, $\bar\delta = \tfrac12(\delta^n+\delta^{n+1})$, and
+\begin{equation}
+S_0 = \sum_n \left(\bar F - F^*(\bar\delta)\right)^2\relu(\Delta\delta),\qquad
+S_1 = \sum_n \bar F\,\relu(\Delta\delta),\qquad S_2 = \sum_n \bar F\,\Delta\delta .
+\end{equation}
+\begin{itemize}
+\item \textbf{Target force--displacement curve (inverse design):}
+$J_\mathrm{MSE} = S_0 \big/ \int F^{*2}\dd\delta$, with $F^*$ piecewise linear (e.g.\ an ``ideal absorber''
+plateau~\cite{zeng2023}).
+\item \textbf{Specific energy absorption:} $\mathrm{SEA} = S_k/m_\mathrm{lat}$ with
+$m_\mathrm{lat} = \rho\sum A L_0$; $k=1$ (loading area) for constant-velocity crushing, $k=2$ (dissipated loop
+area) in a fixed-energy drop. There the loading area is close to the impact energy whatever the design, so the
+loading-area SEA would reduce to $1/m$. The objective $J = -\mathrm{SEA}$ is minimised.
+\end{itemize}
+
+\subsection{Discrete adjoint with two-level checkpointing}
+Write one time step as the pure map $\vect z^{n+1} = \Phi_n(\vect z^n;\vect\theta)$ with state
+$\vect z = (\vect u,\vect v,\mat R,\vect\omega,\vect a,\vect\alpha,\vect q,\vect f_\infty,F_\mathrm{b},F)$, and
+the objective as $J = g(\vect S,\vect\theta)$ with additive accumulators
+$\vect S = \sum_n\vect\ell_n(\vect z^n,\vect z^{n+1})$. The time-step schedule $\{h_n\}$ of the nominal run is
+replayed, and design-dependent rig constants (impactor mass and law, $\varepsilon$, exclusion sets, plate
+contact node sets) are frozen at the nominal design. The contact Verlet list is stored with each checkpoint and
+restored on recompute. The adjoint recursion is
+\begin{equation}
+\vect\lambda^n = \left(\frac{\partial\Phi_n}{\partial\vect z^n}\right)^{\!\top}\vect\lambda^{n+1}
++ \frac{\partial (\vect w\cdot\vect\ell_n)}{\partial\vect z^n},\qquad
+\frac{\dd J}{\dd\vect\theta} = \frac{\partial g}{\partial\vect\theta}
++ \sum_n\left[\left(\frac{\partial\Phi_n}{\partial\vect\theta}\right)^{\!\top}\vect\lambda^{n+1}
++ \frac{\partial(\vect w\cdot\vect\ell_n)}{\partial\vect\theta}\right],\qquad \vect w = \frac{\partial g}{\partial\vect S},
+\end{equation}
+with each product a single-step vector--Jacobian product.
+
+\begin{algorithm}[h]
+\caption{Checkpointed discrete adjoint (\texttt{adjoint.checkpointed\_adjoint})}
+\begin{algorithmic}[1]
+\State forward (no graph): $\vect z^0$; for $n=0..N-1$: store $\vect z^n$ and contact state if $n \bmod K = 0$; $\vect z^{n+1}=\Phi_n(\vect z^n)$, $\vect S \mathrel{+}= \vect\ell_n$
+\State $\vect w \gets \partial g/\partial\vect S$, $\vect g_\theta \gets \partial g/\partial\vect\theta$, $\vect\lambda\gets 0$
+\For{segments $[s, s+K)$ from last to first}
+  \State restore checkpoint $s$; recompute and store $\vect z^{s..s+K-1}$ (no graph)
+  \For{$n = s+K-1$ down to $s$}
+    \State build the graph of one step $\vect z^{n+1},\vect\ell_n = \Phi_n(\vect z^n)$ from the stored $\vect z^n$
+    \State $(\vect\lambda, \Delta\vect g_\theta) \gets \mathrm{VJP}\big((\vect z^{n+1}, \vect w\cdot\vect\ell_n);\ (\vect\lambda, 1)\big)$; $\vect g_\theta \mathrel{+}= \Delta\vect g_\theta$
+  \EndFor
+\EndFor
+\State chain $\vect\lambda^0$ through $\vect z^0(\vect\theta)$
+\end{algorithmic}
+\end{algorithm}
+
+Memory is $\mathcal O((N/K + K)\,|\vect z|)$ plus one step graph, $K=\sqrt N$, independent of the number of
+design variables. The gradient equals reverse-mode differentiation of the unrolled loop
+(discretise-then-differentiate~\cite{jensen2014}); checkpointing follows~\cite{griewank2000}. Measured on the
+3\,mm mesh at 1\,ms: unrolled reverse AD 327\,s and 16.7\,GB (CPU), adjoint 29.8\,s and 0.69\,GB; the full
+8\,ms drop on the 1\,mm mesh takes 403\,s and 0.43\,GB on an 8\,GB GPU.
+
+\subsection{Optimisers}
+Design variables are normalised to $[0,1]$ and denormalised inside the objective. For many design
+variables with constraints the method of moving asymptotes (MMA,~\cite{svanberg1987}) is used with asymptotes
+carried between iterations, or its globally convergent variant GCMMA~\cite{svanberg2002}, whose inner loop
+enlarges the approximation curvature using value-only (forward) evaluations until the approximation is
+conservative. L-BFGS-B is used for small unconstrained problems.
+
+%=====================================================================================================
+\section{Verification}
+\label{sec:verification}
+\begin{longtable}{p{0.42\textwidth}p{0.5\textwidth}}
+\toprule
+check & result\\
+\midrule
+small-strain tangent vs.\ classical Timoshenko stiffness & equal to $10^{-9}$ (skewed and bent frames, $I_y\neq I_z$)\\
+rigid rotations up to $172^\circ$ & internal force $<10^{-10}$\\
+geometric stiffness: column under axial load $P$ & $\omega_1^2(P)/\omega_1^2(0) = 1-P/P_\mathrm{cr}$ within 2\,\% (Engesser $P_\mathrm{cr}$)\\
+cantilever first frequency & within 0.12\,\% of Euler--Bernoulli\\
+tip moment $2\pi EI/L$ & beam closes to a full circle (tip error $1.4\times10^{-5}$\,mm)\\
+fibre Yeoh: bending moment, torque & within 0.1\,\% / 1\,\% of direct section integration\\
+Prony: step relaxation; loss per cycle at 1\,kHz & exact $E_\infty + (E_0-E_\infty)e^{-t/\tau}$; $\pi E''\varepsilon_0^2V$ within 2\,\%\\
+line contact, crossed cylinders & Hertz within 1--3\,\% (from integration alone)\\
+beam radius in contact & no force for $d > r_A + r_B$; onset at $r_A+r_B$ (radii 0.8/0.5)\\
+two free beams colliding & energy within 1\,\%, momentum to $10^{-9}$, no interpenetration\\
+friction & $\lVert\vect F_t\rVert = \mu F_n$ under slip; power $=\mu F_n\lVert\vect v\rVert$; equal and opposite\\
+drop energy balance & $\le 1.1\times10^{-4}$ relative (all physics)\\
+contact force continuity & per-step force change $\propto h$ (no jump)\\
+mesh convergence (0.75 vs 1.0\,mm) & stroke 2\,\%, dissipation 0.2\,\%, densification peak $\pm3.5$\,\%\\
+adjoint vs.\ unrolled AD; vs.\ finite differences & $10^{-16}$; $10^{-9}$--$10^{-10}$ (non-uniform designs, all physics)\\
+\bottomrule
+\end{longtable}
+
+%=====================================================================================================
+\section{Limitations}
+\label{sec:limits}
+\begin{itemize}
+\item One Prony term ($\tau_1 = 52\,\mu$s): most of the dissipation occurs within $\approx 1$\,ms, and the slow
+viscoelasticity near $T_g$ is absent. The relaxation spectrum is the most influential uncertain input.
+\item Transverse shear is linear; only the axial, bending and torsional fibre responses are hyperelastic.
+\item Joints are centreline intersections: overlapping material is double counted in the mass, and joint
+stiffness comes from the beam ends only.
+\item Contact acts within $\approx2\varepsilon$ of touching under light load (regularisation width
+$\varepsilon = 0.05\,r_{\min}$).
+\item The co-moving start assumes a completed plastic impactor--plate collision.
+\item Friction mostly sticks at these loads and dissipates $<1$\,\% of the impact energy.
+\end{itemize}
+
+%=====================================================================================================
+\begin{thebibliography}{99}
+\bibitem{battini2002} J.-M. Battini, C. Pacoste. Co-rotational beam elements with warping effects in instability problems. \emph{Comput. Methods Appl. Mech. Eng.} 191 (2002) 1755--1789.
+\bibitem{simo1985} J.C. Simo. A finite strain beam formulation. The three-dimensional dynamic problem. Part I. \emph{Comput. Methods Appl. Mech. Eng.} 49 (1985) 55--70.
+\bibitem{cowper1966} G.R. Cowper. The shear coefficient in Timoshenko's beam theory. \emph{J. Appl. Mech.} 33 (1966) 335--340.
+\bibitem{yeoh1993} O.H. Yeoh. Some forms of the strain energy function for rubber. \emph{Rubber Chem. Technol.} 66 (1993) 754--771.
+\bibitem{fung1993} Y.C. Fung. \emph{Biomechanics: Mechanical Properties of Living Tissues}. Springer, 1993 (quasi-linear viscoelasticity).
+\bibitem{johnson1985} K.L. Johnson. \emph{Contact Mechanics}. Cambridge University Press, 1985.
+\bibitem{hunt1975} K.H. Hunt, F.R.E. Crossley. Coefficient of restitution interpreted as damping in vibroimpact. \emph{J. Appl. Mech.} 42 (1975) 440--445.
+\bibitem{lankarani1990} H.M. Lankarani, P.E. Nikravesh. A contact force model with hysteresis damping for impact analysis of multibody systems. \emph{J. Mech. Des.} 112 (1990) 369--376.
+\bibitem{li2020ipc} M. Li et al. Incremental potential contact. \emph{ACM Trans. Graph.} 39 (2020) 49.
+\bibitem{svanberg1987} K. Svanberg. The method of moving asymptotes---a new method for structural optimization. \emph{Int. J. Numer. Methods Eng.} 24 (1987) 359--373.
+\bibitem{svanberg2002} K. Svanberg. A class of globally convergent optimization methods based on conservative convex separable approximations. \emph{SIAM J. Optim.} 12 (2002) 555--573.
+\bibitem{griewank2000} A. Griewank, A. Walther. Algorithm 799: Revolve: an implementation of checkpointing for the reverse or adjoint mode of computational differentiation. \emph{ACM Trans. Math. Softw.} 26 (2000) 19--45.
+\bibitem{jensen2014} J.S. Jensen, P.B. Nakshatrala, D.A. Tortorelli. On the consistency of adjoint sensitivity analysis for structural optimization of linear dynamic problems. \emph{Struct. Multidiscip. Optim.} 49 (2014) 831--837.
+\bibitem{zeng2023} Q. Zeng et al. Inverse design of energy-absorbing metamaterials by topology optimization. \emph{Adv. Sci.} 10 (2023) 2204977.
+\bibitem{lebarbenchon2024} L. Le Barbenchon, M. Li{\ss}ner. On the dynamic performance of additively manufactured visco-elastic meta-materials. \emph{Mater. Lett.} 359 (2024) 135823.
+\bibitem{xu2025} K. Xu, J. Ji, H. Feng, J. Lin, Y. Li. Multifunctional performance of 3D-printed helmet liners under impact and blast loadings. \emph{Thin-Walled Struct.} 218 (2025) 114036.
+\bibitem{carbon} Carbon Inc. EPU 45 technical data sheet.
+\end{thebibliography}
+
+\end{document}
