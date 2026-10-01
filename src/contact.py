@@ -370,9 +370,27 @@ class LineContact:
         with torch.no_grad():
             return (x.detach() - self.x_ref).norm(dim=1).max().item() > 0.5 * self.margin
 
-    def _point_gaps(self, x, exclude=True):
-        """Gaps of (point, other beam) combos for the active pairs: returns (key, g)."""
+    def near_pairs(self, x, cutoff=None):
+        """Active pairs whose segment-to-segment gap is < cutoff (default 6 eps). No point of a pair can be closer
+        than its segments, and beyond 6 eps the potential is < e^-12 of the contact scale, so dropping the rest is
+        exact to that level while shrinking the point tensors (and each adjoint step graph) by orders of magnitude.
+        Deterministic in x, so forward, recompute and adjoint select the same pairs."""
         pr = self.active
+        if pr is None or len(pr) == 0:
+            return pr
+        cutoff = 6 * self.eps if cutoff is None else cutoff
+        with torch.no_grad():
+            n1, n2 = self.fr.n1, self.fr.n2
+            i, j = pr[:, 0], pr[:, 1]
+            s, t = segment_closest_params(x[n1[i]], x[n2[i]], x[n1[j]], x[n2[j]])
+            P = x[n1[i]] + s[:, None] * (x[n2[i]] - x[n1[i]])
+            Q = x[n1[j]] + t[:, None] * (x[n2[j]] - x[n1[j]])
+            g = (P - Q).norm(dim=1) - self.r[i].detach() - self.r[j].detach()
+        return pr[g < cutoff]
+
+    def _point_gaps(self, x, exclude=True):
+        """Gaps of (point, other beam) combos for the near pairs: returns (key, g)."""
+        pr = self.near_pairs(x) if exclude else self.active
         if len(pr) == 0:
             return torch.zeros(0, dtype=torch.long), torch.zeros(0, dtype=x.dtype)
         a = torch.cat((pr[:, 0], pr[:, 1]))                    # element owning the points
@@ -446,7 +464,7 @@ def coulomb(Fn, vt, mu, m_eff, dt, v_eps0=1.0):
 
 def _line_friction(lc, x, v, mu, m, dt):
     """Friction on LineContact points. Returns nodal forces (N,3) and dissipated power (>= 0)."""
-    pr = lc.active
+    pr = lc.near_pairs(x)
     N = x.shape[0]
     f = torch.zeros_like(x)
     if pr is None or len(pr) == 0:

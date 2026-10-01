@@ -194,4 +194,5 @@ def test_line_contact_joint_crotch_excluded():
     Phi, g = lc.energy(fr.X.clone())
     assert Phi.item() < 1e-12 and (g > 0).all()                     # no force at rest (softplus tail only)
     assert lc.n_excluded_points > 0
-    assert (g < 2.5).any()                                          # outer parts remain contact candidates
+    assert len(lc.active) > 0                                       # outer parts remain contact candidates
+    assert len(g) == 0                                              # but at rest none is within 6 eps: not evaluated
