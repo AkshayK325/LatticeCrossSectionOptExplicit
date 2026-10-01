@@ -40,3 +40,12 @@ def animate_frame(frame, U, path, times=None, max_frames=80, elev=20, azim=-60, 
 
     FuncAnimation(fig, draw, frames=len(idx)).save(path, writer=PillowWriter(fps=fps))
     plt.close(fig)
+
+
+def numbered(folder, name):
+    """folder/'<n>_<name>' with n one above the highest existing numeric prefix: larger number = newer."""
+    import pathlib
+    folder = pathlib.Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    nums = [int(p.name.split('_', 1)[0]) for p in folder.iterdir() if p.name.split('_', 1)[0].isdigit()]
+    return folder / f'{max(nums, default=0) + 1}_{name}'

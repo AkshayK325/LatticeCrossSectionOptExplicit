@@ -128,7 +128,7 @@ if __name__ == '__main__':
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from plotFrame import animate_frame
+    from plotFrame import animate_frame, numbered
 
     OUT.mkdir(parents=True, exist_ok=True)
 
@@ -143,8 +143,8 @@ if __name__ == '__main__':
     ax[1].plot(np.array(h['t']) * 1e3, (Eh - Eh[0]) / Eh[0])
     ax[1].set(xlabel='t [ms]', ylabel='(E - E0)/E0', title='energy drift (no damping)')
     fig.tight_layout()
-    fig.savefig(OUT / 'cantilever_free_vibration.png', dpi=130)
-    animate_frame(c['fr'], h['u'], OUT / 'cantilever_free_vibration.gif', times=h['t'], elev=0, azim=-90,
+    fig.savefig(numbered(OUT, 'cantilever_free_vibration.png'), dpi=130)
+    animate_frame(c['fr'], h['u'], numbered(OUT, 'cantilever_free_vibration.gif'), times=h['t'], elev=0, azim=-90,
                   title='TPU cantilever, free vibration')
     print('dt', c['dt'], 'max |dE|/E0', np.abs(Eh - Eh[0]).max() / Eh[0])
 
@@ -153,9 +153,9 @@ if __name__ == '__main__':
 
     c, h, tip, exact = run_tip_moment_curl(frac=0.5)
     print('half circle tip', tip, 'exact', exact)
-    animate_frame(c['fr'], h['u'], OUT / 'cantilever_tip_moment_half_circle.gif', times=h['t'], elev=0, azim=-90,
+    animate_frame(c['fr'], h['u'], numbered(OUT, 'cantilever_tip_moment_half_circle.gif'), times=h['t'], elev=0, azim=-90,
                   title='tip moment -> half circle')
     c, h, tip, exact = run_tip_moment_curl(frac=1.0, n_ramp_periods=10, n_hold_periods=6)
     print('full circle tip', tip, 'exact', exact)
-    animate_frame(c['fr'], h['u'], OUT / 'cantilever_tip_moment_full_circle.gif', times=h['t'], elev=0, azim=-90,
+    animate_frame(c['fr'], h['u'], numbered(OUT, 'cantilever_tip_moment_full_circle.gif'), times=h['t'], elev=0, azim=-90,
                   title='tip moment -> full circle')

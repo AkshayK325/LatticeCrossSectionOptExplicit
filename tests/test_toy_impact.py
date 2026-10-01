@@ -111,6 +111,7 @@ def test_gradient_matches_fd(J):
 
 # ---------------------------------------------------------------- figures
 if __name__ == '__main__':
+    from plotFrame import numbered
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -135,7 +136,7 @@ if __name__ == '__main__':
     ax[1].set(xlabel='t [ms]', ylabel='z [mm]', title=f"|dE|/E0 = {abs(r['E_end']-r['E0']).item()/r['E0'].item():.1e}")
     ax[1].legend()
     fig.tight_layout()
-    fig.savefig(OUT / 'toy_force_history.png', dpi=130)
+    fig.savefig(numbered(OUT, 'toy_force_history.png'), dpi=130)
 
     # 2. GIF of the column
     fig, ax = plt.subplots(figsize=(3, 5))
@@ -147,7 +148,7 @@ if __name__ == '__main__':
         ax.plot([0], [z[-1]], 's', ms=12, color='C3')
         ax.axhline(0, color='k', lw=2)
         ax.set(xlim=(-1, 1), ylim=(-1, 22), xticks=[], title=f't = {i*stride*r["dt"]*1e3:.2f} ms')
-    FuncAnimation(fig, frame, frames=len(r['states']) // stride).save(OUT / 'toy_impact.gif', writer=PillowWriter(fps=20))
+    FuncAnimation(fig, frame, frames=len(r['states']) // stride).save(numbered(OUT, 'toy_impact.gif'), writer=PillowWriter(fps=20))
 
     # 3. contact smoothing sweep: gradient value and FD agreement
     eps_list = [1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1.0]
@@ -170,5 +171,5 @@ if __name__ == '__main__':
     ax[2].set(xlabel='contact smoothing ε [mm]', ylabel='|AD − FD| / |FD|', title='autograd vs central FD')
     ax[2].legend(fontsize=7)
     fig.tight_layout()
-    fig.savefig(OUT / 'toy_eps_sweep.png', dpi=130)
+    fig.savefig(numbered(OUT, 'toy_eps_sweep.png'), dpi=130)
     print('dt', r['dt'], 'steps', r['n'], 'dE/E0', (abs(r['E_end'] - r['E0']) / r['E0']).item())

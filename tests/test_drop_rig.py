@@ -103,7 +103,7 @@ if __name__ == '__main__':
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from plotFrame import animate_frame
+    from plotFrame import animate_frame, numbered
 
     OUT.mkdir(parents=True, exist_ok=True)
     lat = example3()
@@ -137,7 +137,7 @@ if __name__ == '__main__':
         if spec['kind'] == 'crit_damped':
             best = (rig, h)
     fig.tight_layout()
-    fig.savefig(OUT / 'drop_contact_options.png', dpi=120)
+    fig.savefig(numbered(OUT, 'drop_contact_options.png'), dpi=120)
 
     rig, h = best
     fr = rig['fr']
@@ -156,7 +156,7 @@ if __name__ == '__main__':
 
     U = h['u'].clone()
     U[:, -1] = 0                                                   # impactor drawn as a plate, not a node
-    animate_frame(fr, U, OUT / 'drop_1J_6ms_r1.5.gif', times=h['t'], elev=10, azim=-60, extra=plates,
+    animate_frame(fr, U, numbered(OUT, 'drop_1J_6ms_r1.5.gif'), times=h['t'], elev=10, azim=-60, extra=plates,
                   title='1 J, 6 m/s, r = 1.5 mm, bonded bottom', max_frames=70)
     fig, ax = plt.subplots(1, 3, figsize=(16, 4))
     t = h['t'] * 1e3
@@ -172,4 +172,4 @@ if __name__ == '__main__':
     ax[2].set(xlabel='t [ms]', ylabel='energy [J]', title='energy budget')
     ax[2].legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(OUT / 'drop_1J_6ms_r1.5_histories.png', dpi=130)
+    fig.savefig(numbered(OUT, 'drop_1J_6ms_r1.5_histories.png'), dpi=130)

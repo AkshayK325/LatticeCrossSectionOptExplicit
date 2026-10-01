@@ -136,7 +136,7 @@ if __name__ == '__main__':
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from plotFrame import animate_frame
+    from plotFrame import animate_frame, numbered
 
     OUT.mkdir(parents=True, exist_ok=True)
     X, conn = lattice_3fz()
@@ -156,7 +156,7 @@ if __name__ == '__main__':
               f"v_end={h['v_plate'][-1]/1e3:.2f} m/s")
         plane = lambda a, k: a.plot_surface(*np.meshgrid(np.linspace(-2, 40, 2), np.linspace(-2, 40, 2)),
                                             np.zeros((2, 2)), color='0.5', alpha=0.3)
-        animate_frame(c['fr'], h['u'], OUT / f'lattice_impact_{Ej:g}J_{vms:g}ms.gif', times=h['t'], elev=8, azim=-60,
+        animate_frame(c['fr'], h['u'], numbered(OUT, f'lattice_impact_{Ej:g}J_{vms:g}ms.gif'), times=h['t'], elev=8, azim=-60,
                       title=f'{lab}', extra=plane, max_frames=60)
     ax[0].set(xlabel='t [ms]', ylabel='surface force [N]', title='force on flat surface')
     ax[1].set(xlabel='impactor stroke [mm]', ylabel='surface force [N]', title='force–stroke')
@@ -164,4 +164,4 @@ if __name__ == '__main__':
     for a in ax:
         a.legend(fontsize=7)
     fig.tight_layout()
-    fig.savefig(OUT / 'lattice_impact_histories.png', dpi=130)
+    fig.savefig(numbered(OUT, 'lattice_impact_histories.png'), dpi=130)
