@@ -260,7 +260,7 @@ def optimizeMMA(objCall, x0, bounds, constraintCall, options,callback):
         fvalnew, dfdxnew = fval.copy(), dfdx.copy()
         
         F_best = np.zeros(max_iter)
-        F_best[0] = f0valnew 
+        F_best[0] = np.asarray(f0valnew).item()  # numpy>=2 rejects size-1 array into scalar slot
         xbest = xval.copy()
         
         
@@ -294,7 +294,7 @@ def optimizeMMA(objCall, x0, bounds, constraintCall, options,callback):
             fval, dfdx = fvalnew.copy(), dfdxnew.copy()
             
             xbest = xval.copy()
-            F_best[outer_iter] = f0val.copy()
+            F_best[outer_iter] = np.asarray(f0val).item()
             fval_best = fval.copy()
      
             change = abs(F_best[outer_iter] - F_best[outer_iter - 1])
