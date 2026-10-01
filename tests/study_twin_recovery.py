@@ -58,7 +58,7 @@ def obj(gv):
 
 
 t_start = time.time()
-res = custom_minimize(obj, x0=np.array(g0), bounds=Bounds([0.5] * 3, [1.2] * 3), method='MMA',
+res = custom_minimize(obj, x0=np.array(g0).reshape(-1, 1), bounds=Bounds([0.5] * 3, [1.2] * 3), method='MMA',
                       options={'maxiter': 20, 'miniter': 5, 'kkttol': 1e-6, 'move_limit': 0.2, 'disp': True})
 g_opt = res.x.reshape(-1)
 wall = time.time() - t_start
