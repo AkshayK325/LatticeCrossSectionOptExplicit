@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from contact import SelfContact, potential_force, hertz_k_crossed_cylinders
+from contact import SelfContact, LineContact, potential_force, hertz_k_crossed_cylinders
 from explicitFE import Frame, lumped_mass, stable_dt
 from material import project_material
 
@@ -137,3 +137,61 @@ def test_free_beams_collide_energy_conserved():
     assert np.abs(P - P[0]).max() < 1e-9 * abs(P[0])
     assert min(G) > -0.05 * R                                       # surfaces do not interpenetrate
     assert h['vA'][-1] < -1500 and abs(h['vB'][-1]) < 500           # momentum handed over (equal masses)
+
+
+# ---------------------------------------------------------------- line-contact density (LineContact, rig default)
+def line(fr, h_q=0.02, eps=0.002, **kw):
+    beam = torch.arange(fr.ne) // (fr.ne // 2)
+    return LineContact(fr, torch.full((fr.ne,), R), beam, MAT['E0'], MAT['nu'], h_q=h_q, eps=eps, **kw)
+
+
+@pytest.mark.parametrize('delta', [0.02, 0.05, 0.1])
+def test_line_contact_crossing_reproduces_hertz(delta):
+    """Integrating the line density over a crossing gives Hertz (4/3) E* sqrt(R) delta^1.5 without using it."""
+    fr = crossed_beams(2 * R - delta, n_el=4)
+    X = fr.X_pos.clone()
+    X[fr.N // 2:, 0] += 0.3                                         # crossing off the nodes
+    f, _, _ = potential_force(line(fr).energy, X)
+    Es = MAT['E0'] / (2 * (1 - MAT['nu']**2))
+    hertz = 4 / 3 * Es * math.sqrt(R) * delta**1.5
+    assert f[fr.N // 2:, 2].sum().item() == pytest.approx(hertz, rel=0.05)
+    assert torch.allclose(f.sum(0), torch.zeros(3), atol=1e-8)
+
+
+def test_line_contact_parallel_is_line_stiffness():
+    """Parallel overlap of length L: force = k_line * delta * L (force per length times length)."""
+    delta, L = 0.05, 6.0
+    fr = crossed_beams(2 * R - delta, n_el=4, parallel=True)
+    lc = line(fr)
+    f, _, _ = potential_force(lc.energy, fr.X_pos.clone())
+    assert f[fr.N // 2:, 2].sum().item() == pytest.approx(lc.k_line * delta * L, rel=0.02)
+
+
+def test_line_contact_force_is_minus_gradient():
+    fr = crossed_beams(2 * R - 0.08, n_el=4)
+    X = fr.X_pos.clone()
+    X[fr.N // 2:, 0] += 0.37
+    lc = line(fr, h_q=0.05, eps=0.01)
+    f, _, _ = potential_force(lc.energy, X)
+    h = 1e-6
+    for node, comp in ((2, 2), (7, 2), (7, 0), (6, 1)):
+        Xp, Xm = X.clone(), X.clone()
+        Xp[node, comp] += h
+        Xm[node, comp] -= h
+        fd = -(lc.energy(Xp)[0] - lc.energy(Xm)[0]).item() / (2 * h)
+        assert f[node, comp].item() == pytest.approx(fd, rel=1e-4, abs=1e-6 * f.abs().max().item())
+
+
+def test_line_contact_joint_crotch_excluded():
+    """Two struts leaving one joint at 30 deg: the crotch (reference gap < r) is excluded, the rest is not."""
+    a = math.radians(30)
+    X = np.array([[0, 0, 0], [5, 0, 0], [5 * math.cos(a), 5 * math.sin(a), 0]])
+    from mesher import MeshFrame
+    Xr, cr = MeshFrame().refineFrameMeshElemSize(X, np.array([[0, 1], [0, 2]]), 1.0)
+    fr = Frame(Xr, cr)
+    beam = torch.tensor([0] * 5 + [1] * 5)
+    lc = LineContact(fr, torch.full((fr.ne,), R), beam, MAT['E0'], MAT['nu'], beam_conn=np.array([[0, 1], [0, 2]]))
+    Phi, g = lc.energy(fr.X.clone())
+    assert Phi.item() < 1e-12 and (g > 0).all()                     # no force at rest (softplus tail only)
+    assert lc.n_excluded_points > 0
+    assert (g < 2.5).any()                                          # outer parts remain contact candidates

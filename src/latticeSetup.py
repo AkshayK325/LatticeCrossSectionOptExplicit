@@ -83,7 +83,7 @@ def circle_sections(r, nu=None):
 # impactor and top plate (scalar gap law from contact.py).
 
 def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
-             start='gap', lattice_contact=True):
+             start='gap', lattice_contact=True, contact_model='line'):
     """law: a gap law, or a dict of contact.calibrate() kwargs (lets 'crit_damped' get the reduced mass).
     r_elem (ne,) radii [mm]. plate_mass [t] (default 2 mm aluminium 38x38: 7.8 g). gap0 [mm] initial
     impactor-plate gap.
@@ -96,8 +96,9 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
                        on rebound: no collision event, no jump.
     start='merged':    impactor rigidly bonded to the plate (one rigid body, no contact): zero jump by
                        construction, but the impactor can never separate on rebound.
-    lattice_contact: beam-to-beam capsule contact (contact.SelfContact, grouped per original beam) and
-                       node-to-plate Hertz contact of every non-bonded node with both plates."""
+    lattice_contact: beam-to-beam contact and node-to-plate Hertz contact of every non-bonded node with both
+                       plates. contact_model 'line' (default): contact.LineContact, line-contact density
+                       integrated along the beams; 'capsule': contact.SelfContact (one Hertz point per beam pair)."""
     from explicitFE import Frame, lumped_mass, adaptive_dt
     from contact import law_tangent, contact_dt_cap, potential_force
     Xr, connr = lat['Xr'], lat['connr']
@@ -141,7 +142,11 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     phi_lat, sc = None, None
     if lattice_contact:
         from contact import SelfContact, node_radius, hertz_potential, hertz_tangent
-        sc = SelfContact(fr, r_elem, mat['E0'], mat['nu'], beam_of_elem=lat['beam_of_elem'])
+        if contact_model == 'line':
+            from contact import LineContact
+            sc = LineContact(fr, r_elem, lat['beam_of_elem'], mat['E0'], mat['nu'], beam_conn=lat['conn'])
+        else:
+            sc = SelfContact(fr, r_elem, mat['E0'], mat['nu'], beam_of_elem=lat['beam_of_elem'])
         rn = node_radius(fr, A)
         kp = (4.0 / 3.0) * mat['E0'] / (1 - mat['nu']**2) * torch.sqrt(rn)   # beam on rigid flat (sphere R = r)
         zb = float(Xr[:, 2].min())
@@ -192,6 +197,7 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
             w_eff = np.sqrt(w_eff**2 + w_s**2 + w_p**2)
         return w_eff, cap
 
+    # beam tangent by power iteration (every 20 steps); contact stiffness by a per-step row-sum bound
     dt_fn = adaptive_dt(fr, beam_law, m, j, courant=courant, contact_fn=contact_dt)
     v_init = torch.zeros(fr.N, 3, dtype=torch.float64)
     v_init[imp, 2] = -v0

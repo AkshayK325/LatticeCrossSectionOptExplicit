@@ -42,7 +42,7 @@ for es, rot in cases:
          'F_bot_peak': float(np.abs(h['F_bottom']).max()), 'E_diss': float(h['E_diss_material'][-1]),
          'v_imp_end': float(h['v_imp'][-1] / 1e3), 'dE': float(np.abs(E - E[0]).max() / E[0]),
          'g_self_min': float(np.min(h['g_self_min'])), 'g_plate_min': float(np.min(h['g_plate_min'])),
-         'n_initial_overlap': rig['self_contact'].n_initial_overlap, 'runtime_s': time.time() - t0}
+         'n_excluded': getattr(rig['self_contact'], 'n_excluded_points', getattr(rig['self_contact'], 'n_initial_overlap', -1)), 'runtime_s': time.time() - t0}
     res.append(r)
     hist[(es, rot)] = h
     print(json.dumps(r), flush=True)

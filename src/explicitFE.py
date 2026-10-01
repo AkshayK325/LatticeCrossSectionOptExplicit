@@ -125,10 +125,12 @@ def lumped_mass(frame, A, I, rho, rot_scale=True):
     return m, j
 
 
-def stable_dt(frame, law, m, j, courant=0.8, iters=100, seed=0, u=None, R=None, v0=None, return_vec=False):
+def stable_dt(frame, law, m, j, courant=0.8, iters=100, seed=0, u=None, R=None, v0=None, return_vec=False,
+              phi_extra=None):
     """Central-difference limit 2/omega_max, omega_max^2 = max eig(M^-1/2 K M^-1/2) by power iteration
     on the tangent at state (u, R) (default: reference state; K v via a JVP of internal_force).
-    Free-free (no BCs): an upper bound on omega for any support, so the dt is safe."""
+    Free-free (no BCs): an upper bound on omega for any support, so the dt is safe.
+    phi_extra(x) -> (Phi, extra): additional potential (contact) whose Hessian is added to the tangent."""
     g = torch.Generator().manual_seed(seed)
     dtype = frame.X.dtype
     s = torch.cat((m[:, None].expand(-1, 3), j[:, None].expand(-1, 3)), dim=0).reshape(-1) ** -0.5
@@ -141,6 +143,9 @@ def stable_dt(frame, law, m, j, courant=0.8, iters=100, seed=0, u=None, R=None, 
         def f(q):
             qq = q.reshape(2, frame.N, 3)
             fu, fth, _, _ = frame.internal_force(u0 + qq[0], rodrigues(qq[1]) @ R0, law)
+            if phi_extra is not None:                  # e.g. contact potential: its stiffness counts too
+                from contact import potential_force
+                fu = fu - potential_force(phi_extra, frame.X + u0 + qq[0])[0]
             return torch.cat((fu, fth)).reshape(-1)
         _, jv = torch.autograd.functional.jvp(f, q, v.reshape(-1))
         return jv * s
@@ -156,7 +161,8 @@ def stable_dt(frame, law, m, j, courant=0.8, iters=100, seed=0, u=None, R=None, 
     return courant * 2 / np.sqrt(lam), np.sqrt(lam)
 
 
-def adaptive_dt(frame, law, m, j, w_extra=0.0, courant=0.7, every=20, iters=8, warm_iters=60, contact_fn=None):
+def adaptive_dt(frame, law, m, j, w_extra=0.0, courant=0.7, every=20, iters=8, warm_iters=60, contact_fn=None,
+                phi_extra=None):
     """dt(step, u, R, v) callable for simulate(): re-estimates omega_max at the current state every `every`
     steps by a warm-started power iteration. Power iteration approaches omega_max from below, hence the
     default courant 0.7.
@@ -168,7 +174,7 @@ def adaptive_dt(frame, law, m, j, w_extra=0.0, courant=0.7, every=20, iters=8, w
     def dt_fn(n, u, R, v=None):
         if n % every == 0:
             _, st['w'], st['v'] = stable_dt(frame, law, m, j, iters=warm_iters if st['v'] is None else iters,
-                                            u=u, R=R, v0=st['v'], return_vec=True)
+                                            u=u, R=R, v0=st['v'], return_vec=True, phi_extra=phi_extra)
         w_c, cap = (0.0, np.inf) if contact_fn is None else contact_fn(u, v)
         dt = min(courant * 2 / np.sqrt(st['w']**2 + w_extra**2 + w_c**2), cap)
         st['dt0'] = st['dt0'] or dt

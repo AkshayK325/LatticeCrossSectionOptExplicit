@@ -301,3 +301,133 @@ def hertz_tangent(g, k, eps):
     """dF/d(penetration) of the Hertz-potential law (for the stable time step)."""
     d = eps * F.softplus(-g / eps)
     return 1.5 * k * d.clamp_min(1e-300) ** 0.5
+
+
+class LineContact:
+    """Beam-to-beam contact as a line-contact density integrated along the beams (mortar-style).
+
+    Quadrature points every ~h_q along each element (midpoint rule). For every point p of beam A and every
+    other beam B near it, the gap is g = dist(p, polyline B) - r_A - r_B (hard min over B's candidate
+    elements = distance to the polyline: no double counting at B's nodes). Potential
+        Phi = 1/2 * sum_points w L * psi(g),   psi = 1/2 k_line delta^2,   delta = eps softplus(-g/eps)
+    (1/2: each contact zone is integrated from both sides). Consequences:
+      - parallel / folding struts: force per length k_line*delta over the overlap (line contact),
+      - crossing struts: integrating over the contact zone gives F = (8/3) k_line sqrt(R) delta^1.5; with
+        k_line = E*/2 this is exactly Hertz (4/3) E* sqrt(R) delta^1.5 (E* = E/(2(1-nu^2))) (tested).
+    Exclusion is geometric and mesh independent: (point, beam) combinations already inside each other in the
+    reference state never contact, and (with beam_conn) for two beams sharing a lattice joint, points within
+    joint_buffer (default one radius) of the other beam at reference are joint material (otherwise any joint
+    rotation 'penetrates' the crotch and double-counts joint stiffness). A beam never contacts itself.
+    """
+
+    def __init__(self, frame, r_e, beam_of_elem, E, nu, h_q=0.1, eps=None, margin=1.0, beam_conn=None,
+                 joint_buffer=None):
+        self.fr, self.r = frame, r_e
+        self.beam = torch.as_tensor(beam_of_elem)
+        self.nb = int(self.beam.max()) + 1
+        self.eps = 0.05 * r_e.min().item() if eps is None else eps
+        self.margin = margin
+        self.k_line = 0.5 * E / (2 * (1 - nu**2))
+        self.nq = max(1, int(np.ceil(frame.L0.max().item() / h_q)))
+        self.xi = (torch.arange(self.nq, dtype=frame.X.dtype) + 0.5) / self.nq      # midpoint rule on [0,1]
+        self.wL = frame.L0 / self.nq                                               # (ne,) length per point
+        ne = frame.ne
+        i, j = torch.triu_indices(ne, ne, 1)
+        keep = self.beam[i] != self.beam[j]
+        self.pairs_all = torch.stack((i[keep], j[keep]), 1)
+        self.active = None
+        # reference exclusion: (point, beam) combos overlapping at t = 0
+        self.excluded = torch.zeros(0, dtype=torch.long)
+        self.refresh(frame.X)
+        with torch.no_grad():
+            key, g = self._point_gaps(frame.X, exclude=False)
+        out = g <= 0
+        if beam_conn is not None:
+            # joint crotch: for two beams meeting at a lattice node, points within joint_buffer (default one
+            # radius) of the other beam in the reference state are joint material, not a contact surface
+            bc = torch.as_tensor(beam_conn)
+            pb = self.beam[key // self.nb // self.nq]
+            ob = key % self.nb
+            share = ((bc[pb, 0] == bc[ob, 0]) | (bc[pb, 0] == bc[ob, 1]) |
+                     (bc[pb, 1] == bc[ob, 0]) | (bc[pb, 1] == bc[ob, 1]))
+            buf = r_e.max().item() if joint_buffer is None else joint_buffer
+            out = out | (share & (g < buf))
+        self.excluded = torch.unique(key[out])
+        self.n_excluded_points = len(self.excluded)
+
+    def refresh(self, x):
+        with torch.no_grad():
+            n1, n2 = self.fr.n1, self.fr.n2
+            i, j = self.pairs_all[:, 0], self.pairs_all[:, 1]
+            s, t = segment_closest_params(x[n1[i]], x[n2[i]], x[n1[j]], x[n2[j]])
+            P = x[n1[i]] + s[:, None] * (x[n2[i]] - x[n1[i]])
+            Q = x[n1[j]] + t[:, None] * (x[n2[j]] - x[n1[j]])
+            g = (P - Q).norm(dim=1) - self.r[i] - self.r[j]
+            self.x_ref = x.detach().clone()
+        self.active = self.pairs_all[g < self.margin]
+
+    def _stale(self, x):
+        with torch.no_grad():
+            return (x.detach() - self.x_ref).norm(dim=1).max().item() > 0.5 * self.margin
+
+    def _point_gaps(self, x, exclude=True):
+        """Gaps of (point, other beam) combos for the active pairs: returns (key, g)."""
+        pr = self.active
+        if len(pr) == 0:
+            return torch.zeros(0, dtype=torch.long), torch.zeros(0, dtype=x.dtype)
+        a = torch.cat((pr[:, 0], pr[:, 1]))                    # element owning the points
+        b = torch.cat((pr[:, 1], pr[:, 0]))                    # element (segment) measured against
+        n1, n2 = self.fr.n1, self.fr.n2
+        pa0, pa1 = x[n1[a]], x[n2[a]]
+        p = pa0[:, None, :] + self.xi[None, :, None] * (pa1 - pa0)[:, None, :]     # (m, nq, 3)
+        q0, d = x[n1[b]], x[n2[b]] - x[n1[b]]
+        with torch.no_grad():
+            t = (((p - q0[:, None, :]) * d[:, None, :]).sum(-1) / (d * d).sum(-1)[:, None]).clamp(0, 1)
+        Q = q0[:, None, :] + t[..., None] * d[:, None, :]
+        dist = torch.sqrt(((p - Q) ** 2).sum(-1) + 1e-30)                           # (m, nq)
+        pid = a[:, None] * self.nq + torch.arange(self.nq)[None, :]
+        key = (pid * self.nb + self.beam[b][:, None]).flatten()
+        gap = (dist - self.r[a][:, None] - self.r[b][:, None]).flatten()
+        uk, inv = torch.unique(key, return_inverse=True)
+        gmin = torch.full((len(uk),), torch.inf, dtype=x.dtype).scatter_reduce(0, inv, gap, 'amin')
+        if exclude and len(self.excluded):
+            ok = ~torch.isin(uk, self.excluded)
+            uk, gmin = uk[ok], gmin[ok]
+        return uk, gmin
+
+    def energy(self, x):
+        if self.active is None or self._stale(x):
+            self.refresh(x)
+        key, g = self._point_gaps(x)
+        if len(g) == 0:
+            return x.sum() * 0.0, g
+        d = self.eps * F.softplus(-g / self.eps)
+        wL = self.wL[key // self.nb // self.nq]
+        return 0.5 * (wL * 0.5 * self.k_line * d * d).sum(), g
+
+    def dt_terms(self, x, v, m, scale, frac=0.1):
+        """(omega, dt_cap). omega: conservative row-sum bound. Each point's exact contact stiffness
+        1/2 wL k_line (sig^2 + delta sig (1-sig)/eps) is summed per element, each node takes the sum over its
+        elements (as if all of it acted on that node), omega = sqrt(2 K_node / m_node).
+        cap: near-contact surfaces close at most frac*scale per step."""
+        if self.active is None or len(self.active) == 0:
+            return 0.0, float('inf')
+        with torch.no_grad():
+            key, g = self._point_gaps(x)
+            if len(g) == 0:
+                return 0.0, float('inf')
+            el = key // self.nb // self.nq
+            sig = torch.sigmoid(-g / self.eps)
+            d = self.eps * F.softplus(-g / self.eps)
+            kp = 0.5 * self.wL[el] * self.k_line * (sig**2 + d * sig * (1 - sig) / self.eps)
+            Ke = torch.zeros(self.fr.ne, dtype=x.dtype).index_add(0, el, kp)
+            Kn = torch.zeros(self.fr.N, dtype=x.dtype).index_add(0, self.fr.n1, Ke).index_add(0, self.fr.n2, Ke)
+            lat = Kn > 0
+            w = torch.sqrt(2 * Kn[lat] / m[lat]).max().item() if lat.any() else 0.0
+            near = g < 3 * scale
+            if not near.any():
+                return w, float('inf')
+            eln = el[near]
+            nodes = torch.unique(torch.cat((self.fr.n1[eln], self.fr.n2[eln])))
+            vrel = 2 * v[nodes].norm(dim=1).max().item()        # bound on relative speed of the two surfaces
+        return w, frac * scale / max(vrel, 1e-12)
