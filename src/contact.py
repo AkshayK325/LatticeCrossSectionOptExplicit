@@ -136,3 +136,168 @@ def law_potential(law, g, g_hi, n=400):
     """Elastic potential int_g^g_hi F(s, 0) ds (diagnostics)."""
     s = torch.linspace(float(g), float(g_hi), n, dtype=torch.float64)
     return torch.trapezoid(law(s, torch.zeros_like(s)), s).item() if g < g_hi else 0.0
+
+
+# ------------------------------------------------------------------------------------------------
+# Beam-to-beam (capsule) and beam-to-plate contact, potential based (conservative, smooth).
+# Each element is a capsule: centreline segment + radius r_e. Gap g = |P(s*) - Q(t*)| - r_i - r_j.
+# Potential phi(g) = (2/5) k delta^2.5, delta = eps*softplus(-g/eps)  ->  force = k delta^1.5 * sigmoid(-g/eps)
+# along the normal (Hertz-like, C-infinity). Forces = -grad(sum phi) by autograd: energy-consistent.
+
+def hertz_k_crossed_cylinders(r_i, r_j, E, nu):
+    """Hertz contact k [N/mm^1.5] for two crossed cylinders: F = (4/3) E* sqrt(R) delta^1.5,
+    R = sqrt(r_i r_j) (equivalent sphere for perpendicular cylinders), E* = E / (2 (1 - nu^2)) (same material).
+    # ponytail: point-contact law for every pair; parallel beams really make line contact (stiffer)"""
+    return (4.0 / 3.0) * E / (2 * (1 - nu**2)) * torch.sqrt(r_i * r_j)
+
+
+def hertz_potential(g, k, eps):
+    d = eps * F.softplus(-g / eps)
+    return 0.4 * k * d**2.5
+
+
+def segment_closest_params(p0, p1, q0, q1):
+    """Clamped closest-point parameters (s, t) in [0,1] between segments p0p1 and q0q1 (batched, (n,3)).
+    Ericson, Real-Time Collision Detection 5.1.9. Returned detached: by the envelope theorem the force only
+    needs the closest points, and detaching avoids NaN/ill-conditioned derivatives for parallel segments."""
+    with torch.no_grad():
+        d1, d2, r = p1 - p0, q1 - q0, p0 - q0
+        a, e, f = (d1 * d1).sum(1), (d2 * d2).sum(1), (d2 * r).sum(1)
+        c, b = (d1 * r).sum(1), (d1 * d2).sum(1)
+        den = a * e - b * b
+        s = torch.where(den > 1e-12 * a * e, ((b * f - c * e) / den.clamp_min(1e-300)).clamp(0, 1), torch.zeros_like(a))
+        t = (b * s + f) / e
+        s = torch.where(t < 0, (-c / a).clamp(0, 1), torch.where(t > 1, ((b - c) / a).clamp(0, 1), s))
+        t = t.clamp(0, 1)
+    return s, t
+
+
+class SelfContact:
+    """Capsule contact between non-neighbouring elements of one frame.
+
+    pairs: all element pairs farther than `exclude_hops` apart on the element graph (joints and elements next
+    to them are always 'touching' and are excluded), minus pairs already overlapping in the reference state.
+    Candidate list (pairs within `margin` of contact) is refreshed by the Verlet-list rule (any node moved more
+    than margin/2 since the last refresh), so no pair can close unseen; forces are exact for every candidate
+    (the choice of candidates is the only non-differentiable part).
+    """
+
+    def __init__(self, frame, r_e, E, nu, eps=None, exclude_hops=2, margin=1.0, every=10, beam_of_elem=None,
+                 T_frac=0.05):
+        """beam_of_elem: original beam id per element. Element pairs between the same two beams are merged into
+        ONE contact by a smooth minimum of their gaps (log-sum-exp, temperature T = T_frac * eps). Without it a
+        contact at a node shared by k elements is counted k times (4x for two beams crossing at their nodes),
+        and the force would jump when the contact point slides from one element to the next."""
+        self.fr, self.r = frame, r_e
+        self.beam = torch.arange(frame.ne) if beam_of_elem is None else torch.as_tensor(beam_of_elem)
+        self.k_pair = None
+        self.E, self.nu = E, nu
+        self.eps = 0.05 * r_e.min().item() if eps is None else eps
+        self.margin, self.every, self.calls = margin, every, 0
+        self.T = T_frac * self.eps
+        ne = frame.ne
+        # element adjacency via shared nodes; hop distance by repeated boolean products
+        inc = torch.zeros(ne, frame.N, dtype=torch.bool)
+        inc[torch.arange(ne), frame.n1] = True
+        inc[torch.arange(ne), frame.n2] = True
+        adj = (inc.double() @ inc.double().T) > 0
+        near = adj.clone()
+        for _ in range(exclude_hops - 1):
+            near = near | ((near.double() @ adj.double()) > 0)
+        i, j = torch.triu_indices(ne, ne, 1)
+        keep = ~near[i, j]
+        i, j = i[keep], j[keep]
+        g0 = self._gap(frame.X, i, j)
+        ok = g0 > 0
+        self.n_initial_overlap = int((~ok).sum())
+        self.pairs = torch.stack((i[ok], j[ok]), 1)
+        self.k_all = hertz_k_crossed_cylinders(self.r[self.pairs[:, 0]], self.r[self.pairs[:, 1]], E, nu)
+        self.active = None
+
+    def _gap(self, x, i, j):
+        n1, n2 = self.fr.n1, self.fr.n2
+        p0, p1, q0, q1 = x[n1[i]], x[n2[i]], x[n1[j]], x[n2[j]]
+        s, t = segment_closest_params(p0, p1, q0, q1)
+        P = p0 + s[:, None] * (p1 - p0)
+        Q = q0 + t[:, None] * (q1 - q0)
+        dist = torch.sqrt(((P - Q) ** 2).sum(1) + 1e-30)
+        return dist - self.r[i] - self.r[j]
+
+    def refresh(self, x):
+        with torch.no_grad():
+            g = self._gap(x, self.pairs[:, 0], self.pairs[:, 1])
+            self.x_ref = x.detach().clone()
+        self.active = torch.nonzero(g < self.margin).flatten()
+
+    def _stale(self, x):
+        """Verlet-list rule: a pair outside `margin` at the last refresh cannot have closed unless some node
+        moved more than margin/2 since then."""
+        if self.active is None:
+            return True
+        with torch.no_grad():
+            return (x.detach() - self.x_ref).norm(dim=1).max().item() > 0.5 * self.margin
+
+    def dt_terms(self, x, v, m, scale, frac=0.1):
+        """(omega, dt_cap) for the active pairs: omega from the Hertz tangent on the lightest node pair,
+        cap so that near-contact pairs close at most frac*scale per step (contact resolved over steps)."""
+        if self.active is None or len(self.active) == 0:
+            return 0.0, float('inf')
+        with torch.no_grad():
+            pr = self.pairs[self.active]
+            i, j = pr[:, 0], pr[:, 1]
+            g = self._gap(x, i, j)
+            kt = hertz_tangent(g, self.k_all[self.active], self.eps)
+            n1, n2 = self.fr.n1, self.fr.n2
+            mi = torch.minimum(m[n1[i]], m[n2[i]])
+            mj = torch.minimum(m[n1[j]], m[n2[j]])
+            w = torch.sqrt(kt * (1 / mi + 1 / mj)).max().item()
+            near = g < 3 * scale
+            if not near.any():
+                return w, float('inf')
+            vi = 0.5 * (v[n1[i]] + v[n2[i]])
+            vj = 0.5 * (v[n1[j]] + v[n2[j]])
+            vrel = (vi - vj).norm(dim=1)[near].max().item()
+        return w, frac * scale / max(vrel, 1e-12)
+
+    def energy(self, x):
+        if self._stale(x):
+            self.refresh(x)
+        self.calls += 1
+        if len(self.active) == 0:
+            return x.sum() * 0.0, torch.zeros(0, dtype=x.dtype)
+        pr = self.pairs[self.active]
+        g = self._gap(x, pr[:, 0], pr[:, 1])
+        # one contact per (beam, beam): smooth min of the element-pair gaps
+        bi, bj = self.beam[pr[:, 0]], self.beam[pr[:, 1]]
+        key = torch.minimum(bi, bj) * (int(self.beam.max()) + 1) + torch.maximum(bi, bj)
+        grp, inv = torch.unique(key, return_inverse=True)
+        z = -g / self.T
+        zmax = torch.full((len(grp),), -torch.inf, dtype=g.dtype).scatter_reduce(0, inv, z.detach(), 'amax')
+        ssum = torch.zeros(len(grp), dtype=g.dtype).index_add(0, inv, torch.exp(z - zmax[inv]))
+        g_grp = -self.T * (zmax + torch.log(ssum))
+        wts = torch.exp(z - zmax[inv]) / ssum[inv]           # softmax weights (closest pair dominates)
+        k_grp = torch.zeros(len(grp), dtype=g.dtype).index_add(0, inv, wts * self.k_all[self.active])
+        return hertz_potential(g_grp, k_grp, self.eps).sum(), g_grp
+
+
+def plate_potential(z_gap, k, eps):
+    """Node-to-plate potential with the same law; z_gap = distance from node surface to the plate face."""
+    return hertz_potential(z_gap, k, eps).sum()
+
+
+def potential_force(phi_fn, x):
+    """Nodal forces -dPhi/dx for a scalar potential phi_fn(x) -> (Phi, extras). Keeps the outer autograd graph
+    (create_graph) when x needs grad, like Frame.internal_force."""
+    dx = torch.zeros_like(x, requires_grad=True)
+    with torch.enable_grad():
+        Phi, extra = phi_fn(x + dx)
+        need = torch.is_grad_enabled() and x.requires_grad
+        g, = torch.autograd.grad(Phi, dx, create_graph=need, allow_unused=True)
+    f = torch.zeros_like(x) if g is None else -g
+    return f, Phi, extra
+
+
+def hertz_tangent(g, k, eps):
+    """dF/d(penetration) of the Hertz-potential law (for the stable time step)."""
+    d = eps * F.softplus(-g / eps)
+    return 1.5 * k * d.clamp_min(1e-300) ** 0.5
