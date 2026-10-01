@@ -176,3 +176,60 @@ def adaptive_dt(frame, law, m, j, w_extra=0.0, courant=0.7, every=20, iters=8, w
             raise RuntimeError(f'dt collapsed to {dt:.2e} at step {n}: solution unstable')
         return dt
     return dt_fn
+
+
+class ViscoHyperLaw:
+    """Section law for visco-hyperelastic elastomers (EPU 45): resultants f = f_inf(d) + sum_i q_i.
+
+    f_inf: long-term part. Axial N = A * P_yeoh(lambda), lambda = 1 + dL/L0 (finite strain, resists element
+    collapse); torsion/bending/shear linear with E_inf, G_inf (Timoshenko, as elastic_law).
+    q_i: quasi-linear (Fung) Prony branches driven by increments of f_inf:
+        q_i <- a_i q_i + beta_i b_i (f_inf(d) - f_inf(d_prev)),   a = exp(-h/tau), b = (1 - a)/(h/tau),
+        beta_i = g_i / (1 - sum g)   (so instantaneous response = E0 / E_inf * f_inf).
+    Exact for a constant rate within the step. simulate() sets `step_dt` before and calls `commit(d)` after
+    each step; calls in between (stable_dt, autograd) never change the history. With step_dt -> 0 the law
+    returns the instantaneous (E0) response, which is what the stable time step must see.
+    # ponytail: linear (E_inf) bending/torsion; fibre integration if bending strains get large
+    """
+
+    def __init__(self, frame, A, I, mat):
+        self.fr, self.A, self.I, self.mat = frame, A, I, mat
+        self.C = mat['yeoh']
+        self.tau = torch.tensor(mat['prony_tau'], dtype=A.dtype)[:, None, None]
+        g = torch.tensor(mat['prony_g'], dtype=A.dtype)[:, None, None]
+        self.beta = g / (1 - g.sum())
+        self.step_dt = 0.0
+        self.reset()
+
+    def reset(self):
+        ne = self.fr.ne
+        self.q = torch.zeros(self.tau.shape[0], ne, 6, dtype=self.A.dtype)
+        self.f_prev = torch.zeros(ne, 6, dtype=self.A.dtype)
+
+    def f_inf(self, d):
+        from material import yeoh_uniaxial
+        f = self.fr.elastic_law(d, self.A, self.I, self.mat['E'], self.mat['G'])
+        lam = 1 + d[:, 0] / self.fr.L0
+        return torch.cat((self.A[:, :1] * yeoh_uniaxial(lam, self.C)[:, None], f[:, 1:]), dim=1)
+
+    def _branches(self, f):
+        x = torch.as_tensor(max(self.step_dt, 1e-300), dtype=f.dtype) / self.tau
+        a = torch.exp(-x)
+        b = -torch.expm1(-x) / x                     # (1 - a)/x, -> 1 as h -> 0
+        return a * self.q + self.beta * b * (f - self.f_prev)
+
+    def __call__(self, d):
+        f = self.f_inf(d)
+        return f + self._branches(f).sum(0)
+
+    def commit(self, d):
+        f = self.f_inf(d)
+        self.q = self._branches(f)
+        self.f_prev = f
+
+    def stored_long_term(self, d):
+        """Long-term elastic energy: Yeoh axial A L0 W(lambda) + quadratic linear parts (diagnostics)."""
+        from material import yeoh_energy
+        f = self.fr.elastic_law(d, self.A, self.I, self.mat['E'], self.mat['G'])
+        lam = 1 + d[:, 0] / self.fr.L0
+        return (self.A[:, 0] * self.fr.L0 * yeoh_energy(lam, self.C)).sum() + 0.5 * (d[:, 1:] * f[:, 1:]).sum()

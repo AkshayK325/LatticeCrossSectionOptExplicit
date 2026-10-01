@@ -67,12 +67,16 @@ def simulate(frame, law, m, j, dt, n_steps, u0=None, v0=None, R0=None, w0=None,
             break
         h = step_dt(n)
         hist['dt'].append(h)
+        if hasattr(law, 'step_dt'):
+            law.step_dt = h                              # history-dependent law: step size for its update
         v = v + 0.5 * h * a
         w = w + 0.5 * h * al
         u = u + h * v
         R = rodrigues(h * w) @ R
         t += h
         a, al, fint = accel(t, u, R, v, w)
+        if hasattr(law, 'commit'):
+            law.commit(fint[2])                          # accept the step: advance internal variables
         v = v + 0.5 * h * a
         w = w + 0.5 * h * al
     hist['u'] = torch.stack(hist['u'])

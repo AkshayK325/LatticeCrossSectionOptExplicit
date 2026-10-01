@@ -12,10 +12,10 @@ import torch
 from contact import flat_surface, flat_surface_potential, node_radius
 from explicitFE import Frame, lumped_mass, stable_dt, adaptive_dt
 from explicitSolve import simulate, strain_energy
-from material import tpu90a_impact
+from material import project_material
 
 torch.set_default_dtype(torch.float64)
-MAT = tpu90a_impact()
+MAT = project_material()   # EPU 45; elastic tests use its long-term E
 E, G, RHO = MAT['E'], MAT['G'], MAT['rho']
 OUT = pathlib.Path(__file__).resolve().parents[1] / 'ResultsFig' / 'explicit'
 

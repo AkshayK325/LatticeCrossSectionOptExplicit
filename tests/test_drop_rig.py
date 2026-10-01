@@ -11,10 +11,10 @@ import torch
 from contact import calibrate
 from latticeSetup import (SYM_TYPES, example3, symmetry_groups, n_design_rows, apply_symmetry, element_values,
                           drop_rig, run_drop, jump_metrics)
-from material import tpu90a_impact
+from material import project_material
 
 torch.set_default_dtype(torch.float64)
-MAT = tpu90a_impact()
+MAT = project_material()   # EPU 45; elastic tests use its long-term E
 OUT = pathlib.Path(__file__).resolve().parents[1] / 'ResultsFig' / 'explicit'
 DEFAULT = {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2, 'zeta': 1.0}
 R_DEFAULT = 1.5      # legacy notebook circle radius upper bound (max_x = 1.5)
@@ -86,6 +86,13 @@ def test_drop_single_smooth_pulse(drop):
     _, h = drop
     jm = jump_metrics(h['F_imp'])
     assert jm['episodes'] == 1 or jm['chatter'] < 4, jm
+
+
+def test_drop_epu45_absorbs_not_springs(drop):
+    """EPU 45 (tan d ~ 2 at ~1 kHz) must absorb most of the 1 J; a spring-like lattice would return it."""
+    rig, h = drop
+    assert h['E_diss_material'][-1] > 0.5 * 1000.0, h['E_diss_material'][-1]
+    assert h['v_imp'][-1] < 0.5 * rig['v0'], h['v_imp'][-1]
 
 
 def test_drop_force_has_no_jump_dt_convergence(lat):

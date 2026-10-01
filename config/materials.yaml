@@ -112,3 +112,37 @@ materials:
     rho: 1.16e-9
     sources:
       - https://bcn3d.com/wp-content/uploads/2023/01/BCN3D-Filaments-Technical-Data-Sheet-TPU-98A.pdf   # Tensile (E) modulus (ISO 527) = 150 MPa, specific gravity = 1.16 g/cc -- verified directly (pdftotext)
+
+  EPU_45:
+    description: >
+      Carbon EPU 45 elastomeric polyurethane (DLS printed). Project material for the explicit impact work
+      (switched from TPU_90A on 2026-10-01). Visco-hyperelastic: Yeoh long-term response + 1-term Prony.
+      E below is the LONG-TERM small-strain modulus E_inf = 6*C10 = 14.4 MPa (table quotes ~14.3);
+      instantaneous E0 = E_inf/(1 - g1) = 342.9 MPa (table quotes ~341). Explicit time steps must use E0.
+      Consistency notes (checked 2026-10-01, see notes/4_):
+        - E_inf 14.4 MPa agrees with the TDS tensile modulus 17 MPa (ASTM D412, 500 mm/min ~ long-term).
+        - Yeoh set is STIFFER than the TDS tension curve: 5.5 / 11.3 / 40.8 MPa vs 3 / 4 / 9 MPa at
+          50 / 100 / 200 % strain (x1.8 / x2.8 / x4.5). Possibly fitted to compression data; unverified.
+        - 1-term Prony (tau = 52 us) gives E' = 14.4 MPa at 1 Hz, but Carbon DMA reports ~65 MPa at room
+          temperature (Tg = 30 C): slow viscoelasticity near Tg is not represented. At 1 kHz the model
+          gives E' = 46 MPa, tan(delta) = 2.1 (strong damping at impact frequencies).
+    process: DLS (Carbon)
+    E: 14.4
+    nu: 0.49
+    rho: 1.06e-9
+    yeoh: [2.4, 0.15, 0.02]        # C10, C20, C30 [MPa], long-term; D_i ~ 0 (near incompressible)
+    prony_g: [0.958]               # shear relaxation (k1 = 0: no bulk relaxation)
+    prony_tau: [5.2e-5]            # [s]
+    tds:                           # Carbon EPU 45 technical data sheet, for checks
+      tensile_modulus_MPa: 17      # ASTM D412 Die C, 500 mm/min (18 IPA washed)
+      stress_at_strain_MPa: {0.5: 3, 1.0: 4, 2.0: 9}
+      ultimate_strength_MPa: 24
+      elongation_at_break: 2.90
+      dma_storage_modulus_RT_MPa: 65
+      Tg_C: 30
+      shore_A: {instantaneous: 77, after_5s: 62}
+    sources:
+      - "Carbon, EPU 45 Technical Data Sheet (density 1060 kg/m3, tensile modulus 17 MPa, DMA, Tg)"
+      - "Le Barbenchon & Lissner (2024), Materials Letters 359:135823, doi:10.1016/j.matlet.2023.135823 (EPU45 compression, rate dependence)"
+      - "Xu, Ji, Feng, Lin, Li (2025), Thin-Walled Structures 218:114036, doi:10.1016/j.tws.2025.114036 (EPU45 helmet liners, 4-5 m/s impact)"
+      - "Yeoh and Prony parameter values: user-compiled table (notes/0_Fix material from publication.md); the originating publication for these fitted constants still needs a citation"

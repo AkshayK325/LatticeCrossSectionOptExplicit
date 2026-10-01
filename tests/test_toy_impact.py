@@ -11,10 +11,10 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from material import tpu90a_impact
+from material import project_material
 
 torch.set_default_dtype(torch.float64)
-MAT = tpu90a_impact()
+MAT = project_material()   # EPU 45; elastic tests use its long-term E
 OUT = pathlib.Path(__file__).resolve().parents[1] / 'ResultsFig' / 'explicit'
 
 

@@ -103,8 +103,12 @@ def drop_rig(lat, r_elem, law, mat, energy_J=1.0, v0_ms=6.0, plate_mass=7.8e-6, 
     X = np.vstack((Xr, [[Xr[:, 0].mean(), Xr[:, 1].mean(), zt + gap0]]))
     fr = Frame(X, connr)
     A, I = circle_sections(r_elem)
-    E, G = mat['E'], mat['G']
-    beam_law = lambda d: fr.elastic_law(d, A, I, E, G)
+    if 'yeoh' in mat:                                            # visco-hyperelastic (EPU 45)
+        from explicitFE import ViscoHyperLaw
+        beam_law = ViscoHyperLaw(fr, A, I, mat)
+    else:
+        E, G = mat['E'], mat['G']
+        beam_law = lambda d: fr.elastic_law(d, A, I, E, G)
     m, j = lumped_mass(fr, A, I, mat['rho'])
     v0 = v0_ms * 1e3
     M = 2 * energy_J * 1e3 / v0**2
@@ -162,7 +166,7 @@ def run_drop(rig, T=8e-3, record=True):
     from explicitSolve import simulate, strain_energy
     from contact import law_potential
     fr, law, imp, bot = rig['fr'], rig['law'], rig['imp'], rig['bot']
-    W = {'Wd': 0.0, 'prev': None}
+    W = {'Wd': 0.0, 'prev': None, 'Wint': 0.0, 'dprev': None}
 
     def cb(n, t, state, fint):
         u, v, R, w = state
@@ -175,17 +179,24 @@ def run_drop(rig, T=8e-3, record=True):
             W['Wd'] += 0.5 * (Pd + W['prev'][0]) * (t - W['prev'][1])
         W['prev'] = (Pd, t)
         ke = 0.5 * (rig['m'] * (v**2).sum(1)).sum().item() + 0.5 * (rig['j'] * (w**2).sum(1)).sum().item()
-        U = strain_energy(d, f_loc).item()
+        # internal work W_int = int f_loc . dd (trapezoid) = stored + dissipated for any section law
+        if W['dprev'] is not None:
+            W['Wint'] += (0.5 * (f_loc + W['dprev'][1]) * (d - W['dprev'][0])).sum().item()
+        W['dprev'] = (d.detach().clone(), f_loc.detach().clone())
+        bl = rig['beam_law']
+        U = bl.stored_long_term(d).item() if hasattr(bl, 'stored_long_term') else strain_energy(d, f_loc).item()
         Phi = law_potential(law, g.item(), rig['gap0'])
         return {'F_imp': Fc, 'a_imp': Fc / rig['M'], 'F_bottom': fu[bot, 2].sum().item(), 'gap': g.item(),
                 'z_imp': u[imp, 2].item(), 'v_imp': v[imp, 2].item(), 'z_plate': u[rig['top'][0], 2].item(),
-                'KE': ke, 'U': U, 'Phi': Phi, 'Wd': W['Wd'], 'rot_max': d[:, 1:].abs().max().item()}
+                'KE': ke, 'U': U, 'W_int': W['Wint'], 'Phi': Phi, 'Wd': W['Wd'],
+                'rot_max': d[:, 1:].abs().max().item()}
 
     with torch.no_grad():
         h = simulate(fr, rig['beam_law'], rig['m'], rig['j'], rig['dt_fn'], None, t_end=T, v0=rig['v_init'],
                      fix_u=rig['fix_u'], fix_r=rig['fix_r'], contact=rig['contact'], tie=rig['tie'], callback=cb)
     h = {k: (np.array(v) if isinstance(v, list) else v) for k, v in h.items()}
-    h['E_tot'] = h['KE'] + h['U'] + h['Phi'] + h['Wd']
+    h['E_tot'] = h['KE'] + h['W_int'] + h['Phi'] + h['Wd']
+    h['E_diss_material'] = h['W_int'] - h['U']                  # viscous loss (+ small branch storage)
     return h
 
 
