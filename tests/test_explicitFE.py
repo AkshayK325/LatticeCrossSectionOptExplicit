@@ -138,3 +138,47 @@ def test_stable_dt_matches_dense_eigenvalue():
     m2, j2 = lumped_mass(fr, A, I, rho, rot_scale=False)
     dt2, _ = stable_dt(fr, law, m2, j2, courant=1.0, iters=300)
     assert dt2 < dt
+
+
+@pytest.mark.parametrize('ratio', [0.0, 0.3, 0.6, 0.9])
+def test_geometric_stiffness_axial_load_softens_bending(ratio):
+    """Geometric nonlinearity (P-delta): a simply supported Timoshenko column under axial compression P has
+    omega_1^2(P) = omega_1^2(0) (1 - P/P_cr), P_cr = P_E / (1 + P_E/(kappa G A)) (Engesser). Computed from the
+    corotational tangent at the compressed equilibrium state (autograd Jacobian of the internal force)."""
+    L, n, r = 40.0, 40, 0.8
+    X = np.stack([np.linspace(0, L, n + 1), np.zeros(n + 1), np.zeros(n + 1)], 1)
+    conn = np.stack([np.arange(n), np.arange(1, n + 1)], 1)
+    fr = Frame(X, conn)
+    kap = 6 * (1 + NU) / (7 + 6 * NU)
+    Ac = math.pi * r**2
+    A = torch.tensor([[Ac, kap * Ac, kap * Ac]]).repeat(n, 1)
+    I = torch.tensor([[math.pi * r**4 / 2, math.pi * r**4 / 4, math.pi * r**4 / 4]]).repeat(n, 1)
+    PE = math.pi**2 * E * I[0, 1].item() / L**2
+    Pcr = PE / (1 + PE / (kap * G * Ac))
+    P = ratio * Pcr
+    law = lambda d: fr.elastic_law(d, A, I, E, G)
+    u_eq = torch.zeros(fr.N, 3)
+    u_eq[:, 0] = -P / (E * Ac) * fr.X[:, 0]                          # uniform compression: equilibrium state
+
+    def f(q):
+        q = q.reshape(fr.N, 6)
+        fu, fth, _, _ = fr.internal_force(u_eq + q[:, :3], rodrigues(q[:, 3:]), law)
+        return torch.cat((fu, fth), 1).reshape(-1)
+
+    K = torch.autograd.functional.jacobian(f, torch.zeros(6 * fr.N))
+    K = 0.5 * (K + K.T)
+    m, j = lumped_mass(fr, A, I, 1.24e-9, rot_scale=False)
+    Mdiag = torch.stack((m, m, m, j, j, j), 1).reshape(-1)
+    fixed = torch.zeros(fr.N, 6, dtype=torch.bool)
+    fixed[0, :4] = True                                               # pin: ux uy uz + twist
+    fixed[-1, 1:3] = True                                             # roller: uy uz
+    fr_dof = ~fixed.reshape(-1)
+    Kf, Mf = K[fr_dof][:, fr_dof], Mdiag[fr_dof]
+    s = Mf ** -0.5
+    w2 = torch.linalg.eigvalsh(s[:, None] * Kf * s[None, :])
+    if ratio == 0.0:
+        test_geometric_stiffness_axial_load_softens_bending.w2_0 = w2[w2 > 1e-6 * w2.max()].min().item()
+        return
+    w2_0 = test_geometric_stiffness_axial_load_softens_bending.w2_0
+    w2_1 = w2[w2.abs() > 1e-9 * w2.max()].min().item()                # lowest bending mode (2 planes, equal)
+    assert w2_1 / w2_0 == pytest.approx(1 - ratio, rel=2e-2, abs=5e-3), (w2_1 / w2_0, 1 - ratio)
