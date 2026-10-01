@@ -67,9 +67,12 @@ def element_values(x, symType, lat):
     return apply_symmetry(x, symmetry_groups(symType, lat), lat)[torch.as_tensor(lat['beam_of_elem'])]
 
 
-def circle_sections(r):
-    """Per-element radius (ne,) -> frameFE3-layout A (ne,3), I (ne,3) = [J, Iy, Iz]."""
-    A = (math.pi * r**2)[:, None].expand(-1, 3)
+def circle_sections(r, nu=None):
+    """Per-element radius (ne,) -> frameFE3-layout A (ne,3) = [A, kappa A, kappa A], I (ne,3) = [J, Iy, Iz].
+    nu given: Timoshenko shear coefficient of a solid circle, kappa = 6(1+nu)/(7+6nu) (Cowper 1966; 0.899 for
+    nu = 0.49). nu None: kappa = 1 (legacy frameFE3 convention)."""
+    kappa = 1.0 if nu is None else 6 * (1 + nu) / (7 + 6 * nu)
+    A = (math.pi * r**2)[:, None] * torch.tensor([1.0, kappa, kappa], dtype=r.dtype)
     I = torch.stack((math.pi * r**4 / 2, math.pi * r**4 / 4, math.pi * r**4 / 4), 1)
     return A, I
 
@@ -104,7 +107,7 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     imp = len(Xr)                                                # impactor = extra node, no elements
     X = np.vstack((Xr, [[Xr[:, 0].mean(), Xr[:, 1].mean(), zt + gap0]]))
     fr = Frame(X, connr)
-    A, I = circle_sections(r_elem)
+    A, I = circle_sections(r_elem, nu=mat['nu'])
     if 'yeoh' in mat:                                            # visco-hyperelastic (EPU 45)
         from explicitFE import ViscoHyperLaw
         beam_law = ViscoHyperLaw(fr, A, I, mat)
