@@ -38,6 +38,7 @@ class FrameFE:
         nodeXY = meshSetting['nodeXY']
         connectivity = meshSetting['connectivity']
         self.AnalysisSettings = AnalysisSettings
+        self.nu = AnalysisSettings.get('nu', 0.3)  # one Poisson ratio for all G (was 0.0 in f_int/Kgeo, 0.3 in Kmat)
         self.Section = AnalysisSettings['Section'] # for plotting
         self.dim = nodeXY.shape[1];
         self.numDOFPerNod = int(3*(self.dim-1))
@@ -425,7 +426,7 @@ class FrameFE:
   # 
     def intForceVctNonLin(self,u,E,A,I):
     
-        G = E / (2*(1 + 0.0))
+        G = E / (2*(1 + self.nu))
         
         uel = u[self.edofMat.reshape(-1)].reshape([self.numEle,-1]) # get element wise deformation matrix (el x node dof)
         # Length increment since beginning of analysis
@@ -544,7 +545,7 @@ class FrameFE:
   #--------------------------#
     
     def geometricStiff(self,Fi_local,E,A,I):
-        G = E / (2*(1 + 0.0)) 
+        G = E / (2*(1 + self.nu)) 
         
         KelemGeo = self.KelemGeoBase.clone()
                 
@@ -599,7 +600,7 @@ class FrameFE:
     
     def materialStiff(self,E,A,I):
       
-        G = E / (2*(1 + 0.3))
+        G = E / (2*(1 + self.nu))
     
         # % Assemble Gent elastic stiffness matrix in local system    
                                  
