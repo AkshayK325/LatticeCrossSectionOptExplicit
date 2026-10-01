@@ -70,3 +70,17 @@ def loading_branch(d, F):
             dmax = d[i].item()
     keep = torch.tensor(keep)
     return d[keep], F[keep]
+
+
+def value_only(x, spec):
+    """J(x) without gradient (forward run with the same frozen-rig / replayed-dt evaluation as value_and_grad):
+    the cheap evaluation GCMMA's conservativeness inner loop needs."""
+    from adjoint import forward_J
+    lat, sym, mat = spec['lat'], spec['symType'], spec['mat']
+    kw = dict(spec['rig_kw'])
+    with torch.no_grad():
+        rig0, sched = nominal(lat, denormalize(x.detach(), spec), sym, mat, T=spec['T'], **kw)
+        kw.pop('law', None)
+        rig = drop_rig(lat, radii(denormalize(x.detach(), spec), sym, lat), rig0['law'], mat=mat, freeze=rig0, **kw)
+        S = forward_J(DropStepper(rig, sched, spec['terms'](rig)))
+        return float(spec['outer'](rig)(torch.as_tensor(S).reshape(-1), [x]))

@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 dev = sys.argv[1] if len(sys.argv) > 1 else 'cuda'
-OPT = sys.argv[2] if len(sys.argv) > 2 else 'lbfgsb'     # 'lbfgsb' (scipy L-BFGS-B, line search) or 'mma'
+OPT = sys.argv[2] if len(sys.argv) > 2 else 'gcmma'      # 'gcmma' (default), 'mma' (standard MMA), 'lbfgsb'
 torch.set_default_device(dev)
 torch.set_default_dtype(torch.float64)
 from latticeSetup import example3, symmetry_groups, n_design_rows
@@ -77,11 +77,23 @@ def no_constraint(x):
 
 
 t_start = time.time()
-if OPT == 'mma':
+if OPT == 'gcmma':
+    from optimizeDrop import value_only
+
+    def vcall(xv):                                   # value-only evaluations for GCMMA's inner loop
+        xv = np.asarray(xv, dtype=float).reshape(-1)
+        J = value_only(rows(xv), spec)
+        print(f'   inner value: radii {np.round(to_r(xv), 4)}, J/J0 {J / J0["v"]:.3e}', flush=True)
+        return np.array([J / J0['v']]), -np.ones((1, 1))
+    res = custom_minimize(obj, x0=np.array(to_x(g0)).reshape(-1, 1), bounds=Bounds([0.0] * 3, [1.0] * 3),
+                          method='GCMMA', constraintCall=no_constraint,
+                          options={'maxiter': 20, 'miniter': 3, 'kkttol': 1e-6, 'disp': True, 'value_call': vcall})
+    x_opt = res.x.reshape(-1)
+elif OPT == 'mma':
     res = custom_minimize(obj, x0=np.array(to_x(g0)).reshape(-1, 1), bounds=Bounds([0.0] * 3, [1.0] * 3), method='MMA',
                           constraintCall=no_constraint,
                           options={'maxiter': 20, 'miniter': 5, 'kkttol': 1e-6, 'move_limit': 0.2, 'disp': True,
-                                   'mma_subsolves': 1})
+                                   'mma_variant': 'standard'})
     x_opt = res.x.reshape(-1)
 else:
     from scipy.optimize import minimize

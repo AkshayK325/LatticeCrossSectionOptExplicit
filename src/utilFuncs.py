@@ -156,7 +156,13 @@ def custom_minimize(objCall, x0, bounds,method='GCMMA',constraintCall=None, opti
     options['maxfun'] = options['maxfun'] if 'maxfun' in options else default_options['maxfun']
     options['move_limit'] = options['move_limit'] if 'move_limit' in options else default_options['move_limit']
 
-    if method == 'MMA':
+    if method == 'MMA' and options.get('mma_variant', 'legacy') == 'standard':
+        print('Running standard MMA (Svanberg 1987, asymptotes carried) from mmapy')
+        x,fun,fun_eval = optimizeMMAStandard(objCall, x0, bounds, constraintCall, options=options,callback=callback)
+    elif method == 'GCMMA':
+        print('Running GCMMA (Svanberg 2002, conservative inner loop) from mmapy')
+        x,fun,fun_eval = optimizeGCMMA(objCall, x0, bounds, constraintCall, options=options,callback=callback)
+    elif method == 'MMA':
         print('Running '+method+' optimizer from mmapy')
         x,fun,fun_eval = optimizeMMA(objCall, x0, bounds, constraintCall, options=options,callback=callback)
     elif method == 'Adam':
@@ -316,6 +322,111 @@ def optimizeMMA(objCall, x0, bounds, constraintCall, options,callback):
                 
         return xbest.reshape(-1), f0val, func_evals
         
+def _mma_setup(objCall, x0, bounds, constraintCall):
+    """Common MMA/GCMMA set-up: column vectors, problem constants (a0 = 1, a = 0, c = 1000, d = 1)."""
+    xval = np.asarray(x0, dtype=float).reshape(-1, 1)
+    n = xval.shape[0]
+    f0, df0 = objCall(xval.reshape(-1))
+    fv, dfv = constraintCall(xval.reshape(-1))
+    fv = np.asarray(fv, dtype=float).reshape(-1, 1)
+    m = fv.shape[0]
+    xmin = np.asarray(bounds.lb, dtype=float).reshape(-1, 1) * np.ones((n, 1))
+    xmax = np.asarray(bounds.ub, dtype=float).reshape(-1, 1) * np.ones((n, 1))
+    return (xval, n, m, float(np.asarray(f0).reshape(-1)[0]), np.asarray(df0, float).reshape(-1, 1), fv,
+            np.asarray(dfv, float).reshape(m, n), xmin, xmax, 1.0, np.zeros((m, 1)), 1000 * np.ones((m, 1)),
+            np.ones((m, 1)))
+
+
+def _eval(objCall, constraintCall, x, m, n):
+    f0, df0 = objCall(x.reshape(-1))
+    fv, dfv = constraintCall(x.reshape(-1))
+    return (float(np.asarray(f0).reshape(-1)[0]), np.asarray(df0, float).reshape(-1, 1),
+            np.asarray(fv, float).reshape(-1, 1), np.asarray(dfv, float).reshape(m, n))
+
+
+def optimizeMMAStandard(objCall, x0, bounds, constraintCall, options, callback=None):
+    """Standard MMA (Svanberg 1987, mmapy.mmasub): ONE subproblem per evaluation and the moving asymptotes
+    low/upp carried between iterations (the legacy optimizeMMA passed xmin/xmax as asymptotes on every call,
+    which disables MMA's asymptote adaptation). Stops on the KKT residual (mmapy.kktcheck) after miniter.
+    Design variables are expected normalised to [0, 1] (bounds), with denormalisation inside objCall."""
+    from mmapy import kktcheck
+    xval, n, m, f0, df0, fv, dfv, xmin, xmax, a0, a, c, d = _mma_setup(objCall, x0, bounds, constraintCall)
+    xold1, xold2, low, upp = xval.copy(), xval.copy(), xmin.copy(), xmax.copy()
+    move = options.get('move_limit', 0.2)
+    evals, hist = 1, [f0]
+    for it in range(1, options['maxiter'] + 1):
+        xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, low, upp = mmasub(
+            m, n, it, xval, xmin, xmax, xold1, xold2, f0, df0, fv, dfv, low, upp, a0, a, c, d, move=move,
+            asyinit=options.get('asyinit', 0.5))
+        xold2, xold1, xval = xold1.copy(), xval.copy(), xmma.copy()
+        f0, df0, fv, dfv = _eval(objCall, constraintCall, xval, m, n)
+        evals += 1
+        hist.append(f0)
+        residu, kktnorm, _ = kktcheck(m, n, xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, xmin, xmax, df0, fv, dfv,
+                                      a0, a, c, d)
+        if options.get('disp'):
+            print(f'MMA {it}: f0 = {f0:.6g}, max con = {fv.max():.3g}, kkt = {kktnorm:.2e}')
+        if callback is not None:
+            callback(xval.reshape(-1))
+        if it >= options['miniter'] and kktnorm < options['kkttol'] and (fv <= options['kkttol']).all():
+            break
+    return xval.reshape(-1), np.array([f0]), evals
+
+
+def optimizeGCMMA(objCall, x0, bounds, constraintCall, options, callback=None):
+    """GCMMA (Svanberg 2002, mmapy.asymp/gcmmasub/concheck/raaupdate). Each outer iteration solves the MMA
+    subproblem; if the approximation is not conservative at the trial point (objective or constraints
+    underestimated), the curvature parameters raa0/raa are raised and the subproblem re-solved (inner loop,
+    VALUE-only evaluations via options['value_call'](x) -> (f0, fval), default objCall/constraintCall).
+    Result: monotone, globally convergent descent. Suited to expensive nonlinear simulations and to many
+    design variables with constraints. Variables normalised to [0, 1]."""
+    from mmapy import asymp, gcmmasub, concheck, raaupdate, kktcheck
+    xval, n, m, f0, df0, fv, dfv, xmin, xmax, a0, a, c, d = _mma_setup(objCall, x0, bounds, constraintCall)
+    xold1, xold2, low, upp = xval.copy(), xval.copy(), xmin.copy(), xmax.copy()
+    epsimin, raa0, raa, raa0eps, raaeps = 1e-7, 0.01, 0.01 * np.ones((m, 1)), 1e-6, 1e-6 * np.ones((m, 1))
+    vcall = options.get('value_call')
+
+    def values(x):
+        if vcall is not None:
+            f, g = vcall(x.reshape(-1))
+            return np.array([[float(np.asarray(f).reshape(-1)[0])]]), np.asarray(g, float).reshape(-1, 1)
+        f, _, g, _ = _eval(objCall, constraintCall, x, m, n)
+        return np.array([[f]]), g
+
+    evals, inner_total = 1, 0
+    for it in range(1, options['maxiter'] + 1):
+        low, upp, raa0, raa = asymp(it, n, xval, xold1, xold2, xmin, xmax, low, upp, raa0, raa, raa0eps, raaeps,
+                                    df0, dfv)
+        out = gcmmasub(m, n, it, epsimin, xval, xmin, xmax, low, upp, raa0, raa, np.array([[f0]]), df0, fv, dfv,
+                       a0, a, c, d)
+        xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, f0app, fapp = out
+        f0new, fvnew = values(xmma)
+        conserv = concheck(m, epsimin, f0app, f0new, fapp, fvnew)
+        inner = 0
+        while conserv == 0 and inner < options.get('max_inner', 15):
+            inner += 1
+            raa0, raa = raaupdate(xmma, xval, xmin, xmax, low, upp, f0new, fvnew, f0app, fapp, raa0, raa, raa0eps,
+                                  raaeps, epsimin)
+            out = gcmmasub(m, n, it, epsimin, xval, xmin, xmax, low, upp, raa0, raa, np.array([[f0]]), df0, fv,
+                           dfv, a0, a, c, d)
+            xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, f0app, fapp = out
+            f0new, fvnew = values(xmma)
+            conserv = concheck(m, epsimin, f0app, f0new, fapp, fvnew)
+        inner_total += inner
+        xold2, xold1, xval = xold1.copy(), xval.copy(), xmma.copy()
+        f0, df0, fv, dfv = _eval(objCall, constraintCall, xval, m, n)
+        evals += 1 + inner
+        residu, kktnorm, _ = kktcheck(m, n, xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, xmin, xmax, df0, fv, dfv,
+                                      a0, a, c, d)
+        if options.get('disp'):
+            print(f'GCMMA {it}: f0 = {f0:.6g}, max con = {fv.max():.3g}, inner = {inner}, kkt = {kktnorm:.2e}')
+        if callback is not None:
+            callback(xval.reshape(-1))
+        if it >= options['miniter'] and kktnorm < options['kkttol'] and (fv <= options['kkttol']).all():
+            break
+    return xval.reshape(-1), np.array([f0]), evals
+
+
 def optimizeAdam(objCall, x0, bounds, constraintCall, options, callback=None):
     """
     Optimize using Adam from PyTorch, with bounds and constraint penalties.
