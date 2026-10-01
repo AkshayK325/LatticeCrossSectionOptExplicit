@@ -266,7 +266,9 @@ class ViscoHyperLaw:
 
     def __call__(self, d):
         f = self.f_inf(d)
-        return f + self._branches(f).sum(0)
+        br = self._branches(f)
+        self.last_q, self.last_f = br, f                  # what commit(d) would store (used by adjoint.DropStepper)
+        return f + br.sum(0)
 
     def commit(self, d):
         f = self.f_inf(d)
