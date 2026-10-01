@@ -78,7 +78,8 @@ def no_constraint(x):
 t_start = time.time()
 res = custom_minimize(obj, x0=np.array(to_x(g0)).reshape(-1, 1), bounds=Bounds([0.0] * 3, [1.0] * 3), method='MMA',
                       constraintCall=no_constraint,
-                      options={'maxiter': 20, 'miniter': 5, 'kkttol': 1e-6, 'move_limit': 0.2, 'disp': True})
+                      options={'maxiter': 20, 'miniter': 5, 'kkttol': 1e-6, 'move_limit': 0.2, 'disp': True,
+                               'mma_subsolves': 1})
 g_opt = np.array(to_r(res.x.reshape(-1)))
 wall = time.time() - t_start
 

@@ -276,7 +276,9 @@ def optimizeMMA(objCall, x0, bounds, constraintCall, options,callback):
             # else:
             # updateConTol = -1e-5
                        
-            for _ in range(2):
+            # legacy: two subproblem solves per function evaluation (each up to the move limit, same gradient);
+            # options['mma_subsolves'] = 1 gives standard MMA (one update per evaluation)
+            for _ in range(options.get('mma_subsolves', 2)):
                 # Solve the MMA subproblem
                 xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, low, upp = mmasub( # type: ignore
                     m, n, outer_iter, xval, xmin, xmax, xold1, xold2, f0valnew[np.newaxis], df0dxnew, fvalnew, dfdxnew, xmin, xmax, a0, a, c, d, move)
