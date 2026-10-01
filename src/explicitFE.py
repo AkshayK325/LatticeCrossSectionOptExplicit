@@ -156,20 +156,23 @@ def stable_dt(frame, law, m, j, courant=0.8, iters=100, seed=0, u=None, R=None, 
     return courant * 2 / np.sqrt(lam), np.sqrt(lam)
 
 
-def adaptive_dt(frame, law, m, j, w_extra=0.0, courant=0.7, every=20, iters=8, warm_iters=60):
-    """dt(step, u, R) callable for simulate(): re-estimates omega_max at the current state every `every`
-    steps by a warm-started power iteration (the tangent stiffens ~2x when a TPU lattice is crushed).
-    w_extra: frequency of extra stiffness on the same nodes (e.g. contact), added in quadrature.
-    Power iteration approaches omega_max from below, hence the default courant 0.7."""
-    st = {'v': None, 'dt': None, 'dt0': None}
+def adaptive_dt(frame, law, m, j, w_extra=0.0, courant=0.7, every=20, iters=8, warm_iters=60, contact_fn=None):
+    """dt(step, u, R, v) callable for simulate(): re-estimates omega_max at the current state every `every`
+    steps by a warm-started power iteration. Power iteration approaches omega_max from below, hence the
+    default courant 0.7.
+    w_extra: constant frequency of extra stiffness on the same nodes (e.g. flat contact), added in quadrature.
+    contact_fn(u, v) -> (w_c, dt_cap): state-dependent contact frequency (added in quadrature, evaluated every
+    step since contact stiffness changes fast) and a hard step cap (e.g. barrier CCD)."""
+    st = {'v': None, 'w': None, 'dt0': None}
 
-    def dt_fn(n, u, R):
+    def dt_fn(n, u, R, v=None):
         if n % every == 0:
-            _, w, st['v'] = stable_dt(frame, law, m, j, iters=warm_iters if st['v'] is None else iters,
-                                      u=u, R=R, v0=st['v'], return_vec=True)
-            st['dt'] = courant * 2 / np.sqrt(w**2 + w_extra**2)
-            st['dt0'] = st['dt0'] or st['dt']
-            if not np.isfinite(st['dt']) or st['dt'] < 1e-3 * st['dt0']:
-                raise RuntimeError(f'dt collapsed to {st["dt"]:.2e} at step {n}: solution unstable')
-        return st['dt']
+            _, st['w'], st['v'] = stable_dt(frame, law, m, j, iters=warm_iters if st['v'] is None else iters,
+                                            u=u, R=R, v0=st['v'], return_vec=True)
+        w_c, cap = (0.0, np.inf) if contact_fn is None else contact_fn(u, v)
+        dt = min(courant * 2 / np.sqrt(st['w']**2 + w_extra**2 + w_c**2), cap)
+        st['dt0'] = st['dt0'] or dt
+        if not np.isfinite(dt) or dt < 1e-3 * st['dt0']:
+            raise RuntimeError(f'dt collapsed to {dt:.2e} at step {n}: solution unstable')
+        return dt
     return dt_fn

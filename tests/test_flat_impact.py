@@ -53,7 +53,7 @@ def build(X, conn, r, energy_J, v0_ms, kc_factor=10.0, eps_frac=0.02, gap0=0.05,
     dt_fn = adaptive_dt(fr, law, m, j, w_extra=w_c, courant=courant)
     return dict(fr=fr, A=A, I=I, law=law, m=m, j=j, rn=rn, top=top, probe=top[0].item(), M=M, dt_fn=dt_fn, v0=v0, kc=kc, eps=eps,
                 dt=courant * 2 / math.sqrt(w_beam**2 + w_c**2), dt_beam=dt_beam, dt_c=dt_c, fix_r=fix_r,
-                contact=lambda u: flat_surface(fr.X + u, rn, kc, eps))
+                contact=lambda u, v: flat_surface(fr.X + u, rn, kc, eps))
 
 
 def run(c, T, record_every=1):

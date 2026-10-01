@@ -1,0 +1,199 @@
+"""optBeam.ipynb exampleCase 3 lattice (cell 19) + its symmetry groups, and the drop-test rig built on it.
+
+Design flow (as in the notebook / OptimizeFrame, varType 'Element'):
+    x (n_rows, ncol) --apply_symmetry--> per-beam values (n_beams, ncol) --[beam_of_elem]--> per-element values
+"""
+import math
+
+import numpy as np
+import torch
+
+from mesher import MeshFrame
+
+SYM_TYPES = ('Independent', 'Unitcell', 'OneValue', 'Midplane')
+
+
+def example3(elemSize=3.0):
+    """exampleCase '3fz' lattice with the notebook cell-19 params. Returns a dict with base and refined mesh."""
+    from examples import getExample
+    H = 0.5 * 25.4                                    # 0.5 inch per row
+    params = {'base': H, 'height': H, 'phi': 0.0, 'delta': 0.0, 'nx': 3, 'ny': 3, 'nz': 1,
+              'Name': 'C4', 'Shape': 'Square'}
+    _, X, conn, _, radiiNodIndex, radiiElemIndex = getExample('3fz', params)
+    Xr, connr = MeshFrame().refineFrameMeshElemSize(X, conn, elemSize)
+    L = np.linalg.norm(X[conn[:, 1]] - X[conn[:, 0]], axis=1)
+    n_per_beam = np.rint(L / elemSize).astype(int)    # same rule as refineFrameMeshElemSize
+    return {'X': X, 'conn': conn, 'Xr': Xr, 'connr': connr, 'elemSize': elemSize,
+            'beam_of_elem': np.repeat(np.arange(len(conn)), n_per_beam),
+            'radiiElemIndex': np.asarray(radiiElemIndex), 'radiiNodIndex': np.asarray(radiiNodIndex),
+            'numUnitLatElem': int(max(radiiElemIndex)) + 1, 'params': params}
+
+
+def symmetry_groups(symType, lat):
+    """symArray exactly as notebook cell 19 builds it for exampleCase 3."""
+    X, conn, nU = lat['X'], lat['conn'], lat['numUnitLatElem']
+    if symType == 'Unitcell':
+        return np.arange(nU).tolist()
+    if symType == 'OneValue':
+        return [np.arange(nU)]
+    if symType == 'Independent':
+        return np.arange(conn.shape[0]).tolist()
+    if symType == 'Midplane':
+        mid_lat = np.mean(X[0:nU, :], axis=0)
+        mids = (X[conn[0:nU, 0], :] + X[conn[0:nU, 1], :]) / 2
+        dist = np.round((mids[:, -1] - mid_lat[-1]) / np.linalg.norm(mids[:, -1] - mid_lat[-1]), decimals=5)
+        dist = (dist > 0.0) * 1.0 + (dist < 0.0) * 2.0 + (dist == 0.0) * 3.0
+        uniq, inv = np.unique(dist, return_inverse=True)
+        return [np.where(inv == i)[0] for i in range(len(uniq))]
+    raise ValueError(f'symType must be one of {SYM_TYPES}')
+
+
+def n_design_rows(symType, lat):
+    return lat['conn'].shape[0] if symType == 'Independent' else lat['numUnitLatElem']
+
+
+def apply_symmetry(x, symArray, lat):
+    """Group means, then unit-cell -> all beams (OptimizeFrame.applySymm, varType 'Element')."""
+    var = x.clone()
+    for g in symArray:
+        var[g] = x[g].reshape(-1, x.shape[1]).mean(0, keepdim=True)
+    if var.shape[0] < len(lat['radiiElemIndex']):
+        var = var[torch.as_tensor(lat['radiiElemIndex'])]
+    return var
+
+
+def element_values(x, symType, lat):
+    """Design rows -> per-element values (n_elements_refined, ncol)."""
+    return apply_symmetry(x, symmetry_groups(symType, lat), lat)[torch.as_tensor(lat['beam_of_elem'])]
+
+
+def circle_sections(r):
+    """Per-element radius (ne,) -> frameFE3-layout A (ne,3), I (ne,3) = [J, Iy, Iz]."""
+    A = (math.pi * r**2)[:, None].expand(-1, 3)
+    I = torch.stack((math.pi * r**4 / 2, math.pi * r**4 / 4, math.pi * r**4 / 4), 1)
+    return A, I
+
+
+# ------------------------------------------------------------------------------------------------
+# Drop rig: lattice bonded to a fixed rigid bottom plate, rigid top plate bonded to the top nodes,
+# separate rigid impactor (1 translational DOF) falling onto the top plate. Contact acts only between
+# impactor and top plate (scalar gap law from contact.py).
+
+def drop_rig(lat, r_elem, law, mat, energy_J=1.0, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
+             start='gap'):
+    """law: a gap law, or a dict of contact.calibrate() kwargs (lets 'crit_damped' get the reduced mass).
+    r_elem (ne,) radii [mm]. plate_mass [t] (default 2 mm aluminium 38x38: 7.8 g). gap0 [mm] initial
+    impactor-plate gap.
+    start='gap':       impactor (M = 2E/v0^2) at v0 hits the resting plate -> rigid-rigid collision: a force
+                       spike and plate rattling are physical here, whatever the contact law.
+    start='co_moving': impactor and plate start together at v0 (the impactor-plate collision is taken as
+                       already completed, plastic; i.e. the plate is the striker face), small gap, zero
+                       relative speed. Total KE = E: M = 2E/v0^2 - plate mass. The contact force then
+                       builds continuously as the lattice decelerates the plate, and releases continuously
+                       on rebound: no collision event, no jump.
+    start='merged':    impactor rigidly bonded to the plate (one rigid body, no contact): zero jump by
+                       construction, but the impactor can never separate on rebound."""
+    from explicitFE import Frame, lumped_mass, adaptive_dt
+    from contact import law_tangent, contact_dt_cap
+    Xr, connr = lat['Xr'], lat['connr']
+    zt = Xr[:, 2].max()
+    top = np.nonzero(np.isclose(Xr[:, 2], zt))[0]
+    bot = np.nonzero(np.isclose(Xr[:, 2], Xr[:, 2].min()))[0]
+    imp = len(Xr)                                                # impactor = extra node, no elements
+    X = np.vstack((Xr, [[Xr[:, 0].mean(), Xr[:, 1].mean(), zt + gap0]]))
+    fr = Frame(X, connr)
+    A, I = circle_sections(r_elem)
+    E, G = mat['E'], mat['G']
+    beam_law = lambda d: fr.elastic_law(d, A, I, E, G)
+    m, j = lumped_mass(fr, A, I, mat['rho'])
+    v0 = v0_ms * 1e3
+    M = 2 * energy_J * 1e3 / v0**2
+    m = m.clone()
+    if start in ('co_moving', 'merged'):
+        M -= (m[top].sum().item() + plate_mass)          # plate + tied top nodes move with the impactor
+    m[imp], j[imp] = M, 1.0                                      # impactor rotations are fixed below
+    m[top] += plate_mass / len(top)
+    fix_u = torch.zeros(fr.N, 3, dtype=torch.bool)
+    fix_u[bot] = True
+    fix_u[imp, :2] = True
+    fix_r = torch.zeros(fr.N, 3, dtype=torch.bool)
+    fix_r[bot] = fix_r[top] = fix_r[imp] = True
+    top_t, t0 = torch.as_tensor(top), int(top[0])
+    m_plate = m[top].sum().item()
+    mu = 1 / (1 / M + 1 / m_plate)                               # impactor-plate reduced mass
+    if isinstance(law, dict):
+        from contact import calibrate
+        law = calibrate(mu=mu, v_ref=v0, **law)
+
+    def gap(u, v):
+        return gap0 + u[imp, 2] - u[t0, 2], v[imp, 2] - v[t0, 2]
+
+    def contact(u, v):
+        g, gd = gap(u, v)
+        Fc = law(g, gd)
+        f = torch.zeros(fr.N, 3, dtype=u.dtype)
+        f[imp, 2] = Fc
+        f[t0, 2] = -Fc                                           # tie spreads it over the plate
+        return f
+
+    def contact_dt(u, v):
+        g, gd = gap(u, v)
+        kg, kv = law_tangent(law, g, gd)
+        w = np.sqrt(max(kg, 0.0) / mu)
+        zeta = kv / (2 * np.sqrt(max(kg, 1e-30) * mu))
+        w_eff = w / (np.sqrt(1 + zeta**2) - zeta) if w > 0 else 0.0  # damped central-difference limit
+        return w_eff, contact_dt_cap(law, g.item(), gd.item())
+
+    dt_fn = adaptive_dt(fr, beam_law, m, j, courant=courant, contact_fn=contact_dt)
+    v_init = torch.zeros(fr.N, 3, dtype=torch.float64)
+    v_init[imp, 2] = -v0
+    if start in ('co_moving', 'merged'):
+        v_init[top_t, 2] = -v0
+    tie = top_t
+    if start == 'merged':
+        tie, contact = torch.cat((top_t, torch.tensor([imp]))), None
+    return dict(fr=fr, A=A, I=I, beam_law=beam_law, law=law, m=m, j=j, M=M, imp=imp, top=top_t, bot=bot,
+                fix_u=fix_u, fix_r=fix_r, contact=contact, tie=tie, gap=gap, dt_fn=dt_fn, v_init=v_init, gap0=gap0,
+                v0=v0, plate_mass=plate_mass)
+
+
+def run_drop(rig, T=8e-3, record=True):
+    """Simulate; record impactor force, bottom reaction, gap, energies. Returns numpy histories."""
+    from explicitSolve import simulate, strain_energy
+    from contact import law_potential
+    fr, law, imp, bot = rig['fr'], rig['law'], rig['imp'], rig['bot']
+    W = {'Wd': 0.0, 'prev': None}
+
+    def cb(n, t, state, fint):
+        u, v, R, w = state
+        fu, fth, d, f_loc, fc = fint
+        g, gd = rig['gap'](u, v)
+        Fc = fc[imp, 2].item() if rig['contact'] is not None else -fu[rig['top'], 2].sum().item() * rig['M'] / (rig['M'] + rig['m'][rig['top']].sum().item())
+        Fel = law(g, torch.zeros_like(gd)).item()
+        Pd = (Fc - Fel) * -gd.item()                             # power dissipated by contact damping (>= 0)
+        if W['prev'] is not None:
+            W['Wd'] += 0.5 * (Pd + W['prev'][0]) * (t - W['prev'][1])
+        W['prev'] = (Pd, t)
+        ke = 0.5 * (rig['m'] * (v**2).sum(1)).sum().item() + 0.5 * (rig['j'] * (w**2).sum(1)).sum().item()
+        U = strain_energy(d, f_loc).item()
+        Phi = law_potential(law, g.item(), rig['gap0'])
+        return {'F_imp': Fc, 'a_imp': Fc / rig['M'], 'F_bottom': fu[bot, 2].sum().item(), 'gap': g.item(),
+                'z_imp': u[imp, 2].item(), 'v_imp': v[imp, 2].item(), 'z_plate': u[rig['top'][0], 2].item(),
+                'KE': ke, 'U': U, 'Phi': Phi, 'Wd': W['Wd'], 'rot_max': d[:, 1:].abs().max().item()}
+
+    with torch.no_grad():
+        h = simulate(fr, rig['beam_law'], rig['m'], rig['j'], rig['dt_fn'], None, t_end=T, v0=rig['v_init'],
+                     fix_u=rig['fix_u'], fix_r=rig['fix_r'], contact=rig['contact'], tie=rig['tie'], callback=cb)
+    h = {k: (np.array(v) if isinstance(v, list) else v) for k, v in h.items()}
+    h['E_tot'] = h['KE'] + h['U'] + h['Phi'] + h['Wd']
+    return h
+
+
+def jump_metrics(F):
+    """Force-history smoothness: max per-step jump / peak, chatter = total variation / (2 peak)
+    (1.0 for a single clean pulse), number of separate contact episodes (F > 2% of peak)."""
+    F = np.asarray(F)
+    pk = np.abs(F).max() + 1e-30
+    on = F > 0.02 * pk
+    return {'peak': pk, 'max_step_jump': np.abs(np.diff(F)).max() / pk,
+            'chatter': np.abs(np.diff(F)).sum() / (2 * pk), 'episodes': int(np.sum(on[1:] & ~on[:-1]) + on[0])}

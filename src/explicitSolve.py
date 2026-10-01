@@ -18,10 +18,10 @@ def simulate(frame, law, m, j, dt, n_steps, u0=None, v0=None, R0=None, w0=None,
              fix_u=None, fix_r=None, f_ext=None, contact=None, tie=None, damping=0.0, record_every=1,
              callback=None, t_end=None):
     """Run n_steps. fix_u / fix_r: bool masks (N,3) of fixed translation / rotation DOFs (held at u0/R0).
-    f_ext(t) -> (F (N,3), Mom (N,3)) or None. contact(u) -> F (N,3) or None.
+    f_ext(t) -> (F (N,3), Mom (N,3)) or None. contact(u, v) -> F (N,3) or None.
     tie: node indices moving as one rigid translating body (e.g. a bonded impactor plate; put its mass into m
     on those nodes and fix their rotations). damping: mass-proportional coefficient alpha (1/s).
-    dt: float, a per-step sequence (replay a recorded schedule), or a callable dt(step, u, R) (adaptive);
+    dt: float, a per-step sequence (replay a recorded schedule), or a callable dt(step, u, R, v) (adaptive);
     with a callable, n_steps may be None and t_end sets the duration. hist['dt'] holds the steps used.
     callback(step, t, state, fint) -> dict of scalars to record. Returns dict of recorded histories."""
     N, dtype = frame.N, frame.X.dtype
@@ -37,7 +37,7 @@ def simulate(frame, law, m, j, dt, n_steps, u0=None, v0=None, R0=None, w0=None,
     def accel(t, u, R, v, w):
         fu, fth, d, f_loc = frame.internal_force(u, R, law)
         Fx, Mx = (z, z) if f_ext is None else f_ext(t)
-        fc = z if contact is None else contact(u)
+        fc = z if contact is None else contact(u, v)
         a = (Fx + fc - fu) / m3 - damping * v
         if tie is not None:
             a = a.index_copy(0, tie, ((m3[tie] * a[tie]).sum(0) / m3[tie].sum()).expand(len(tie), 3))
@@ -46,7 +46,7 @@ def simulate(frame, law, m, j, dt, n_steps, u0=None, v0=None, R0=None, w0=None,
 
     def step_dt(n):
         if callable(dt):
-            return dt(n, u.detach(), R.detach())
+            return dt(n, u.detach(), R.detach(), v.detach())
         return float(dt[n]) if hasattr(dt, '__len__') else dt
 
     if n_steps is None:
