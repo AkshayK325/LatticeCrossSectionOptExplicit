@@ -198,9 +198,20 @@ class ViscoHyperLaw:
     # ponytail: linear (E_inf) bending/torsion; fibre integration if bending strains get large
     """
 
-    def __init__(self, frame, A, I, mat):
+    def __init__(self, frame, A, I, mat, fibre=True, n_r=4, n_theta=16):
         self.fr, self.A, self.I, self.mat = frame, A, I, mat
         self.C = mat['yeoh']
+        self.fibre = fibre
+        if fibre:                                  # polar quadrature of a solid circle of radius r (unit r)
+            xg, wg = np.polynomial.legendre.leggauss(n_r)
+            s_, ws = 0.5 * (xg + 1), 0.5 * wg      # int_0^1 f(s) s ds ~ sum ws*s*f(s)
+            th = 2 * np.pi * (np.arange(n_theta) + 0.5) / n_theta
+            S, TH = np.meshgrid(s_, th, indexing='ij')
+            W = (ws * s_)[:, None] * np.full(n_theta, 2 * np.pi / n_theta)[None, :]
+            self.fy = torch.tensor((S * np.cos(TH)).ravel(), dtype=A.dtype)     # fibre y / r
+            self.fz = torch.tensor((S * np.sin(TH)).ravel(), dtype=A.dtype)     # fibre z / r
+            self.fw = torch.tensor(W.ravel(), dtype=A.dtype)                    # area weight / r^2
+            self.r_sec = torch.sqrt(A[:, 0] / torch.pi)
         self.tau = torch.tensor(mat['prony_tau'], dtype=A.dtype)[:, None, None]
         g = torch.tensor(mat['prony_g'], dtype=A.dtype)[:, None, None]
         self.beta = g / (1 - g.sum())
@@ -212,11 +223,38 @@ class ViscoHyperLaw:
         self.q = torch.zeros(self.tau.shape[0], ne, 6, dtype=self.A.dtype)
         self.f_prev = torch.zeros(ne, 6, dtype=self.A.dtype)
 
+    def _fibre_energy(self, d, quadratic):
+        """Section-integrated Yeoh energy per element (fibre model), or its small-strain quadratic form.
+        Curvatures/twist from the corotational end rotations: kappa = (r2 - r1)/L0, twist = rx/L0."""
+        L0, r = self.fr.L0, self.r_sec
+        e0 = d[:, 0] / L0
+        ky, kz, tw = (d[:, 4] - d[:, 2]) / L0, (d[:, 5] - d[:, 3]) / L0, d[:, 1] / L0
+        y, z = r[:, None] * self.fy[None, :], r[:, None] * self.fz[None, :]
+        eps = e0[:, None] - y * kz[:, None] + z * ky[:, None]                   # fibre axial strain
+        g2 = (tw[:, None] ** 2) * (y * y + z * z)                               # torsional shear^2
+        C10, C20, C30 = self.C
+        if quadratic:
+            W = C10 * (3 * eps * eps + g2)                                      # small-strain limit of Yeoh
+        else:
+            lam = 1 + eps
+            x = lam * lam + 2 / lam - 3 + g2                                    # I1 - 3 (uniaxial + simple shear)
+            W = C10 * x + C20 * x * x + C30 * x * x * x
+        return (L0 * r * r * (W * self.fw[None, :]).sum(1)).sum()
+
     def f_inf(self, d):
+        """Long-term resultants. Fibre mode: exact linear Timoshenko law + large-strain correction
+        d/dd (U_fibre - U_quadratic): equal to the validated linear element at small strain, Yeoh in axial,
+        bending and torsion at large strain, and conservative. Non-fibre mode: Yeoh axial only (previous)."""
         from material import yeoh_uniaxial
         f = self.fr.elastic_law(d, self.A, self.I, self.mat['E'], self.mat['G'])
-        lam = 1 + d[:, 0] / self.fr.L0
-        return torch.cat((self.A[:, :1] * yeoh_uniaxial(lam, self.C)[:, None], f[:, 1:]), dim=1)
+        if not self.fibre:
+            lam = 1 + d[:, 0] / self.fr.L0
+            return torch.cat((self.A[:, :1] * yeoh_uniaxial(lam, self.C)[:, None], f[:, 1:]), dim=1)
+        with torch.enable_grad():
+            dd = d if d.requires_grad else d.detach().requires_grad_(True)
+            corr, = torch.autograd.grad(self._fibre_energy(dd, False) - self._fibre_energy(dd, True), dd,
+                                        create_graph=True)
+        return f + corr
 
     def _branches(self, f):
         x = torch.as_tensor(max(self.step_dt, 1e-300), dtype=f.dtype) / self.tau
@@ -234,8 +272,11 @@ class ViscoHyperLaw:
         self.f_prev = f
 
     def stored_long_term(self, d):
-        """Long-term elastic energy: Yeoh axial A L0 W(lambda) + quadratic linear parts (diagnostics)."""
+        """Long-term elastic energy (diagnostics). Fibre mode: linear Timoshenko energy + (U_fibre - U_quad)."""
         from material import yeoh_energy
         f = self.fr.elastic_law(d, self.A, self.I, self.mat['E'], self.mat['G'])
+        if self.fibre:
+            with torch.no_grad():
+                return 0.5 * (d * f).sum() + self._fibre_energy(d, False) - self._fibre_energy(d, True)
         lam = 1 + d[:, 0] / self.fr.L0
         return (self.A[:, 0] * self.fr.L0 * yeoh_energy(lam, self.C)).sum() + 0.5 * (d[:, 1:] * f[:, 1:]).sum()

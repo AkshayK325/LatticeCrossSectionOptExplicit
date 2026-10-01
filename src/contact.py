@@ -431,3 +431,65 @@ class LineContact:
             nodes = torch.unique(torch.cat((self.fr.n1[eln], self.fr.n2[eln])))
             vrel = 2 * v[nodes].norm(dim=1).max().item()        # bound on relative speed of the two surfaces
         return w, frac * scale / max(vrel, 1e-12)
+
+
+def coulomb(Fn, vt, mu, m_eff, dt, v_eps0=1.0):
+    """Smooth regularised Coulomb friction force (n,3) for normal forces Fn (n,) and tangential slip
+    velocities vt (n,3):  F_t = -mu Fn vt / sqrt(|vt|^2 + v_eps^2).
+    v_eps = max(v_eps0, 2 mu Fn dt / m_eff): the equivalent viscous coefficient mu Fn / v_eps never exceeds
+    m_eff / (2 dt), so near stick the explicit step stays stable (the classic explicit friction limit, here in
+    a smooth, differentiable form); under real slip (|vt| >> v_eps) it is plain Coulomb mu Fn."""
+    v_eps = torch.maximum(torch.as_tensor(v_eps0, dtype=Fn.dtype), 2 * mu * Fn * dt / m_eff)
+    return -(mu * Fn / torch.sqrt((vt * vt).sum(1) + v_eps * v_eps))[:, None] * vt
+
+
+def _line_friction(lc, x, v, mu, m, dt):
+    """Friction on LineContact points. Returns nodal forces (N,3) and dissipated power (>= 0)."""
+    pr = lc.active
+    N = x.shape[0]
+    f = torch.zeros_like(x)
+    if pr is None or len(pr) == 0:
+        return f, 0.0
+    a = torch.cat((pr[:, 0], pr[:, 1]))
+    b = torch.cat((pr[:, 1], pr[:, 0]))
+    n1, n2 = lc.fr.n1, lc.fr.n2
+    xi = lc.xi[None, :]
+    p = x[n1[a]][:, None, :] + xi[..., None] * (x[n2[a]] - x[n1[a]])[:, None, :]
+    q0, dq = x[n1[b]], x[n2[b]] - x[n1[b]]
+    with torch.no_grad():
+        t = (((p - q0[:, None, :]) * dq[:, None, :]).sum(-1) / (dq * dq).sum(-1)[:, None]).clamp(0, 1)
+    Q = q0[:, None, :] + t[..., None] * dq[:, None, :]
+    dist = torch.sqrt(((p - Q) ** 2).sum(-1) + 1e-30)
+    gap = dist - lc.r[a][:, None] - lc.r[b][:, None]
+    # keep only the closest segment of each other beam per point (same rule as the normal contact)
+    pid = a[:, None] * lc.nq + torch.arange(lc.nq)[None, :]
+    key = pid * lc.nb + lc.beam[b][:, None]
+    uk, inv = torch.unique(key.flatten(), return_inverse=True)
+    gmin = torch.full((len(uk),), torch.inf, dtype=x.dtype).scatter_reduce(0, inv, gap.flatten().detach(), 'amin')
+    win = gap.flatten().detach() <= gmin[inv]
+    # exactly one winner per (point, beam): a point projecting onto a node shared by two segments ties
+    idx = torch.arange(len(inv))
+    big = torch.full((len(uk),), len(inv), dtype=torch.long)
+    first = big.scatter_reduce(0, inv[win], idx[win], 'amin')
+    win = (idx == first[inv]) & ~torch.isin(key.flatten(), lc.excluded)
+    sig = torch.sigmoid(-gap / lc.eps)
+    dlt = lc.eps * F.softplus(-gap / lc.eps)
+    Fn = (0.5 * lc.wL[a][:, None] * lc.k_line * dlt * sig).flatten()          # normal force of the point
+    keep = win & (Fn > 1e-12)
+    if not keep.any():
+        return f, 0.0
+    nrm = ((p - Q) / dist[..., None]).reshape(-1, 3)
+    vp = (v[n1[a]][:, None, :] + xi[..., None] * (v[n2[a]] - v[n1[a]])[:, None, :]).reshape(-1, 3)
+    vq = (v[n1[b]][:, None, :] + t[..., None] * (v[n2[b]] - v[n1[b]])[:, None, :]).reshape(-1, 3)
+    vr = vp - vq
+    vt = vr - (vr * nrm).sum(1, keepdim=True) * nrm
+    ia, ib = a[:, None].expand(-1, lc.nq).reshape(-1), b[:, None].expand(-1, lc.nq).reshape(-1)
+    meff = torch.minimum(torch.minimum(m[n1[ia]], m[n2[ia]]), torch.minimum(m[n1[ib]], m[n2[ib]]))
+    Ft = coulomb(Fn[keep], vt[keep], mu, meff[keep], dt)
+    xa = xi.expand(len(a), -1).reshape(-1)[keep][:, None]
+    tb = t.reshape(-1)[keep][:, None]
+    ia, ib = ia[keep], ib[keep]
+    f = f.index_add(0, n1[ia], (1 - xa) * Ft).index_add(0, n2[ia], xa * Ft)
+    f = f.index_add(0, n1[ib], -(1 - tb) * Ft).index_add(0, n2[ib], -tb * Ft)
+    P = -(Ft * vt[keep]).sum().item()
+    return f, P

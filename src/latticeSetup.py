@@ -7,6 +7,7 @@ import math
 
 import numpy as np
 import torch
+import torch.nn.functional as F_
 
 from mesher import MeshFrame
 
@@ -83,7 +84,7 @@ def circle_sections(r, nu=None):
 # impactor and top plate (scalar gap law from contact.py).
 
 def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
-             start='gap', lattice_contact=True, contact_model='line'):
+             start='gap', lattice_contact=True, contact_model='line', fibre=True, mu=0.5):
     """law: a gap law, or a dict of contact.calibrate() kwargs (lets 'crit_damped' get the reduced mass).
     r_elem (ne,) radii [mm]. plate_mass [t] (default 2 mm aluminium 38x38: 7.8 g). gap0 [mm] initial
     impactor-plate gap.
@@ -98,7 +99,9 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
                        construction, but the impactor can never separate on rebound.
     lattice_contact: beam-to-beam contact and node-to-plate Hertz contact of every non-bonded node with both
                        plates. contact_model 'line' (default): contact.LineContact, line-contact density
-                       integrated along the beams; 'capsule': contact.SelfContact (one Hertz point per beam pair)."""
+                       integrated along the beams; 'capsule': contact.SelfContact (one Hertz point per beam pair).
+    mu:                Coulomb friction coefficient for beam-beam and beam-plate contact (line model; 0 = off).
+    fibre:             large-strain (fibre-integrated Yeoh) bending and torsion in the section law."""
     from explicitFE import Frame, lumped_mass, adaptive_dt
     from contact import law_tangent, contact_dt_cap, potential_force
     Xr, connr = lat['Xr'], lat['connr']
@@ -111,7 +114,7 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     A, I = circle_sections(r_elem, nu=mat['nu'])
     if 'yeoh' in mat:                                            # visco-hyperelastic (EPU 45)
         from explicitFE import ViscoHyperLaw
-        beam_law = ViscoHyperLaw(fr, A, I, mat)
+        beam_law = ViscoHyperLaw(fr, A, I, mat, fibre=fibre)   # fibre: large-strain bending + torsion
     else:
         E, G = mat['E'], mat['G']
         beam_law = lambda d: fr.elastic_law(d, A, I, E, G)
@@ -164,6 +167,32 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
             Phi = Phi_s + hertz_potential(gb, kp[bc], eps_c).sum() + hertz_potential(gt, kp[tc], eps_c).sum()
             return Phi, (g_s, gb, gt)
 
+    dt_now = {'h': 1e-6}
+    last = {}
+
+    def friction(u, v):
+        """Coulomb friction (mu) at beam-beam line-contact points and node-plate contacts: (forces, power>=0)."""
+        f = torch.zeros(fr.N, 3, dtype=u.dtype)
+        if phi_lat is None or mu == 0 or contact_model != 'line':
+            return f, 0.0
+        from contact import _line_friction, coulomb
+        x = fr.X + u
+        f, P = _line_friction(sc, x, v, mu, m, dt_now['h'])
+        for nodes, gp, vt in ((bc, x[bc, 2] - zb - rn[bc], v[bc].clone()),
+                              (tc, x[t0, 2] - x[tc, 2] - rn[tc], v[tc] - v[t0])):
+            dl = eps_c * F_.softplus(-gp / eps_c)
+            Fn = kp[nodes] * dl**1.5 * torch.sigmoid(-gp / eps_c)
+            on = Fn > 1e-12
+            if not on.any():
+                continue
+            vt[:, 2] = 0.0                                       # in-plane slip on the plate
+            Ft = coulomb(Fn[on], vt[on], mu, m[nodes[on]], dt_now['h'])
+            f = f.index_add(0, nodes[on], Ft)
+            if nodes is tc:
+                f[t0] = f[t0] - Ft.sum(0)                        # reaction on the (tied) top plate
+            P += -(Ft * vt[on]).sum().item()
+        return f, P
+
     def contact(u, v):
         g, gd = gap(u, v)
         Fc = law(g, gd)
@@ -171,7 +200,10 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         f[imp, 2] = Fc
         f[t0, 2] = -Fc                                           # tie spreads it over the plate
         if phi_lat is not None:
-            f = f + potential_force(phi_lat, fr.X + u)[0]
+            fp, Phi_l, ex = potential_force(phi_lat, fr.X + u)
+            ff, Pf = friction(u, v)
+            f = f + fp + ff
+            last.update(Phi_lat=Phi_l.item(), ex=ex, Pf=Pf)     # reused by run_drop's energy bookkeeping
         return f
 
     def contact_dt(u, v):
@@ -198,7 +230,11 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         return w_eff, cap
 
     # beam tangent by power iteration (every 20 steps); contact stiffness by a per-step row-sum bound
-    dt_fn = adaptive_dt(fr, beam_law, m, j, courant=courant, contact_fn=contact_dt)
+    dt_base = adaptive_dt(fr, beam_law, m, j, courant=courant, contact_fn=contact_dt)
+
+    def dt_fn(n, u, R, v=None):
+        dt_now['h'] = dt_base(n, u, R, v)                       # friction regularisation needs the step size
+        return dt_now['h']
     v_init = torch.zeros(fr.N, 3, dtype=torch.float64)
     v_init[imp, 2] = -v0
     if start in ('co_moving', 'merged'):
@@ -208,7 +244,8 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         tie, contact = torch.cat((top_t, torch.tensor([imp]))), None
     return dict(fr=fr, A=A, I=I, beam_law=beam_law, law=law, m=m, j=j, M=M, imp=imp, top=top_t, bot=bot,
                 fix_u=fix_u, fix_r=fix_r, contact=contact, tie=tie, gap=gap, dt_fn=dt_fn, v_init=v_init, gap0=gap0,
-                v0=v0, plate_mass=plate_mass, phi_lat=phi_lat, self_contact=sc)
+                v0=v0, plate_mass=plate_mass, phi_lat=phi_lat, self_contact=sc, friction=friction, mu=mu,
+                last=last)
 
 
 def run_drop(rig, T=8e-3, record=True):
@@ -236,24 +273,27 @@ def run_drop(rig, T=8e-3, record=True):
         bl = rig['beam_law']
         U = bl.stored_long_term(d).item() if hasattr(bl, 'stored_long_term') else strain_energy(d, f_loc).item()
         Phi = law_potential(law, g.item(), rig['gap0'])
+        Pf = rig['last'].get('Pf', 0.0)                         # from the integrator's own contact call
+        if W.get('pf') is not None:
+            W['Wf'] = W.get('Wf', 0.0) + 0.5 * (Pf + W['pf'][0]) * (t - W['pf'][1])
+        W['pf'] = (Pf, t)
         Phi_lat, gs_min, gp_min = 0.0, np.inf, np.inf
-        if rig['phi_lat'] is not None:
-            with torch.no_grad():
-                P_, (gs, gb, gt) = rig['phi_lat'](fr.X + u)
-            Phi_lat = P_.item()
+        if rig['phi_lat'] is not None and 'ex' in rig['last']:
+            gs, gb, gt = rig['last']['ex']
+            Phi_lat = rig['last']['Phi_lat']
             gs_min = gs.min().item() if len(gs) else np.inf
             gp_min = min(gb.min().item(), gt.min().item())
         return {'F_imp': Fc, 'a_imp': Fc / rig['M'], 'F_bottom': fu[bot, 2].sum().item(), 'gap': g.item(),
                 'z_imp': u[imp, 2].item(), 'v_imp': v[imp, 2].item(), 'z_plate': u[rig['top'][0], 2].item(),
                 'KE': ke, 'U': U, 'W_int': W['Wint'], 'Phi': Phi, 'Wd': W['Wd'], 'Phi_lat': Phi_lat,
-                'g_self_min': gs_min, 'g_plate_min': gp_min,
+                'g_self_min': gs_min, 'g_plate_min': gp_min, 'W_fric': W.get('Wf', 0.0),
                 'rot_max': d[:, 1:].abs().max().item()}
 
     with torch.no_grad():
         h = simulate(fr, rig['beam_law'], rig['m'], rig['j'], rig['dt_fn'], None, t_end=T, v0=rig['v_init'],
                      fix_u=rig['fix_u'], fix_r=rig['fix_r'], contact=rig['contact'], tie=rig['tie'], callback=cb)
     h = {k: (np.array(v) if isinstance(v, list) else v) for k, v in h.items()}
-    h['E_tot'] = h['KE'] + h['W_int'] + h['Phi'] + h['Wd'] + h['Phi_lat']
+    h['E_tot'] = h['KE'] + h['W_int'] + h['Phi'] + h['Wd'] + h['Phi_lat'] + h['W_fric']
     h['E_diss_material'] = h['W_int'] - h['U']                  # viscous loss (+ small branch storage)
     return h
 

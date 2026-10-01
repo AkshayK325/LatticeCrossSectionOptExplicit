@@ -77,3 +77,56 @@ def test_harmonic_loss_matches_loss_modulus():
         d_prev, N_prev = d, N
     Epp = (MAT['E0'] - MAT['E']) * w * tau / (1 + (w * tau) ** 2)
     assert W == pytest.approx(math.pi * Epp * eps0**2 * A * fr.L0[0].item(), rel=2e-2)
+
+
+# ---------------------------------------------------------------- large-strain bending / torsion (fibre model)
+def direct_section(fun, r, n=801):
+    """Integrate fun(y, z) over a solid circle of radius r on a fine Cartesian grid (independent check)."""
+    t = np.linspace(-r, r, n)
+    Y, Z = np.meshgrid(t, t, indexing='ij')
+    inside = Y**2 + Z**2 <= r * r
+    dA = (t[1] - t[0]) ** 2
+    return (fun(Y, Z) * inside).sum() * dA
+
+
+def test_fibre_small_strain_equals_linear_timoshenko():
+    fr, law, A = bar()
+    g = torch.Generator().manual_seed(0)
+    d = 1e-7 * torch.randn(1, 6, generator=g)
+    f_lin = fr.elastic_law(d, law.A, law.I, MAT['E'], MAT['G'])
+    assert torch.allclose(law.f_inf(d), f_lin, rtol=1e-4, atol=1e-12)
+
+
+@pytest.mark.parametrize('kappa', [0.05, 0.2, 0.4])
+def test_fibre_pure_bending_vs_direct_integration(kappa):
+    """kappa r = 0.04..0.32 surface strain. Antisymmetric end rotations = constant curvature (no shear)."""
+    fr, law, A = bar(r=1.0)
+    L = fr.L0[0].item()
+    d = torch.zeros(1, 6)
+    d[0, 3], d[0, 5] = -kappa * L / 2, kappa * L / 2                # rz1, rz2 -> kappa_z
+    f = law.f_inf(d)[0]
+    C = MAT['yeoh']
+    P = lambda lam: yeoh_uniaxial(torch.as_tensor(lam), C).numpy()
+    M = direct_section(lambda y, z: P(1 - y * kappa) * (-y), 1.0)
+    N = direct_section(lambda y, z: P(1 - y * kappa), 1.0)
+    assert f[5].item() == pytest.approx(M, rel=1e-3)
+    assert f[3].item() == pytest.approx(-M, rel=1e-3)
+    # tension/compression asymmetry of Yeoh: pure bending carries a net axial force (fibre model only)
+    assert abs(N) > 0 and law.fibre
+
+
+@pytest.mark.parametrize('twist', [0.05, 0.2, 0.4])
+def test_fibre_torsion_vs_direct_integration(twist):
+    fr, law, A = bar(r=1.0)
+    L = fr.L0[0].item()
+    d = torch.zeros(1, 6)
+    d[0, 1] = twist * L
+    T = law.f_inf(d)[0, 1].item()
+    C10, C20, C30 = MAT['yeoh']
+    def tau(y, z):
+        rho = np.sqrt(y * y + z * z)
+        gam = twist * rho
+        return 2 * gam * (C10 + 2 * C20 * gam**2 + 3 * C30 * gam**4) * rho
+    T_direct = direct_section(tau, 1.0)
+    # linear part uses G = E/(2(1+nu)) with nu = 0.49 vs Yeoh's 2 C10 (nu = 0.5): 0.7% at small strain
+    assert T == pytest.approx(T_direct, rel=1e-2)
