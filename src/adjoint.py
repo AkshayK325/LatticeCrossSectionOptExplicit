@@ -29,7 +29,8 @@ class DropStepper:
         self.J_fn = J_fn
         self.law = rig['beam_law']
         self.fr = rig['fr']
-        self.m3, self.j3 = rig['m'][:, None], rig['j'][:, None]
+        # masses are indexed at use time: views cached here would be detached if the stepper were built under
+        # no_grad (e.g. inside autograd.Function.forward), silently dropping dm/dtheta from the gradient
         self.keep_u, self.keep_r, self.tie = rig['fix_u'], rig['fix_r'], rig['tie']
         self.sc = rig['self_contact']
 
@@ -48,11 +49,12 @@ class DropStepper:
         fu, fth, d, f_loc = self.fr.internal_force(u, R, law)
         q_new, f_inf = law.last_q, law.last_f
         fc = self.rig['contact'](u, v)
-        a = (fc - fu) / self.m3
+        m3, j3 = self.rig['m'][:, None], self.rig['j'][:, None]
+        a = (fc - fu) / m3
         tie = self.tie
         if tie is not None:
-            a = a.index_copy(0, tie, ((self.m3[tie] * a[tie]).sum(0) / self.m3[tie].sum()).expand(len(tie), 3))
-        al = -fth / self.j3
+            a = a.index_copy(0, tie, ((m3[tie] * a[tie]).sum(0) / m3[tie].sum()).expand(len(tie), 3))
+        al = -fth / j3
         Fb = fu[self.rig['bot'], 2].sum()
         Fi = fc[self.rig['imp'], 2]                              # impactor-plate contact force (resisting > 0)
         return a.masked_fill(self.keep_u, 0.0), al.masked_fill(self.keep_r, 0.0), q_new, f_inf, Fb, Fi

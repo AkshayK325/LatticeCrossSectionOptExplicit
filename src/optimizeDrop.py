@@ -21,8 +21,9 @@ def value_and_grad(x, spec):
     kw.pop('law', None)
     with torch.enable_grad():                 # autograd.Function.forward runs with grad disabled
         rig = drop_rig(lat, radii(xx, sym, lat), rig0['law'], mat=mat, freeze=rig0, **kw)
-    J, (g,) = checkpointed_adjoint(DropStepper(rig, sched, spec['terms'](rig)), [xx], K=spec.get('K'),
-                                   outer=spec['outer'](rig))
+    with torch.enable_grad():
+        stepper = DropStepper(rig, sched, spec['terms'](rig))
+    J, (g,) = checkpointed_adjoint(stepper, [xx], K=spec.get('K'), outer=spec['outer'](rig))
     return J, g
 
 
