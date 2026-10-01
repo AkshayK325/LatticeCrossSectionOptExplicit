@@ -98,13 +98,18 @@ class Frame:
         `law(d) -> f_loc (ne,6)`. Rotational variation is a spatial spin dtheta: R -> (I + skew(dtheta)) R.
         Differentiable w.r.t. u, R and any tensors inside `law` (create_graph when grad is needed).
         """
+        outer = torch.is_grad_enabled()          # caller's mode: build graphs only if the caller differentiates
+        if hasattr(law, 'commit'):
+            law._outer_grad = outer              # history-dependent laws must not chain graphs in no-grad runs
         du = torch.zeros_like(u, requires_grad=True)
         dth = torch.zeros(self.N, 3, dtype=u.dtype, device=u.device, requires_grad=True)
         with torch.enable_grad():
             d = self.local_deformations(self.X + u + du, R + skew(dth) @ R)
             f_loc = law(d)
-            need_graph = torch.is_grad_enabled() and (u.requires_grad or R.requires_grad or f_loc.requires_grad)
+            need_graph = outer and (u.requires_grad or R.requires_grad or f_loc.requires_grad)
             fu, fth = torch.autograd.grad(d, (du, dth), grad_outputs=f_loc, create_graph=need_graph)
+        if not outer:
+            d, f_loc = d.detach(), f_loc.detach()
         return fu, fth, d, f_loc
 
 
@@ -252,11 +257,12 @@ class ViscoHyperLaw:
         if not self.fibre:
             lam = 1 + d[:, 0] / self.fr.L0
             return torch.cat((self.A[:, :1] * yeoh_uniaxial(lam, self.C)[:, None], f[:, 1:]), dim=1)
+        outer = getattr(self, '_outer_grad', True)
         with torch.enable_grad():
             dd = d if d.requires_grad else d.detach().requires_grad_(True)
             corr, = torch.autograd.grad(self._fibre_energy(dd, False) - self._fibre_energy(dd, True), dd,
-                                        create_graph=True)
-        return f + corr
+                                        create_graph=outer)
+        return f + corr if outer else (f + corr).detach()
 
     def _branches(self, f):
         x = torch.as_tensor(max(self.step_dt, 1e-300), dtype=f.dtype) / self.tau
@@ -267,10 +273,13 @@ class ViscoHyperLaw:
     def __call__(self, d):
         f = self.f_inf(d)
         br = self._branches(f)
+        if not getattr(self, '_outer_grad', True):
+            br, f = br.detach(), f.detach()
         self.last_q, self.last_f = br, f                  # what commit(d) would store (used by adjoint.DropStepper)
         return f + br.sum(0)
 
     def commit(self, d):
+        self._outer_grad = torch.is_grad_enabled()
         f = self.f_inf(d)
         self.q = self._branches(f)
         self.f_prev = f

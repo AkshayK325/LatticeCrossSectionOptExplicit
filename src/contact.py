@@ -288,12 +288,15 @@ def plate_potential(z_gap, k, eps):
 def potential_force(phi_fn, x):
     """Nodal forces -dPhi/dx for a scalar potential phi_fn(x) -> (Phi, extras). Keeps the outer autograd graph
     (create_graph) when x needs grad, like Frame.internal_force."""
+    outer = torch.is_grad_enabled()        # caller's mode (Phi may depend on radii even if x does not)
     dx = torch.zeros_like(x, requires_grad=True)
     with torch.enable_grad():
         Phi, extra = phi_fn(x + dx)
-        need = torch.is_grad_enabled()     # Phi may depend on design tensors (radii) even if x does not
-        g, = torch.autograd.grad(Phi, dx, create_graph=need, allow_unused=True)
+        g, = torch.autograd.grad(Phi, dx, create_graph=outer, allow_unused=True)
     f = torch.zeros_like(x) if g is None else -g
+    if not outer:                          # no graphs survive a no-grad call
+        Phi = Phi.detach()
+        extra = tuple(e.detach() if torch.is_tensor(e) else e for e in extra) if isinstance(extra, tuple) else extra
     return f, Phi, extra
 
 
