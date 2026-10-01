@@ -173,7 +173,8 @@ if __name__ == '__main__':
     ax[0].legend()
     ax[1].plot(-h['z_plate'], h['F_imp'])
     ax[1].set(xlabel='top-plate stroke [mm]', ylabel='impactor force [N]', title='force–stroke')
-    for k, lab in (('KE', 'kinetic'), ('U', 'strain'), ('Phi', 'contact potential'), ('Wd', 'contact damping')):
+    for k, lab in (('KE', 'kinetic'), ('U', 'stored (long-term strain)'), ('E_diss_material', 'material (Prony) dissipation'),
+                   ('Phi', 'contact potential'), ('Wd', 'contact damping')):
         ax[2].plot(t, h[k] / 1e3, label=lab)
     ax[2].plot(t, h['E_tot'] / 1e3, 'k--', label='total')
     ax[2].set(xlabel='t [ms]', ylabel='energy [J]', title='energy budget')
