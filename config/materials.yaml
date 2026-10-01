@@ -1,0 +1,114 @@
+# Material properties for frame FEM modal analysis
+# Unit system: mm / MPa / tonne
+#   E   in MPa       (1 MPa = 1 N/mm²)
+#   rho in t/mm³     (e.g. water = 1e-9, steel = 7.85e-9)
+#   nu  dimensionless
+#   G   not stored — computed as E / (2*(1+nu))
+#
+# All TPU values are POST-PRINT experimental measurements
+# at 100% infill, 0°/90° raster, room temperature (23°C).
+#
+# CORRECTED: an earlier version of this file used values that turned out to
+# be TENSILE STRENGTH (stress at break) mislabeled/miscopied as Young's
+# Modulus for TPU_85A/90A/95A -- these are very different quantities for a
+# soft elastomer (strength is measured tens of MPa higher than the actual
+# small-strain stiffness). Re-verified directly against Bambu Lab's own
+# datasheets (85A/90A/95A -- same ISO 527/GB-T 1040 methodology, 100%
+# infill, X-Y and Z print directions both reported) and BCN3D's TPU 98A
+# datasheet (Bambu doesn't sell a 98A grade), which correctly distinguish
+# "Young's Modulus" from "Tensile Strength" as separate rows. E below uses
+# each sheet's X-Y (in-plane) value; the Z (build direction) value is noted
+# in each material's description for reference -- it is consistently lower
+# (roughly 75-85% of X-Y), reflecting layer-adhesion anisotropy.
+#
+# None of these sheets report Poisson's ratio -- nu values are unsourced
+# engineering estimates (typical for soft, near-incompressible elastomers),
+# not measured quantities.
+
+materials:
+
+  paper_default:
+    description: "Soft isotropic material from original paper (E=17 MPa)"
+    process: reference
+    E: 17.0
+    nu: 0.30
+    rho: 1.20e-9
+    sources:
+      - "Internal reference value from the original paper this project implements — not independently web-verifiable"
+
+  TPU_85A:
+    description: >
+      TPU Shore 85A — FDM printed, 100% infill.
+      Softest grade; highly elastic, best vibration isolation.
+      E = Young's Modulus (X-Y) = 6.8 MPa (Z-direction: 5.2 MPa).
+      Density: 1.18 g/cm³.
+      Source: Bambu Lab TPU 85A TDS (ISO 527, GB/T 1040, 100% infill).
+      CORRECTED from a previous version of this file, which used 12.0 MPa --
+      that is this same datasheet's Tensile STRENGTH (X-Y), not modulus.
+    process: FDM
+    E: 6.8
+    nu: 0.45
+    rho: 1.18e-9
+    sources:
+      - https://c.cdnmp.net/828809388/content/Info/BambuLab/Bambu_TPU_85A_Technical_Data_Sheet_a7233668-497b-487f-af8a-3adb49fafaa1.pdf   # Young's Modulus (X-Y)=6.8MPa, (Z)=5.2MPa, density=1.18 g/cm3 -- verified directly (pdftotext)
+
+  TPU_90A:
+    description: >
+      TPU Shore 90A — FDM printed, 100% infill.
+      Mid-range flexibility; good balance of damping and load capacity.
+      E = Young's Modulus (X-Y) = 5.3 MPa (Z-direction: 4.4 MPa).
+      Density: 1.24 g/cm³.
+      Source: Bambu Lab TPU 90A TDS (ISO 527, GB/T 1040, 100% infill).
+      CORRECTED from a previous version of this file, which used 55.0 MPa,
+      attributed to a Matériaux & Techniques (2026) simulation study -- that
+      paper's own reported "Young's modulus" (measured 55.38 MPa) is real and
+      properly labeled, but for a different, unspecified TPU 90A formulation/
+      test method (Abaqus UMAT calibration) that disagrees with Bambu's own
+      directly-measured ISO 527 value by ~10x. Bambu's own consistent,
+      correctly-labeled, same-methodology dataset was used instead, to keep
+      this material family internally consistent (see 85A/95A_HF below).
+    process: FDM
+    E: 5.3
+    nu: 0.45
+    rho: 1.24e-9
+    sources:
+      - https://www.createeducation.com/wp-content/uploads/2025/08/Bambu_TPU_90A_Technical_Data_Sheet_582bf8f6-1f0a-474c-aeda-9e72af3689dc.pdf   # Young's Modulus (X-Y)=5.3MPa, (Z)=4.4MPa, density=1.24 g/cm3 -- verified directly (pdftotext)
+      - https://www.mattech-journal.org/articles/mattech/abs/2026/03/mt20250065/mt20250065.html   # NOT used for E (see note above) -- kept for reference only; reports ~55 MPa for a different TPU 90A product/method
+
+  TPU_95A_HF:
+    description: >
+      TPU Shore 95A HF (High Flow) — FDM printed, 100% infill.
+      Semi-rigid; load-bearing mounts with moderate damping. HF variant is
+      optimized for ~3x faster printing than regular TPU 95A, same Shore
+      hardness; used here because regular 95A was not available in this
+      research work, only 95A HF.
+      E = Young's Modulus (X-Y) = 9.8 MPa (Z-direction: 7.4 MPa).
+      Density: 1.22 g/cm³.
+      Source: Bambu Lab TPU 95A HF TDS (ISO 527, GB/T 1040, 100% infill).
+    process: FDM
+    E: 9.8
+    nu: 0.44
+    rho: 1.22e-9
+    sources:
+      - https://store.bblcdn.eu/s8/default/16df21baf482453999b3dbb61cc110e7/Bambu_TPU_95A_HF_Technical_Data_Sheet.pdf   # Young's Modulus (X-Y)=9.8MPa, (Z)=7.4MPa, density=1.22 g/cm3 -- verified directly (pdftotext)
+
+  TPU_98A:
+    description: >
+      TPU Shore 98A — FDM printed, 100% infill.
+      Stiffest TPU grade; structural parts with mild damping.
+      E = Tensile (E) Modulus = 150 MPa (ISO 527; single value, no X-Y/Z
+      split reported). Density: 1.16 g/cm³ (specific gravity, ISO 1183).
+      Source: BCN3D TPU 98A TDS -- Bambu Lab does not sell a 98A grade, so
+      this material uses a different (but correctly labeled, ISO 527)
+      vendor. Minor correction from a previous version of this file, which
+      used E=160 MPa (close, same order) and rho=1.23 g/cm³ attributed to a
+      nonexistent "Filabase" brand -- 1.23 g/cm3 is actually an exact match
+      for Fillamentum's Flexfill TPU 98A, a different product, which reports
+      tensile stress-at-elongation values but never a true Young's modulus,
+      so it was not used here for E.
+    process: FDM
+    E: 150.0
+    nu: 0.42
+    rho: 1.16e-9
+    sources:
+      - https://bcn3d.com/wp-content/uploads/2023/01/BCN3D-Filaments-Technical-Data-Sheet-TPU-98A.pdf   # Tensile (E) modulus (ISO 527) = 150 MPa, specific gravity = 1.16 g/cc -- verified directly (pdftotext)
