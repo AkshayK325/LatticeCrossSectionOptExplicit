@@ -76,13 +76,18 @@ def test_drop_bottom_bonded_and_no_fly_off(drop):
     assert h['v_imp'][-1] > 0                                     # impactor separates and goes up
 
 
-@pytest.mark.xfail(strict=True, reason='r = 0.8 cannot stop the drop: beams pass through each other until beam-beam '
-                                      'contact (plan Day 4); remove this mark when that lands')
 def test_drop_no_crush_through(drop):
     """Top plate must stop above the compacted lattice (~2 layers of beams, 2*d), not pass the bottom plate."""
     rig, h = drop
     H = rig['fr'].X[rig['top'][0], 2].item()
     assert -h['z_plate'].min() < H - 2 * (2 * R_DEFAULT), (-h['z_plate'].min(), H)
+
+
+def test_drop_contact_deformation_bounded(drop):
+    """Beam-beam and beam-plate approach (Hertz indentation) stays a small fraction of the radius."""
+    _, h = drop
+    assert np.min(h['g_self_min']) > -0.15 * R_DEFAULT, np.min(h['g_self_min'])
+    assert np.min(h['g_plate_min']) > -0.15 * R_DEFAULT, np.min(h['g_plate_min'])
 
 
 def test_drop_energy_balance(drop):

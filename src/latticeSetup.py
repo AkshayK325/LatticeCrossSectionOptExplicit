@@ -80,7 +80,7 @@ def circle_sections(r):
 # impactor and top plate (scalar gap law from contact.py).
 
 def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
-             start='gap'):
+             start='gap', lattice_contact=True):
     """law: a gap law, or a dict of contact.calibrate() kwargs (lets 'crit_damped' get the reduced mass).
     r_elem (ne,) radii [mm]. plate_mass [t] (default 2 mm aluminium 38x38: 7.8 g). gap0 [mm] initial
     impactor-plate gap.
@@ -92,9 +92,11 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
                        builds continuously as the lattice decelerates the plate, and releases continuously
                        on rebound: no collision event, no jump.
     start='merged':    impactor rigidly bonded to the plate (one rigid body, no contact): zero jump by
-                       construction, but the impactor can never separate on rebound."""
+                       construction, but the impactor can never separate on rebound.
+    lattice_contact: beam-to-beam capsule contact (contact.SelfContact, grouped per original beam) and
+                       node-to-plate Hertz contact of every non-bonded node with both plates."""
     from explicitFE import Frame, lumped_mass, adaptive_dt
-    from contact import law_tangent, contact_dt_cap
+    from contact import law_tangent, contact_dt_cap, potential_force
     Xr, connr = lat['Xr'], lat['connr']
     zt = Xr[:, 2].max()
     top = np.nonzero(np.isclose(Xr[:, 2], zt))[0]
@@ -132,12 +134,36 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     def gap(u, v):
         return gap0 + u[imp, 2] - u[t0, 2], v[imp, 2] - v[t0, 2]
 
+    # ---- lattice contact: beam-beam capsules + nodes against both plates (one potential)
+    phi_lat, sc = None, None
+    if lattice_contact:
+        from contact import SelfContact, node_radius, hertz_potential, hertz_tangent
+        sc = SelfContact(fr, r_elem, mat['E0'], mat['nu'], beam_of_elem=lat['beam_of_elem'])
+        rn = node_radius(fr, A)
+        kp = (4.0 / 3.0) * mat['E0'] / (1 - mat['nu']**2) * torch.sqrt(rn)   # beam on rigid flat (sphere R = r)
+        zb = float(Xr[:, 2].min())
+        lat_nodes = np.arange(len(Xr))
+        bc = torch.as_tensor(np.setdiff1d(lat_nodes, bot))
+        tc = torch.as_tensor(np.setdiff1d(lat_nodes, top))
+        bc = bc[(fr.X[bc, 2] - zb - rn[bc]) > 0]                # drop nodes already touching (none expected)
+        tc = tc[(zt - fr.X[tc, 2] - rn[tc]) > 0]
+        eps_c = sc.eps
+
+        def phi_lat(x):
+            Phi_s, g_s = sc.energy(x)
+            gb = x[bc, 2] - zb - rn[bc]
+            gt = x[t0, 2] - x[tc, 2] - rn[tc]                   # top-plate face = tied top-node plane
+            Phi = Phi_s + hertz_potential(gb, kp[bc], eps_c).sum() + hertz_potential(gt, kp[tc], eps_c).sum()
+            return Phi, (g_s, gb, gt)
+
     def contact(u, v):
         g, gd = gap(u, v)
         Fc = law(g, gd)
         f = torch.zeros(fr.N, 3, dtype=u.dtype)
         f[imp, 2] = Fc
         f[t0, 2] = -Fc                                           # tie spreads it over the plate
+        if phi_lat is not None:
+            f = f + potential_force(phi_lat, fr.X + u)[0]
         return f
 
     def contact_dt(u, v):
@@ -146,7 +172,22 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         w = np.sqrt(max(kg, 0.0) / mu)
         zeta = kv / (2 * np.sqrt(max(kg, 1e-30) * mu))
         w_eff = w / (np.sqrt(1 + zeta**2) - zeta) if w > 0 else 0.0  # damped central-difference limit
-        return w_eff, contact_dt_cap(law, g.item(), gd.item())
+        cap = contact_dt_cap(law, g.item(), gd.item())
+        if phi_lat is not None:
+            x = fr.X + u
+            scale = 2 * eps_c
+            w_s, cap_s = sc.dt_terms(x, v, m, scale)
+            with torch.no_grad():
+                gb = x[bc, 2] - zb - rn[bc]
+                gt = x[t0, 2] - x[tc, 2] - rn[tc]
+                w_p = max(torch.sqrt(hertz_tangent(gb, kp[bc], eps_c) / m[bc]).max().item(),
+                          torch.sqrt(hertz_tangent(gt, kp[tc], eps_c) / m[tc]).max().item())
+                vb = v[bc, 2].abs()[gb < 3 * scale]
+                vt = (v[t0, 2] - v[tc, 2]).abs()[gt < 3 * scale]
+                vmax = max(vb.max().item() if len(vb) else 0.0, vt.max().item() if len(vt) else 0.0)
+            cap = min(cap, cap_s, 0.1 * scale / vmax if vmax > 0 else np.inf)
+            w_eff = np.sqrt(w_eff**2 + w_s**2 + w_p**2)
+        return w_eff, cap
 
     dt_fn = adaptive_dt(fr, beam_law, m, j, courant=courant, contact_fn=contact_dt)
     v_init = torch.zeros(fr.N, 3, dtype=torch.float64)
@@ -158,7 +199,7 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         tie, contact = torch.cat((top_t, torch.tensor([imp]))), None
     return dict(fr=fr, A=A, I=I, beam_law=beam_law, law=law, m=m, j=j, M=M, imp=imp, top=top_t, bot=bot,
                 fix_u=fix_u, fix_r=fix_r, contact=contact, tie=tie, gap=gap, dt_fn=dt_fn, v_init=v_init, gap0=gap0,
-                v0=v0, plate_mass=plate_mass)
+                v0=v0, plate_mass=plate_mass, phi_lat=phi_lat, self_contact=sc)
 
 
 def run_drop(rig, T=8e-3, record=True):
@@ -186,16 +227,24 @@ def run_drop(rig, T=8e-3, record=True):
         bl = rig['beam_law']
         U = bl.stored_long_term(d).item() if hasattr(bl, 'stored_long_term') else strain_energy(d, f_loc).item()
         Phi = law_potential(law, g.item(), rig['gap0'])
+        Phi_lat, gs_min, gp_min = 0.0, np.inf, np.inf
+        if rig['phi_lat'] is not None:
+            with torch.no_grad():
+                P_, (gs, gb, gt) = rig['phi_lat'](fr.X + u)
+            Phi_lat = P_.item()
+            gs_min = gs.min().item() if len(gs) else np.inf
+            gp_min = min(gb.min().item(), gt.min().item())
         return {'F_imp': Fc, 'a_imp': Fc / rig['M'], 'F_bottom': fu[bot, 2].sum().item(), 'gap': g.item(),
                 'z_imp': u[imp, 2].item(), 'v_imp': v[imp, 2].item(), 'z_plate': u[rig['top'][0], 2].item(),
-                'KE': ke, 'U': U, 'W_int': W['Wint'], 'Phi': Phi, 'Wd': W['Wd'],
+                'KE': ke, 'U': U, 'W_int': W['Wint'], 'Phi': Phi, 'Wd': W['Wd'], 'Phi_lat': Phi_lat,
+                'g_self_min': gs_min, 'g_plate_min': gp_min,
                 'rot_max': d[:, 1:].abs().max().item()}
 
     with torch.no_grad():
         h = simulate(fr, rig['beam_law'], rig['m'], rig['j'], rig['dt_fn'], None, t_end=T, v0=rig['v_init'],
                      fix_u=rig['fix_u'], fix_r=rig['fix_r'], contact=rig['contact'], tie=rig['tie'], callback=cb)
     h = {k: (np.array(v) if isinstance(v, list) else v) for k, v in h.items()}
-    h['E_tot'] = h['KE'] + h['W_int'] + h['Phi'] + h['Wd']
+    h['E_tot'] = h['KE'] + h['W_int'] + h['Phi'] + h['Wd'] + h['Phi_lat']
     h['E_diss_material'] = h['W_int'] - h['U']                  # viscous loss (+ small branch storage)
     return h
 
