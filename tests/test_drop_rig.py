@@ -1,4 +1,4 @@
-"""exampleCase-3 lattice + symmetry, contact laws, and the bonded-bottom / top-plate drop rig (1 J).
+"""exampleCase-3 lattice + symmetry, contact laws, and the bonded-bottom / top-plate drop rig (ENERGY_J, 0.75 J).
 
 Run as a script for the contact-option comparison figure and the drop GIF (ResultsFig/explicit/drop_*).
 """
@@ -17,6 +17,7 @@ torch.set_default_dtype(torch.float64)
 MAT = project_material()   # EPU 45; elastic tests use its long-term E
 OUT = pathlib.Path(__file__).resolve().parents[1] / 'ResultsFig' / 'explicit'
 DEFAULT = {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2, 'zeta': 1.0}
+ENERGY_J = 0.75     # user choice 2026-10-01 (was 1 J)
 R_DEFAULT = 0.8      # user choice 2026-10-01: r = 0.8 (d = 1.6 mm); r = 1.6 (d = 3.2) too large for this system
 
 
@@ -64,7 +65,7 @@ def test_crit_damped_releases_exactly_on_separation():
 # ---------------------------------------------------------------- drop rig
 @pytest.fixture(scope='module')
 def drop(lat):
-    rig = drop_rig(lat, torch.full((lat['connr'].shape[0],), R_DEFAULT), DEFAULT, MAT, start='co_moving', gap0=0.1)
+    rig = drop_rig(lat, torch.full((lat['connr'].shape[0],), R_DEFAULT), DEFAULT, MAT, start='co_moving', gap0=0.1, energy_J=ENERGY_J)
     return rig, run_drop(rig, T=8e-3)
 
 
@@ -75,7 +76,7 @@ def test_drop_bottom_bonded_and_no_fly_off(drop):
     assert h['v_imp'][-1] > 0                                     # impactor separates and goes up
 
 
-@pytest.mark.xfail(strict=True, reason='r = 0.8 cannot stop 1 J: beams pass through each other until beam-beam '
+@pytest.mark.xfail(strict=True, reason='r = 0.8 cannot stop the drop: beams pass through each other until beam-beam '
                                       'contact (plan Day 4); remove this mark when that lands')
 def test_drop_no_crush_through(drop):
     """Top plate must stop above the compacted lattice (~2 layers of beams, 2*d), not pass the bottom plate."""
@@ -88,7 +89,7 @@ def test_drop_energy_balance(drop):
     _, h = drop
     E = h['E_tot']
     assert np.abs(E - E[0]).max() / E[0] < 1e-2
-    assert abs(E[0] - 1000.0) < 1e-6                              # 1 J in N*mm
+    assert abs(E[0] - ENERGY_J * 1e3) < 1e-6                      # J -> N*mm
 
 
 def test_drop_single_smooth_pulse(drop):
@@ -98,9 +99,9 @@ def test_drop_single_smooth_pulse(drop):
 
 
 def test_drop_epu45_absorbs_not_springs(drop):
-    """EPU 45 (tan d ~ 2 at ~1 kHz) must absorb most of the 1 J; a spring-like lattice would return it."""
+    """EPU 45 (tan d ~ 2 at ~1 kHz) must absorb most of the impact energy; a spring-like lattice would return it."""
     rig, h = drop
-    assert h['E_diss_material'][-1] > 0.5 * 1000.0, h['E_diss_material'][-1]
+    assert h['E_diss_material'][-1] > 0.5 * ENERGY_J * 1e3, h['E_diss_material'][-1]
     assert h['v_imp'][-1] < 0.5 * rig['v0'], h['v_imp'][-1]
 
 
@@ -109,7 +110,7 @@ def test_drop_force_has_no_jump_dt_convergence(lat):
     jumps = []
     for c in (0.7, 0.35):
         rig = drop_rig(lat, torch.full((lat['connr'].shape[0],), R_DEFAULT), DEFAULT, MAT, start='co_moving',
-                       gap0=0.1, courant=c)
+                       gap0=0.1, courant=c, energy_J=ENERGY_J)
         jumps.append(np.abs(np.diff(run_drop(rig, T=3e-3)['F_imp'])).max())
     assert jumps[1] / jumps[0] < 0.6, jumps
 
@@ -134,7 +135,8 @@ if __name__ == '__main__':
     fig, ax = plt.subplots(2, 3, figsize=(17, 8))
     rows = []
     for i, (start, spec, lab) in enumerate(variants):
-        rig = drop_rig(lat, r, {**base, **spec}, MAT, start=start, gap0=0.3 if start == 'gap' else 0.1)
+        rig = drop_rig(lat, r, {**base, **spec}, MAT, start=start, gap0=0.3 if start == 'gap' else 0.1,
+                       energy_J=ENERGY_J)
         h = run_drop(rig, T=8e-3)
         t = h['t'] * 1e3
         a = ax.flat[i]
@@ -172,8 +174,8 @@ if __name__ == '__main__':
 
     U = h['u'].clone()
     U[:, -1] = 0                                                   # impactor drawn as a plate, not a node
-    animate_frame(fr, U, numbered(OUT, 'drop_1J_6ms_r0.8.gif'), times=h['t'], elev=10, azim=-60, extra=plates,
-                  title='1 J, 6 m/s, r = 0.8 mm, bonded bottom', max_frames=70)
+    animate_frame(fr, U, numbered(OUT, f'drop_{ENERGY_J:g}J_6ms_r{R_DEFAULT:g}.gif'), times=h['t'], elev=10, azim=-60, extra=plates,
+                  title=f'{ENERGY_J:g} J, 6 m/s, r = {R_DEFAULT:g} mm, bonded bottom', max_frames=70)
     fig, ax = plt.subplots(1, 3, figsize=(16, 4))
     t = h['t'] * 1e3
     ax[0].plot(t, h['F_imp'], label='impactor–plate')
@@ -189,4 +191,4 @@ if __name__ == '__main__':
     ax[2].set(xlabel='t [ms]', ylabel='energy [J]', title='energy budget')
     ax[2].legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(numbered(OUT, 'drop_1J_6ms_r0.8_histories.png'), dpi=130)
+    fig.savefig(numbered(OUT, f'drop_{ENERGY_J:g}J_6ms_r{R_DEFAULT:g}_histories.png'), dpi=130)

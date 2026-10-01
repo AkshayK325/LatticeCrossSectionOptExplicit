@@ -79,7 +79,7 @@ def circle_sections(r):
 # separate rigid impactor (1 translational DOF) falling onto the top plate. Contact acts only between
 # impactor and top plate (scalar gap law from contact.py).
 
-def drop_rig(lat, r_elem, law, mat, energy_J=1.0, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
+def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
              start='gap'):
     """law: a gap law, or a dict of contact.calibrate() kwargs (lets 'crit_damped' get the reduced mass).
     r_elem (ne,) radii [mm]. plate_mass [t] (default 2 mm aluminium 38x38: 7.8 g). gap0 [mm] initial
