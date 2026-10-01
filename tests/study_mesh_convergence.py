@@ -20,7 +20,7 @@ OUT = pathlib.Path(__file__).resolve().parents[1] / 'ResultsFig' / 'explicit'
 MAT = project_material()
 SPEC = {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}
 
-cases = [(3.0, True), (1.5, True), (1.0, True), (0.75, True)]
+cases = [(1.5, True), (1.0, True), (0.75, True)]   # all physics: fibre bending, line contact, mu = 0.5
 if 'rotscale' in sys.argv:
     cases += [(0.75, False)]
 res, hist = [], {}
@@ -37,7 +37,7 @@ for es, rot in cases:
     h = run_drop(rig, T=8e-3)
     E = h['E_tot']
     jm = jump_metrics(h['F_imp'])
-    r = {'elemSize': es, 'rot_scale': rot, 'n_el': int(lat['connr'].shape[0]), 'steps': len(h['dt']),
+    r = {'W_fric': float(h['W_fric'][-1]), 'elemSize': es, 'rot_scale': rot, 'n_el': int(lat['connr'].shape[0]), 'steps': len(h['dt']),
          'dt_min': float(h['dt'].min()), 'stroke_max': float(-h['z_plate'].min()), 'F_imp_peak': float(jm['peak']),
          'F_bot_peak': float(np.abs(h['F_bottom']).max()), 'E_diss': float(h['E_diss_material'][-1]),
          'v_imp_end': float(h['v_imp'][-1] / 1e3), 'dE': float(np.abs(E - E[0]).max() / E[0]),
@@ -61,7 +61,7 @@ ax[1].set(xlabel='top-plate stroke [mm]', ylabel='impactor force [N]', title='fo
 ax[2].set(xlabel='t [ms]', ylabel='material dissipation [J]', title='dissipation')
 for a in ax:
     a.legend(fontsize=7)
-fig.suptitle('Mesh convergence: EPU 45, r = 0.8 mm, 0.75 J, 6 m/s')
+fig.suptitle('Mesh convergence (all physics): EPU 45, r = 0.8 mm, 0.75 J, 6 m/s, fibre bending, line contact, mu 0.5')
 fig.tight_layout()
 fig.savefig(numbered(OUT, 'mesh_convergence.png'), dpi=130)
 json.dump(res, open(numbered(OUT, 'mesh_convergence.json'), 'w'), indent=1)
