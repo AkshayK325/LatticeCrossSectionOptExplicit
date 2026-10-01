@@ -268,7 +268,8 @@ def optimizeMMA(objCall, x0, bounds, constraintCall, options,callback):
         # The main iteration loop
         for outer_iter in range(1,max_iter):
             
-            move = compute_move(outer_iter, max_iter*0.5, move_max=0.5, decay_rate=min_iter*1.0)
+            # move_max was hard-coded 0.5 (options['move_limit'] ignored); legacy runs pass 0.5, so unchanged
+            move = compute_move(outer_iter, max_iter*0.5, move_max=move_limit, decay_rate=min_iter*1.0)
             
             # if outer_iter < 6:
             #     updateConTol = np.max((fvalnew)) * 0.25

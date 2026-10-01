@@ -37,3 +37,16 @@ def test_gradient_independent_of_ambient_grad_mode():
     with torch.no_grad():
         _, g2 = value_and_grad(x, spec)
     assert torch.allclose(g1, g2, rtol=1e-12, atol=1e-16)
+
+
+def test_normalised_design_chain_rule():
+    """x in [0,1] with x_range: dJ/dx = (max_x - min_x) * dJ/dr (denormalisation inside the objective)."""
+    lat = example3(elemSize=3.0)
+    target = plateau_target(60.0, 0.5, 8.0)
+    base = dict(lat=lat, symType='Midplane', mat=project_material(), T=3e-4,
+                rig_kw=dict(law={'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}, start='co_moving',
+                            gap0=0.1, energy_J=0.75),
+                terms=lambda rig: make_terms(rig, target), outer=lambda rig: fd_mse_outer(target))
+    J_r, g_r = value_and_grad(torch.full((n_design_rows('Midplane', lat), 1), 0.8), base)
+    J_n, g_n = value_and_grad(torch.full((n_design_rows('Midplane', lat), 1), 0.5), dict(base, x_range=(0.4, 1.2)))
+    assert abs(J_n - J_r) <= 1e-12 * abs(J_r) and torch.allclose(g_n, 0.8 * g_r, rtol=1e-10)

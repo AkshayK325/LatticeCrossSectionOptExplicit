@@ -22,6 +22,9 @@ from scipy.optimize import Bounds
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SYM, T = 'Midplane', 3e-3
+R_RANGE = (0.4, 1.2)                     # radius = min + (max - min) * x, x in [0, 1] (OptimizeFrame convention)
+to_x = lambda r: [(v - R_RANGE[0]) / (R_RANGE[1] - R_RANGE[0]) for v in r]
+to_r = lambda x: [R_RANGE[0] + (R_RANGE[1] - R_RANGE[0]) * v for v in x]
 lat = example3(elemSize=3.0)
 groups = symmetry_groups(SYM, lat)
 nrow = n_design_rows(SYM, lat)
@@ -36,26 +39,35 @@ def rows(gv):
 
 base = dict(lat=lat, symType=SYM, mat=project_material(), T=T,
             rig_kw=dict(law={'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}, start='co_moving', gap0=0.1,
-                        energy_J=0.75))
-g_true = [0.70, 0.90, 0.80]
+                        energy_J=0.75), x_range=R_RANGE)
+g_true = [0.70, 0.90, 0.80]                 # radii [mm]
 g0 = [0.80, 0.80, 0.80]
-d_t, F_t, _ = response_curve(rows(g_true), base)
+d_t, F_t, _ = response_curve(rows(to_x(g_true)), base)
 target = tuple(t.cpu() if False else t for t in loading_branch(d_t, F_t))
 spec = dict(base, terms=lambda rig: make_terms(rig, target), outer=lambda rig: fd_mse_outer(target))
 
 hist = {'J': [], 'g': [], 'time': []}
+memo, J0 = {}, {}
 
 
-def obj(gv):
-    gv = np.asarray(gv, dtype=float).reshape(-1)                                # MMA passes (n,) or (n, 1)
+def obj(xv):
+    """MMA works on normalised x in [0,1]; denormalisation happens inside value_and_grad (x_range). J is scaled by
+    its value at the start design (OptimizeFrame obj0 idea) so MMA's constants see an O(1) objective."""
+    xv = np.asarray(xv, dtype=float).reshape(-1)                                # MMA passes (n,) or (n, 1)
+    key = tuple(np.round(xv, 15))
+    if key in memo:
+        return memo[key]
     t0 = time.time()
-    J, gx = value_and_grad(rows(gv), spec)
+    J, gx = value_and_grad(rows(xv), spec)
     gg = np.array([gx[torch.as_tensor(g)].sum().item() for g in groups])      # chain rule rows -> groups
+    J0.setdefault('v', J)
     hist['J'].append(J)
-    hist['g'].append([float(v) for v in gv])
+    hist['g'].append(to_r(xv))
     hist['time'].append(time.time() - t0)
-    print(f'iter {len(hist["J"])}: J = {J:.4e}, groups = {np.round(gv, 4)}, grad = {gg}, {hist["time"][-1]:.0f}s', flush=True)
-    return np.array([J]), gg.reshape(-1, 1)
+    print(f'iter {len(hist["J"])}: J = {J:.4e} (J/J0 {J / J0["v"]:.3e}), radii = {np.round(to_r(xv), 4)}, '
+          f'dJ/dx = {gg}, {hist["time"][-1]:.0f}s', flush=True)
+    memo[key] = (np.array([J / J0['v']]), (gg / J0['v']).reshape(-1, 1))
+    return memo[key]
 
 
 def no_constraint(x):
@@ -64,10 +76,10 @@ def no_constraint(x):
 
 
 t_start = time.time()
-res = custom_minimize(obj, x0=np.array(g0).reshape(-1, 1), bounds=Bounds([0.5] * 3, [1.2] * 3), method='MMA',
+res = custom_minimize(obj, x0=np.array(to_x(g0)).reshape(-1, 1), bounds=Bounds([0.0] * 3, [1.0] * 3), method='MMA',
                       constraintCall=no_constraint,
                       options={'maxiter': 20, 'miniter': 5, 'kkttol': 1e-6, 'move_limit': 0.2, 'disp': True})
-g_opt = res.x.reshape(-1)
+g_opt = np.array(to_r(res.x.reshape(-1)))
 wall = time.time() - t_start
 
 # ---------------------------------------------------------------- report (after the run)
@@ -76,8 +88,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from plotFrame import numbered
 
-d0, F0, _ = response_curve(rows(g0), base)
-d1, F1, _ = response_curve(rows(g_opt), base)
+d0, F0, _ = response_curve(rows(to_x(g0)), base)
+d1, F1, _ = response_curve(rows(to_x(g_opt)), base)
 fig, ax = plt.subplots(1, 3, figsize=(17, 4.5))
 ax[0].plot(d_t.cpu(), F_t.cpu(), 'k-', lw=2.5, label=f'target (groups {g_true})')
 ax[0].plot(d0.cpu(), F0.cpu(), 'C0--', label=f'initial {g0}')
@@ -102,7 +114,7 @@ md = [
     '# 8 — Twin recovery: MMA + exact adjoint gradients recover a design from its F–δ curve', '',
     f'Generated automatically by `tests/study_twin_recovery.py` after the run finished ({datetime.datetime.now():%Y-%m-%d %H:%M}, device {dev}).', '',
     f'- Rig: EPU 45 drop, 0.75 J, 6 m/s, 3 mm mesh, {T*1e3:.0f} ms, fibre visco-hyperelastic beams, line + plate contact, μ = 0.5.',
-    f'- Design: Midplane symmetry, 3 group radii. Target curve from the design {g_true}; start {g0}; bounds 0.5–1.2 mm.',
+    f'- Design: Midplane symmetry, 3 group radii; MMA on normalised x in [0, 1] (radius = {R_RANGE[0]} + {R_RANGE[1]-R_RANGE[0]:.1f} x, denormalised inside the objective), J scaled by J(x0). Target curve from the design {g_true}; start {g0}.',
     '- Objective: normalised MSE between the impactor force–stroke loading branch and the target.',
     '- Gradients: checkpointed discrete adjoint (exact).', '',
     f'![twin](../ResultsFig/explicit/{fp.name})', '',
