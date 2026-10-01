@@ -18,6 +18,8 @@ MAT = project_material()   # EPU 45; elastic tests use its long-term E
 OUT = pathlib.Path(__file__).resolve().parents[1] / 'ResultsFig' / 'explicit'
 DEFAULT = {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2, 'zeta': 1.0}
 ENERGY_J = 0.75     # user choice 2026-10-01 (was 1 J)
+ELEM_SIZE_RESULTS = 1.0   # converged mesh for figures/results (study 33_/34_: 1.0 vs 0.75 within 2.6%);
+                          # unit tests use the 3 mm mesh for speed
 R_DEFAULT = 0.8      # user choice 2026-10-01: r = 0.8 (d = 1.6 mm); r = 1.6 (d = 3.2) too large for this system
 
 
@@ -129,7 +131,7 @@ if __name__ == '__main__':
     from plotFrame import animate_frame, numbered
 
     OUT.mkdir(parents=True, exist_ok=True)
-    lat = example3()
+    lat = example3(elemSize=ELEM_SIZE_RESULTS)
     r = torch.full((lat['connr'].shape[0],), R_DEFAULT)
     base = {'F_ref': 2000.0, 'delta_ref': 0.2}
     variants = [('gap', {'kind': 'linear'}, 'A  gap · linear penalty'),
