@@ -93,6 +93,12 @@ def test_drop_contact_deformation_bounded(drop):
     assert np.min(h['g_plate_min']) > -0.15 * R_DEFAULT, np.min(h['g_plate_min'])
 
 
+def test_drop_friction_active(drop):
+    """mu = 0.5 must actually dissipate (guards against the rig silently running frictionless)."""
+    rig, h = drop
+    assert rig['mu'] == 0.5 and h['W_fric'][-1] > 1.0, (rig['mu'], h['W_fric'][-1])
+
+
 def test_drop_energy_balance(drop):
     _, h = drop
     E = h['E_tot']

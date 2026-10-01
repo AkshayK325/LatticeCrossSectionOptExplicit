@@ -133,10 +133,10 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     fix_r[bot] = fix_r[top] = fix_r[imp] = True
     top_t, t0 = torch.as_tensor(top), int(top[0])
     m_plate = m[top].sum().item()
-    mu = 1 / (1 / M + 1 / m_plate)                               # impactor-plate reduced mass
+    mu_red = 1 / (1 / M + 1 / m_plate)                           # impactor-plate reduced mass (not friction mu)
     if isinstance(law, dict):
         from contact import calibrate
-        law = calibrate(mu=mu, v_ref=v0, **law)
+        law = calibrate(mu=mu_red, v_ref=v0, **law)
 
     def gap(u, v):
         return gap0 + u[imp, 2] - u[t0, 2], v[imp, 2] - v[t0, 2]
@@ -203,14 +203,14 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
             fp, Phi_l, ex = potential_force(phi_lat, fr.X + u)
             ff, Pf = friction(u, v)
             f = f + fp + ff
-            last.update(Phi_lat=Phi_l.item(), ex=ex, Pf=Pf)     # reused by run_drop's energy bookkeeping
+            last.update(Phi_lat=Phi_l.item(), ex=ex, Pf=Pf, ff=ff.detach().clone())  # for run_drop bookkeeping
         return f
 
     def contact_dt(u, v):
         g, gd = gap(u, v)
         kg, kv = law_tangent(law, g, gd)
-        w = np.sqrt(max(kg, 0.0) / mu)
-        zeta = kv / (2 * np.sqrt(max(kg, 1e-30) * mu))
+        w = np.sqrt(max(kg, 0.0) / mu_red)
+        zeta = kv / (2 * np.sqrt(max(kg, 1e-30) * mu_red))
         w_eff = w / (np.sqrt(1 + zeta**2) - zeta) if w > 0 else 0.0  # damped central-difference limit
         cap = contact_dt_cap(law, g.item(), gd.item())
         if phi_lat is not None:
@@ -273,10 +273,13 @@ def run_drop(rig, T=8e-3, record=True):
         bl = rig['beam_law']
         U = bl.stored_long_term(d).item() if hasattr(bl, 'stored_long_term') else strain_energy(d, f_loc).item()
         Phi = law_potential(law, g.item(), rig['gap0'])
-        Pf = rig['last'].get('Pf', 0.0)                         # from the integrator's own contact call
-        if W.get('pf') is not None:
-            W['Wf'] = W.get('Wf', 0.0) + 0.5 * (Pf + W['pf'][0]) * (t - W['pf'][1])
-        W['pf'] = (Pf, t)
+        # friction dissipation = -(work of the friction forces the integrator applied), trapezoid in
+        # displacement like the internal work (power from half-step velocities does not match Verlet's work)
+        ff = rig['last'].get('ff')
+        if ff is not None:
+            if W.get('fu') is not None:
+                W['Wf'] = W.get('Wf', 0.0) - (0.5 * (ff + W['fu'][0]) * (u - W['fu'][1])).sum().item()
+            W['fu'] = (ff, u.detach().clone())
         Phi_lat, gs_min, gp_min = 0.0, np.inf, np.inf
         if rig['phi_lat'] is not None and 'ex' in rig['last']:
             gs, gb, gt = rig['last']['ex']
