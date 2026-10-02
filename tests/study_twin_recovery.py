@@ -1,6 +1,6 @@
 """End-to-end check: recover a known design from its F-delta curve with MMA + exact adjoint gradients.
     PYTHONPATH=src:tests python tests/study_twin_recovery.py [cuda|cpu]
-Writes (after the run finishes) a numbered figure in ResultsFig/explicit/ and notes/8_TwinRecovery.md."""
+Writes (after the run finishes) a numbered figure in ResultsFig/explicit/ and notes/8_TwinRecovery_<optimizer>.md."""
 import datetime
 import json
 import pathlib
@@ -147,5 +147,5 @@ md = [
     f'Objective {hist["J"][0]:.3e} → {min(hist["J"]):.3e} in {len(hist["J"])} evaluations '
     f'({np.mean(hist["time"]):.0f} s each: nominal run + adjoint), total {wall/60:.1f} min.',
 ]
-(ROOT / 'notes' / '8_TwinRecovery.md').write_text('\n'.join(md) + '\n')
-print('report:', fp, ROOT / 'notes' / '8_TwinRecovery.md')
+(ROOT / 'notes' / f'8_TwinRecovery_{OPT}.md').write_text('\n'.join(md) + '\n')
+print('report:', fp, ROOT / 'notes' / f'8_TwinRecovery_{OPT}.md')
