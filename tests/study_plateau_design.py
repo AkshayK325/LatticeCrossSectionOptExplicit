@@ -1,6 +1,6 @@
 """Design for an ideal-absorber force-stroke curve: fast rise 0 -> F_PLATEAU over D_RISE, then constant F_PLATEAU.
 Minimises the normalised F-delta MSE (loading branch) with exact adjoint gradients; 3 Midplane group radii.
-    PYTHONPATH=src:tests python tests/study_plateau_design.py [cuda|cpu] [mma|gcmma|lbfgsb]
+    PYTHONPATH=src:tests python tests/study_plateau_design.py [cuda|cpu] [mma|gcmma|lbfgsb] [r0,r1,r2 start] [maxiter]
 Writes (after the run finishes) a numbered figure + json in ResultsFig/explicit/ and notes/9_PlateauDesign_<opt>.md."""
 import datetime
 import json
@@ -45,7 +45,9 @@ base = dict(lat=lat, symType=SYM, mat=project_material(), T=T,
                         energy_J=0.75), x_range=R_RANGE)
 target = plateau_target(F_PLATEAU, D_RISE, D_END)
 spec = dict(base, terms=lambda rig: make_terms(rig, target), outer=lambda rig: fd_mse_outer(target))
-g0 = [0.80, 0.80, 0.80]
+g0 = [float(v) for v in sys.argv[3].split(',')] if len(sys.argv) > 3 else [0.80, 0.80, 0.80]
+MAXIT = int(sys.argv[4]) if len(sys.argv) > 4 else None
+TAG = OPT + ('' if len(sys.argv) <= 3 else '_from_' + '_'.join(f'{v:.3f}' for v in g0))
 
 hist = {'J': [], 'g': [], 'time': []}
 memo, J0 = {}, {}
@@ -78,14 +80,14 @@ t_start = time.time()
 x0 = np.array(to_x(g0))
 if OPT == 'mma':
     res = custom_minimize(obj, x0=x0, bounds=Bounds([0.0] * 3, [1.0] * 3), method='MMA', constraintCall=no_constraint,
-                          options={'maxiter': 30, 'miniter': 5, 'kkttol': 1e-6, 'move_limit': 0.5, 'disp': True,
+                          options={'maxiter': MAXIT or 30, 'miniter': 5, 'kkttol': 1e-6, 'move_limit': 0.5, 'disp': True,
                                    'mma_variant': 'standard', 'move_schedule': 'cos', 'move_period': 10})
     x_opt = res.x.reshape(-1)
 elif OPT == 'gcmma':
     from optimizeDrop import value_only
     vcall = lambda xv: (np.array([value_only(rows(np.asarray(xv).reshape(-1)), spec) / J0['v']]), -np.ones((1, 1)))
     res = custom_minimize(obj, x0=x0, bounds=Bounds([0.0] * 3, [1.0] * 3), method='GCMMA', constraintCall=no_constraint,
-                          options={'maxiter': 15, 'miniter': 3, 'kkttol': 1e-6, 'disp': True, 'value_call': vcall,
+                          options={'maxiter': MAXIT or 15, 'miniter': 3, 'kkttol': 1e-6, 'disp': True, 'value_call': vcall,
                                    'move_limit': 0.5, 'move_schedule': 'cos'})
     x_opt = res.x.reshape(-1)
 else:
@@ -132,11 +134,11 @@ for k in range(3):
 ax[2].set(xlabel='function evaluation', ylabel='radius [mm]', title='design')
 ax[2].legend(fontsize=8)
 fig.tight_layout()
-fp = numbered(ROOT / 'ResultsFig' / 'explicit', f'plateau_design_{OPT}.png')
+fp = numbered(ROOT / 'ResultsFig' / 'explicit', f'plateau_design_{TAG}.png')
 fig.savefig(fp, dpi=130)
 json.dump(dict(F_plateau=F_PLATEAU, d_rise=D_RISE, g0=g0, g_opt=g_opt.tolist(), hist=hist, wall_s=wall,
                metrics0={k: float(v) for k, v in m0.items()}, metrics1={k: float(v) for k, v in m1.items()}),
-          open(numbered(ROOT / 'ResultsFig' / 'explicit', f'plateau_design_{OPT}.json'), 'w'), indent=1)
+          open(numbered(ROOT / 'ResultsFig' / 'explicit', f'plateau_design_{TAG}.json'), 'w'), indent=1)
 row = lambda name, m, g: (f'| {name} | {g[0]:.3f} / {g[1]:.3f} / {g[2]:.3f} | {m["F_max"]:.1f} | {m["d_max"]:.2f} | '
                           f'{m["E_J"]:.3f} | {m["eff"]:.2f} | {m["uniform"]:.2f} |')
 md = [
@@ -147,7 +149,7 @@ md = [
     f'0.75 J at {F_PLATEAU:.0f} N needs {750 / F_PLATEAU:.1f} mm of stroke.',
     f'- Objective: normalised MSE of the impactor force–stroke loading branch against the target. '
     f'Design: Midplane symmetry, 3 group radii, normalised x in [0, 1] (radius = {R_RANGE[0]} + {R_RANGE[1]-R_RANGE[0]:.1f} x).',
-    f'- Optimizer: {OPT}; gradients: checkpointed discrete adjoint (exact).', '',
+    f'- Optimizer: {OPT}; gradients: checkpointed discrete adjoint (exact). Start {g0}. Contact exclusion: smooth (C1) unless noted.', '',
     f'![plateau](../ResultsFig/explicit/{fp.name})', '',
     '| design | radii [mm] | peak F [N] | max stroke [mm] | loading energy [J] | crush efficiency | plateau mean/max |',
     '|---|---|---|---|---|---|---|',
@@ -156,5 +158,5 @@ md = [
     f'Objective {hist["J"][0]:.3e} → {min(hist["J"]):.3e} (×{min(hist["J"]) / hist["J"][0]:.2e}) in {len(hist["J"])} '
     f'evaluations ({np.mean(hist["time"]):.0f} s each), total {wall/60:.1f} min.',
 ]
-(ROOT / 'notes' / f'9_PlateauDesign_{OPT}.md').write_text('\n'.join(md) + '\n')
-print('report:', fp, ROOT / 'notes' / f'9_PlateauDesign_{OPT}.md')
+(ROOT / 'notes' / f'9_PlateauDesign_{TAG}.md').write_text('\n'.join(md) + '\n')
+print('report:', fp, ROOT / 'notes' / f'9_PlateauDesign_{TAG}.md')
