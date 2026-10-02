@@ -6,7 +6,8 @@ Checks of the explicit beam solver against Abaqus 2024/Explicit. The cases and t
 | Path | Content |
 |---|---|
 | `cases.py` | One definition per case: writes the `.inp` and runs our solver on the same model |
-| `inp/` | Generated Abaqus input files (run these) |
+| `inp/` | Generated Abaqus input files (run these). Only `.inp` is tracked here |
+| `logs/` | Useful Abaqus job logs per run: `.sta` (energy table, increments, timing), `.dat` (input-processing warnings/errors, model size), `.msg` when it has warnings. `.env`, `.com`, `.prt`, … are not kept |
 | `odb/` | Put the `.odb` files here (git-ignored, large) |
 | `extract_odb.py` | Abaqus Python script: odb → CSV |
 | `csv/` | Extracted Abaqus histories `<job>_history.csv`, `<job>_field_U.csv` (tracked) |
@@ -20,8 +21,8 @@ Checks of the explicit beam solver against Abaqus 2024/Explicit. The cases and t
    Use double precision: the comparison is at the 1% level.
 3. Extract (on the Abaqus machine, Abaqus Python): `abaqus python extract_odb.py A1_cantilever.odb`.
    This writes `A1_cantilever_history.csv` and `A1_cantilever_field_U.csv`.
-4. Copy the two CSVs into `abaqus/csv/`, plus optionally the odb into `abaqus/odb/`, and the `.sta` / `.msg` if
-   Abaqus warned about anything.
+4. Copy the two CSVs into `abaqus/csv/`, the `.sta` and `.dat` (and `.msg` if it has warnings) into `abaqus/logs/`,
+   optionally the odb into `abaqus/odb/` (git-ignored).
 5. Compare (here): `PYTHONPATH=src python abaqus/compare.py A1 A2 ...` → figure + `abaqus/results/A1_cantilever.md`.
    Then update the status in `BENCHMARK_PLAN.md`.
 

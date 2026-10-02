@@ -198,3 +198,7 @@ abaqus/**/*.stt
 abaqus/**/*.mdl
 abaqus/**/*.pac
 abaqus/**/*.sel
+# Abaqus job files copied into abaqus/inp/ are not tracked (inputs only there; logs go to abaqus/logs/)
+abaqus/inp/*
+!abaqus/inp/*.inp
+abaqus/**/*.env

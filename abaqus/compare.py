@@ -35,8 +35,8 @@ def read_abaqus(name):
 
 def read_sta(name):
     """Fallback without the odb/CSV: the Abaqus/Explicit .sta table (time, kinetic energy, total energy at the
-    field-output increments, 4 significant digits). Looks in abaqus/csv/ and abaqus/inp/."""
-    for d in ('csv', 'inp'):
+    field-output increments, 4 significant digits). Looks in abaqus/logs/ (then csv/, inp/)."""
+    for d in ('logs', 'csv', 'inp'):
         p = ROOT / d / f'{name}.sta'
         if p.exists():
             break
@@ -85,8 +85,14 @@ def nrmse(t_ref, y_ref, t, y):
     return float(np.sqrt(np.mean((yi - y_ref) ** 2)) / max(np.abs(y_ref).max(), 1e-300))
 
 
-def corr(t_ref, y_ref, t, y):
+def corr(t_ref, y_ref, t, y, window=None):
+    """Correlation on Abaqus's time points; window [s]: moving-average low-pass of both first (removes
+    high-frequency axial ringing whose phase is not reproducible between codes)."""
     yi = np.interp(t_ref, t, y)
+    if window:
+        k = max(1, int(round(window / np.median(np.diff(t_ref)))))
+        w = np.ones(k) / k
+        yi, y_ref = np.convolve(yi, w, 'valid'), np.convolve(y_ref, w, 'valid')
     return float(np.corrcoef(yi, y_ref)[0, 1])
 
 
@@ -187,8 +193,8 @@ def scalar_metrics(case, ours, ab):
                     po, pa = np.interp(rf[0][w], ours['time'], ours['RF3']).mean(), rf[1][w].mean()
                     out.append(('post-buckling plateau, mean root RF3 [N]', po, pa, rel(po, pa), 0.03))
                 kr = rf[0] <= tcut
-                out.append(('root RF3 correlation, compression phase', corr(rf[0][kr], rf[1][kr], ours['time'], ours['RF3']),
-                            1.0, None, 0.98))
+                out.append(('root RF3 correlation, compression phase, 0.1 ms low-pass',
+                            corr(rf[0][kr], rf[1][kr], ours['time'], ours['RF3'], window=1e-4), 1.0, None, 0.98))
     if case in ('A3', 'A3b'):
         r = pick(ab, 'V3', ('wsum', L['b'], ours['massB']))
         if r is not None:
@@ -204,6 +210,11 @@ def scalar_metrics(case, ours, ab):
         r = pick(ab, 'U3', ('node', L['ref']))
         if r is not None:
             out.append(('max stroke [mm]', -ours['U3ref'].min(), -r[1].min(), rel(ours['U3ref'].min(), r[1].min()), 0.02))
+            k = r[0] <= r[0][np.argmin(r[1])]
+            e = nrmse(r[0][k], r[1][k], ours['time'], ours['U3ref'])
+            out.append(('stroke nRMSE, first compression', e, 0.0, e, 0.02))
+            Tp, Ta = period(ours['time'], ours['U3ref']), period(*r)
+            out.append(('plate U3 period [ms]', Tp * 1e3, Ta * 1e3, rel(Tp, Ta), 0.01))
         r = pick(ab, 'RF3', ('sum', L['bot']))
         if r is not None:
             pa, po = np.abs(r[1]).max(), np.abs(ours['RF3bot']).max()
@@ -270,9 +281,9 @@ def main(case):
                           f'{"—" if lim is None else ("✔" if rd <= lim else f"✘ (limit {lim:.1%})")} |')
         md.append('')
     if ab is not None and pick(ab, 'ETOTAL') is not None and pick(ab, 'ALLKE') is not None:
-        ta, ea = pick(ab, 'ETOTAL')
-        md.append(f'- Energy balance: Abaqus |ETOTAL| max {np.abs(ea).max():.3e} N mm '
-                  f'({np.abs(ea).max() / pick(ab, "ALLKE")[1].max():.2%} of max KE).')
+        ta, ea = pick(ab, 'ETOTAL')                              # constant (= initial energy) when conserved
+        md.append(f'- Energy balance: Abaqus ETOTAL drift (max − min) {np.ptp(ea):.3e} N mm '
+                  f'({np.ptp(ea) / pick(ab, "ALLKE")[1].max():.2%} of max KE).')
     if rows:
         md += ['', '| signal | nRMSE (ours − Abaqus, / max abs Abaqus) | pass |', '|---|---|---|']
         md += [f'| {a} | {b} | {p} |' for a, b, p in rows]
