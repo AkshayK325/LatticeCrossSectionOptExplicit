@@ -132,10 +132,10 @@ json.dump(dict(g_true=g_true, g0=g0, g_opt=g_opt.tolist(), hist=hist, wall_s=wal
           open(numbered(ROOT / 'ResultsFig' / 'explicit', f'twin_recovery_fd_mse_{OPT}.json'), 'w'), indent=1)
 err = np.abs(np.array(g_opt) - np.array(g_true))
 md = [
-    '# 8 — Twin recovery: MMA + exact adjoint gradients recover a design from its F–δ curve', '',
+    f'# 8 — Twin recovery: {OPT} + exact adjoint gradients recover a design from its F–δ curve', '',
     f'Generated automatically by `tests/study_twin_recovery.py` after the run finished ({datetime.datetime.now():%Y-%m-%d %H:%M}, device {dev}).', '',
     f'- Rig: EPU 45 drop, 0.75 J, 6 m/s, 3 mm mesh, {T*1e3:.0f} ms, fibre visco-hyperelastic beams, line + plate contact, μ = 0.5.',
-    f'- Design: Midplane symmetry, 3 group radii; MMA on normalised x in [0, 1] (radius = {R_RANGE[0]} + {R_RANGE[1]-R_RANGE[0]:.1f} x, denormalised inside the objective), J scaled by J(x0). Target curve from the design {g_true}; start {g0}.',
+    f'- Design: Midplane symmetry, 3 group radii; {OPT} on normalised x in [0, 1] (radius = {R_RANGE[0]} + {R_RANGE[1]-R_RANGE[0]:.1f} x, denormalised inside the objective), J scaled by J(x0). Target curve from the design {g_true}; start {g0}.',
     '- Objective: normalised MSE between the impactor force–stroke loading branch and the target.',
     f'- Gradients: checkpointed discrete adjoint (exact). Optimizer: {OPT} on normalised x in [0, 1].', '',
     f'![twin](../ResultsFig/explicit/{fp.name})', '',
