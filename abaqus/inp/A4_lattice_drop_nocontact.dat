@@ -1,6 +1,6 @@
 1
 
-   Abaqus 2024                                  Date 02-Oct-2026   Time 11:45:34
+   Abaqus 2024                                  Date 02-Oct-2026   Time 12:02:02
    For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
 
 
@@ -67,12 +67,6 @@
    *******************************************************
 
 
- ***ERROR: in keyword *ELSET, file "A4_lattice_drop_nocontact.inp", line 2567: 
-           The following sets specified do not exist. Sets should be defined 
-           before they are used: VERT
- ***NOTE: DUE TO AN INPUT ERROR THE ANALYSIS PRE-PROCESSOR HAS BEEN UNABLE TO 
-          INTERPRET SOME DATA.  SUBSEQUENT ERRORS MAY BE CAUSED BY THIS OMISSION
-
      END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
    ***********************************************************
 
@@ -85,30 +79,13 @@
 
   *HEADING
           A4: 3x3x1 C4 lattice (exampleCase 3, 1 mm elements, r 0.8), bottom nodes clamped, top nodes in a rigid plate (rotations fixed) bonded to the impactor, 0.75 J at 6 m/s; linear elastic E0; NO contact                                                                                                                                                                                                                                                                                                                           
-  *ELEMENT, TYPE=B31, ELSET=VERT
-
- ***ERROR: BLANK LINE IN ELEMENT DATA OR ALL FIELDS GIVEN AS ZERO
- LINE IMAGE:                                                                    
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                        
   *ELEMENT, TYPE=B31, ELSET=OBLQ
   *ELSET, ELSET=LATTICE
-
- ***ERROR: ELEMENT SET VERT HAS NOT BEEN DEFINED
   *ELEMENT, TYPE=MASS, ELSET=IMPMASS
   *MATERIAL, NAME=EPU45_LIN
   *DENSITY
   *ELASTIC
   *MASS, ELSET=IMPMASS
-  *BEAM SECTION, ELSET=VERT, MATERIAL=EPU45_LIN, SECTION=CIRC
-
- ***WARNING: ELSET VERT ON *BEAM SECTION OPTION IS NOT DEFINED. THIS SECTION 
-             DEFINITION WILL NOT BE USED IN THE ANALYSIS.
   *BEAM SECTION, ELSET=OBLQ, MATERIAL=EPU45_LIN, SECTION=CIRC
   *TRANSVERSE SHEAR STIFFNESS
   *MASS, ELSET=IMPMASS
@@ -155,20 +132,12 @@
 
 
 
-
-
-          THE PROGRAM HAS DISCOVERED     3 FATAL ERRORS
-
-               ** EXECUTION IS TERMINATED **
-
-
-
                               END OF USER INPUT PROCESSING
 
 
 
      JOB TIME SUMMARY
-       USER TIME (SEC)      =     0.10    
-       SYSTEM TIME (SEC)    =      0.0    
+       USER TIME (SEC)      =      0.0    
+       SYSTEM TIME (SEC)    =     0.10    
        TOTAL CPU TIME (SEC) =     0.10    
        WALLCLOCK TIME (SEC) =            0
