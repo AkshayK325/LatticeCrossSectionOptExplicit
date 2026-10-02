@@ -71,7 +71,7 @@ A1 → A2 → A3 → A4 → A5a → A5b → B0 → B1 → B3 → B4 → (B2, B5)
 
 ## Log
 - 2026-10-02 (b): A1 run by the user.
-  - Abaqus accepted the input unchanged. The `.dat` shows 40 program-generated internal nodes for the 20 B31 elements (Explicit beam internals), with mass equal to ours.
+  - Abaqus accepted the input unchanged. The `.dat` shows 40 program-generated internal nodes for the 20 B31 elements (cause not yet checked; total mass still equals ours).
   - Energy-level agreement: period 0.17%, KE peaks 0.1%.
   - Still waiting on the history CSV for the displacement/rotation criteria (the main kinematic check).
 - 2026-10-02:
