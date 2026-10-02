@@ -26,7 +26,7 @@ Legend: ⬜ not started · 🟦 inp ready, waiting for Abaqus · 🟨 results in
 - [x] `abaqus/` folder: `cases.py`, `extract_odb.py`, `compare.py`, `inp/`, `csv/`, `ours/`, `results/`, `odb/` (2026-10-02)
 - [x] `extract_odb.py`: odb → `<job>_history.csv` (long format) + `<job>_field_U.csv` (Abaqus Python 3)
 - [x] `compare.py`: our run + overlay + nRMSE + period + report
-- [~] First round trip with A1: inp → Abaqus ✔ (input accepted, no warnings, completed) → odb → CSV ⬜ → compare (energies from `.sta` ✔; `compare.py` falls back to the `.sta` table when no CSV exists)
+- [x] First round trip with A1: inp → Abaqus → odb → CSV → compare ✔ (region names `Node PART-1-1.<label>`, `Assembly Assembly-1` parsed; `.sta` fallback kept)
 - [ ] Lattice exporter in `cases.py`: `example3` lattice → B31 elements, one element set per strut,
       CIRC section per strut, rigid top plate (`*RIGID BODY`, reference node with plate + impactor mass), bonded
       bottom, `*INITIAL CONDITIONS, TYPE=VELOCITY`
@@ -37,7 +37,7 @@ Legend: ⬜ not started · 🟦 inp ready, waiting for Abaqus · 🟨 results in
 
 | Case | Status | What it checks | Metrics → pass | Abaqus | Ours | Result |
 |---|---|---|---|---|---|---|
-| **A1** cantilever, L = 20, r = 0.8, 20 B31, sudden tip load P = 0.4 N (+z, fixed direction), 10 ms | 🟨 | corotational kinematics at 67° rotation, mass + rotary inertia, time integration, Timoshenko shear | nRMSE tip U3 ≤ 1%, U1 ≤ 2%, UR2 ≤ 1%; U3 period ≤ 0.5% | `inp/A1_cantilever.inp`; ran 2026-10-02 (double, 6420 incr., Δt 1.558e-6); only `.sta/.dat/.msg` returned | U3max 13.753 mm, UR2min −67.25°, T = 2.807 ms | **Partial ✔** (`results/A1_cantilever.md`, fig 59). From `.sta`: KE period 1.4003 vs 1.4027 ms (**0.17%** ✔, so the U3 period too), no phase lag after 3.5 periods; max KE 1.7170 vs 1.7187 N mm (0.1%); mass equal (4.2625e-8 t); Abaqus energy balance 0.13% of max KE, ours 5e-6. **Tip U/UR/RF nRMSE still pending:** needs `A1_cantilever_history.csv` (run `extract_odb.py` on the odb) |
+| **A1** cantilever, L = 20, r = 0.8, 20 B31, sudden tip load P = 0.4 N (+z, fixed direction), 10 ms | ✅ | corotational kinematics at 67° rotation, mass + rotary inertia, time integration, Timoshenko shear | nRMSE tip U3 ≤ 1%, U1 ≤ 2%, UR2 ≤ 1%; U3 period ≤ 0.5% | ,  (double, 6420 incr., Δt 1.558e-6) | 7106 steps, Δt 1.407e-6 | **Pass** (fe07082): U3 **0.06%**, U1 **0.10%**, UR2 **0.31%**, period 2.8040 vs 2.8039 ms (**0.004%**), max U3 13.739 vs 13.742 mm; KE 0.12%, SE 0.08%; root RF3 8.6% raw / 0.7% low-passed (high-mode content). Required fixing our rotary inertia (below). Fig  |
 | **A2** single strut (L = 6.4, r = 0.8), clamped base; rigid mass M at 6 m/s bonded to the top (merged), strut buckles | ⬜ | geometric nonlinearity (P–δ), buckling, axial wave speed at E₀ | peak reaction ≤ 2%; F(t) correlation ≥ 0.98; buckling time ≤ 3% | | | |
 | **A3** two crossed beams (r_A = 0.8, r_B = 0.5): A clamped–clamped, B driven onto A at constant speed, then released | ⬜ | contact onset at r_A + r_B, contact kinematics (Abaqus general contact, beam edges with circular section) | onset gap within 1% of r_A + r_B; impulse ≤ 5%; B rebound speed ≤ 5%. Abaqus contact run twice (default penalty; penalty × 10) to bracket | | | |
 | **A4** 3×3×1 C4 lattice drop, r = 0.8, 0.75 J, 6 m/s, impactor merged with the top plate, **no beam contact** | ⬜ | the whole assembly: BCs, rigid plate, impactor mass, many-element dynamics | stroke ≤ 2%; F–δ nRMSE ≤ 5%; peak ≤ 5% | | | |
@@ -70,6 +70,12 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
 A1 → A2 → A3 → A4 → A5a → A5b → B0 → B1 → B3 → B4 → (B2, B5).
 
 ## Log
+- 2026-10-02 (c): **A1 passes** after a fix found by the benchmark (fe07082).
+  - Before the fix: U3 0.59%, U1 0.90%, **UR2 1.73% ✘**, RF3 18% (high-frequency ripple).
+  - Cause: our scalar rotary inertia was rho L/2 (Iy + Iz), the polar value. That is exact for torsion but twice the bending rotary inertia.
+  - Fix: default rho L/2 max(Iy, Iz), the bending value, as Abaqus uses. All errors dropped about 10x.
+  - Effect elsewhere: none on the 3 mm optimization mesh (the rotary-inertia scaling A L^2/12 dominates there; drop rig identical: 2720 steps, stroke 8.475 mm, peak 92.22 N). It only acts for elements shorter than about 2.4 r, e.g. the 1 mm verification mesh, so re-run the 1 mm mesh-convergence numbers when convenient.
+  - Tests: 40 related tests pass. The large-amplitude energy test window was widened to 4 periods: the error envelope settles at 0.8% by period 2 and stays flat through 6.
 - 2026-10-02 (b): A1 run by the user.
   - Abaqus accepted the input unchanged. The `.dat` shows 40 program-generated internal nodes for the 20 B31 elements (cause not yet checked; total mass still equals ours).
   - Energy-level agreement: period 0.17%, KE peaks 0.1%.
