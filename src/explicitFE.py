@@ -113,16 +113,19 @@ class Frame:
         return fu, fth, d, f_loc
 
 
-def lumped_mass(frame, A, I, rho, rot_scale=True):
+def lumped_mass(frame, A, I, rho, rot_scale=True, rot='bending'):
     """Nodal translational mass m (N,) and scalar rotary inertia j (N,).
 
-    Rotary inertia per element end: rho*L/2 * max(Iy+Iz, A*L^2/12) when rot_scale (standard explicit
-    rotary-inertia scaling so rotation DOFs do not set the time step), else rho*L/2*(Iy+Iz).
+    Rotary inertia per element end: rho*L/2 * max(I_r, A*L^2/12) when rot_scale (standard explicit
+    rotary-inertia scaling so rotation DOFs do not set the time step), else rho*L/2*I_r.
+    rot='bending' (default): I_r = max(Iy, Iz), the bending rotary inertia (what Abaqus/Explicit B31 uses: with
+    it our A1 cantilever matches Abaqus to 0.06% in tip deflection, 0.3% in tip rotation; abaqus/results).
+    rot='polar': I_r = Iy + Iz (exact for torsion, but twice the bending rotary inertia; used before 2026-10-02).
     # ponytail: scalar (isotropic) rotary inertia per node, no gyroscopic term; full tensor if spin matters
     """
     L = frame.L0
     me = rho * A[:, 0] * L / 2
-    ie = I[:, 1] + I[:, 2]
+    ie = torch.maximum(I[:, 1], I[:, 2]) if rot == 'bending' else I[:, 1] + I[:, 2]
     if rot_scale:
         ie = torch.maximum(ie, A[:, 0] * L * L / 12)
     je = rho * L / 2 * ie

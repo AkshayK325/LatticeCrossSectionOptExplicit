@@ -85,8 +85,10 @@ def test_first_frequency_matches_euler_bernoulli():
 
 def test_energy_conserved_large_amplitude():
     """Tip 1/3 of L (geometrically nonlinear). Verlet energy error is a bounded O((w dt)^2) oscillation:
-    ~5% at courant 0.8 on the high modes the release excites, ~0.3% at 0.2. Check the bound and no growth."""
-    _, _, h = run_free_vibration(w_tip=10.0, periods=2.0, courant=0.2)
+    ~5% at courant 0.8 on the high modes the release excites, <1% at 0.2. Check the bound and no growth.
+    4 periods: with bending rotary inertia the error envelope settles over the first ~2 periods (0.4% -> 0.8%) and
+    then stays flat (0.8% through 6 periods), so growth is judged on periods 3-4 vs 1-2."""
+    _, _, h = run_free_vibration(w_tip=10.0, periods=4.0, courant=0.2)
     err = np.abs(np.array(h['E']) / h['E'][0] - 1)
     assert err.max() < 1e-2, err.max()
     half = len(err) // 2
