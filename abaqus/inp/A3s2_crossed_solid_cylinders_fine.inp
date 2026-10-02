@@ -138841,9 +138841,7 @@ U, V
 U3, V3
 *NODE OUTPUT, NSET=AMID
 U3, V3
-** total contact normal force on B (if this block is rejected, delete it: B momentum below still gives the impulse)
-*CONTACT OUTPUT, GENERAL CONTACT, SURFACE=SB
-CFN, CFNM
+** (no *CONTACT OUTPUT: 'GENERAL CONTACT' is not a valid parameter in Abaqus/Explicit; impulse from B momentum)
 *ENERGY OUTPUT
 ALLKE, ALLIE, ALLSE, ALLWK, ETOTAL, ALLAE, ALLVD, ALLFD
 *ENERGY OUTPUT, ELSET=CYLB
