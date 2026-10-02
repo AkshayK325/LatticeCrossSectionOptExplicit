@@ -1,0 +1,174 @@
+1
+
+   Abaqus 2024                                  Date 02-Oct-2026   Time 11:45:34
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+ ***ERROR: in keyword *ELSET, file "A4_lattice_drop_nocontact.inp", line 2567: 
+           The following sets specified do not exist. Sets should be defined 
+           before they are used: VERT
+ ***NOTE: DUE TO AN INPUT ERROR THE ANALYSIS PRE-PROCESSOR HAS BEEN UNABLE TO 
+          INTERPRET SOME DATA.  SUBSEQUENT ERRORS MAY BE CAUSED BY THIS OMISSION
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          A4: 3x3x1 C4 lattice (exampleCase 3, 1 mm elements, r 0.8), bottom nodes clamped, top nodes in a rigid plate (rotations fixed) bonded to the impactor, 0.75 J at 6 m/s; linear elastic E0; NO contact                                                                                                                                                                                                                                                                                                                           
+  *ELEMENT, TYPE=B31, ELSET=VERT
+
+ ***ERROR: BLANK LINE IN ELEMENT DATA OR ALL FIELDS GIVEN AS ZERO
+ LINE IMAGE:                                                                    
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                        
+  *ELEMENT, TYPE=B31, ELSET=OBLQ
+  *ELSET, ELSET=LATTICE
+
+ ***ERROR: ELEMENT SET VERT HAS NOT BEEN DEFINED
+  *ELEMENT, TYPE=MASS, ELSET=IMPMASS
+  *MATERIAL, NAME=EPU45_LIN
+  *DENSITY
+  *ELASTIC
+  *MASS, ELSET=IMPMASS
+  *BEAM SECTION, ELSET=VERT, MATERIAL=EPU45_LIN, SECTION=CIRC
+
+ ***WARNING: ELSET VERT ON *BEAM SECTION OPTION IS NOT DEFINED. THIS SECTION 
+             DEFINITION WILL NOT BE USED IN THE ANALYSIS.
+  *BEAM SECTION, ELSET=OBLQ, MATERIAL=EPU45_LIN, SECTION=CIRC
+  *TRANSVERSE SHEAR STIFFNESS
+  *MASS, ELSET=IMPMASS
+  *RIGID BODY, REF NODE=1225, TIE NSET=TOP
+  *RIGID BODY, REF NODE=1225, TIE NSET=TOP
+  *RIGID BODY, REF NODE=1225, TIE NSET=TOP
+  *RIGID BODY, REF NODE=1225, TIE NSET=TOP
+  *RIGID BODY, REF NODE=1225, TIE NSET=TOP
+  *RIGID BODY, REF NODE=1225, TIE NSET=TOP
+  *RIGID BODY, REF NODE=1225, TIE NSET=TOP
+  *BOUNDARY
+  *RIGID BODY, REF NODE=1225, TIE NSET=TOP
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  *OUTPUT, FIELD, NUMBER INTERVAL=40
+  *OUTPUT, HISTORY, TIME INTERVAL=5e-06
+  *STEP, NAME=DROP, NLGEOM=YES
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *OUTPUT, FIELD, NUMBER INTERVAL=40
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=5e-06
+  *NODE OUTPUT, NSET=REF
+  *NODE OUTPUT, NSET=BOT
+  *ENERGY OUTPUT
+  *END STEP
+  *BOUNDARY
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                  1333
+          NUMBER OF NODES IS                                     3889
+          NUMBER OF NODES DEFINED BY THE USER                    1225
+          NUMBER OF INTERNAL NODES GENERATED BY THE PROGRAM      2664
+          TOTAL NUMBER OF VARIABLES IN THE MODEL                 7350
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+
+
+          THE PROGRAM HAS DISCOVERED     3 FATAL ERRORS
+
+               ** EXECUTION IS TERMINATED **
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =     0.10    
+       SYSTEM TIME (SEC)    =      0.0    
+       TOTAL CPU TIME (SEC) =     0.10    
+       WALLCLOCK TIME (SEC) =            0
