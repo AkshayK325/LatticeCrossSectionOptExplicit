@@ -26,7 +26,7 @@ Legend: ⬜ not started · 🟦 inp ready, waiting for Abaqus · 🟨 results in
 - [x] `abaqus/` folder: `cases.py`, `extract_odb.py`, `compare.py`, `inp/`, `csv/`, `ours/`, `results/`, `odb/` (2026-10-02)
 - [x] `extract_odb.py`: odb → `<job>_history.csv` (long format) + `<job>_field_U.csv` (Abaqus Python 3)
 - [x] `compare.py`: our run + overlay + nRMSE + period + report
-- [ ] First round trip done with A1 (inp → Abaqus → odb → CSV → compare): confirms region / variable naming
+- [~] First round trip with A1: inp → Abaqus ✔ (input accepted, no warnings, completed) → odb → CSV ⬜ → compare (energies from `.sta` ✔; `compare.py` falls back to the `.sta` table when no CSV exists)
 - [ ] Lattice exporter in `cases.py`: `example3` lattice → B31 elements, one element set per strut,
       CIRC section per strut, rigid top plate (`*RIGID BODY`, reference node with plate + impactor mass), bonded
       bottom, `*INITIAL CONDITIONS, TYPE=VELOCITY`
@@ -37,7 +37,7 @@ Legend: ⬜ not started · 🟦 inp ready, waiting for Abaqus · 🟨 results in
 
 | Case | Status | What it checks | Metrics → pass | Abaqus | Ours | Result |
 |---|---|---|---|---|---|---|
-| **A1** cantilever, L = 20, r = 0.8, 20 B31, sudden tip load P = 0.4 N (+z, fixed direction), 10 ms | 🟦 | corotational kinematics at 67° rotation, mass + rotary inertia, time integration, Timoshenko shear | nRMSE tip U3 ≤ 1%, U1 ≤ 2%, UR2 ≤ 1%; U3 period ≤ 0.5% | `inp/A1_cantilever.inp` | U3max 13.753 mm, UR2min −67.25°, T = 2.807 ms | — |
+| **A1** cantilever, L = 20, r = 0.8, 20 B31, sudden tip load P = 0.4 N (+z, fixed direction), 10 ms | 🟨 | corotational kinematics at 67° rotation, mass + rotary inertia, time integration, Timoshenko shear | nRMSE tip U3 ≤ 1%, U1 ≤ 2%, UR2 ≤ 1%; U3 period ≤ 0.5% | `inp/A1_cantilever.inp`; ran 2026-10-02 (double, 6420 incr., Δt 1.558e-6); only `.sta/.dat/.msg` returned | U3max 13.753 mm, UR2min −67.25°, T = 2.807 ms | **Partial ✔** (`results/A1_cantilever.md`, fig 59). From `.sta`: KE period 1.4003 vs 1.4027 ms (**0.17%** ✔, so the U3 period too), no phase lag after 3.5 periods; max KE 1.7170 vs 1.7187 N mm (0.1%); mass equal (4.2625e-8 t); Abaqus energy balance 0.13% of max KE, ours 5e-6. **Tip U/UR/RF nRMSE still pending:** needs `A1_cantilever_history.csv` (run `extract_odb.py` on the odb) |
 | **A2** single strut (L = 6.4, r = 0.8), clamped base; rigid mass M at 6 m/s bonded to the top (merged), strut buckles | ⬜ | geometric nonlinearity (P–δ), buckling, axial wave speed at E₀ | peak reaction ≤ 2%; F(t) correlation ≥ 0.98; buckling time ≤ 3% | | | |
 | **A3** two crossed beams (r_A = 0.8, r_B = 0.5): A clamped–clamped, B driven onto A at constant speed, then released | ⬜ | contact onset at r_A + r_B, contact kinematics (Abaqus general contact, beam edges with circular section) | onset gap within 1% of r_A + r_B; impulse ≤ 5%; B rebound speed ≤ 5%. Abaqus contact run twice (default penalty; penalty × 10) to bracket | | | |
 | **A4** 3×3×1 C4 lattice drop, r = 0.8, 0.75 J, 6 m/s, impactor merged with the top plate, **no beam contact** | ⬜ | the whole assembly: BCs, rigid plate, impactor mass, many-element dynamics | stroke ≤ 2%; F–δ nRMSE ≤ 5%; peak ≤ 5% | | | |
@@ -70,6 +70,10 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
 A1 → A2 → A3 → A4 → A5a → A5b → B0 → B1 → B3 → B4 → (B2, B5).
 
 ## Log
+- 2026-10-02 (b): A1 run by the user.
+  - Abaqus accepted the input unchanged. The `.dat` shows 40 program-generated internal nodes for the 20 B31 elements (Explicit beam internals), with mass equal to ours.
+  - Energy-level agreement: period 0.17%, KE peaks 0.1%.
+  - Still waiting on the history CSV for the displacement/rotation criteria (the main kinematic check).
 - 2026-10-02:
   - folder, scripts and plan created;
   - A1 inp written;
