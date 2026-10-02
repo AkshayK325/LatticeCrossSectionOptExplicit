@@ -540,7 +540,7 @@ def a4_ours(c=A4):
 
 # ------------------------------------------------------------------------------------------------ A3s
 A3s = dict(A3, name='A3s2_crossed_solid_cylinders_fine', n_sq=16, n_rad=5, rbias=1.6, ds=0.25, ds_min=0.03, growth=1.15,
-           T=1e-3, hourglass='ENHANCED', field_frames=10, ball_dt=1e-4,
+           T=1e-3, hourglass='ENHANCED', field_frames=20, ball_dt=1e-4,
            title='A3s: the A3 crossing as SOLID cylinders (C3D8R, structured O-grid): A (r 0.8, along x, L 10) with '
                  'both end faces clamped; free B (r 0.5, along y) 0.3 mm above, 2 m/s down; frictionless general '
                  '(surface-to-surface) contact; linear elastic E0; reference for radius-aware contact (vs our A3 beams). '
@@ -713,8 +713,9 @@ BALL, 3, {-c['vB']:.10g}
 *CONTACT INCLUSIONS, ALL EXTERIOR
 *CONTACT PROPERTY ASSIGNMENT
 , , FRICTIONLESS
+** field output on the WHOLE model (nodes without field output are drawn undeformed in the viewer)
 *OUTPUT, FIELD, NUMBER INTERVAL={c['field_frames']}
-*NODE OUTPUT, NSET=AXES
+*NODE OUTPUT
 U, V
 *OUTPUT, HISTORY, TIME INTERVAL={c['out_dt']:.10g}
 *NODE OUTPUT, NSET=BMID
