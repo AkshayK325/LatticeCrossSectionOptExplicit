@@ -539,15 +539,26 @@ def a4_ours(c=A4):
 
 
 # ------------------------------------------------------------------------------------------------ A3s
-A3s = dict(A3, name='A3s_crossed_solid_cylinders', n_sq=6, n_rad=3, ds=0.25, field_frames=10, ball_dt=2e-5,
+A3s = dict(A3, name='A3s2_crossed_solid_cylinders_fine', n_sq=16, n_rad=5, rbias=1.6, ds=0.25, ds_min=0.03, growth=1.15,
+           T=1e-3, hourglass='ENHANCED', field_frames=10, ball_dt=1e-4,
            title='A3s: the A3 crossing as SOLID cylinders (C3D8R, structured O-grid): A (r 0.8, along x, L 10) with '
                  'both end faces clamped; free B (r 0.5, along y) 0.3 mm above, 2 m/s down; frictionless general '
-                 '(surface-to-surface) contact; linear elastic E0; reference for radius-aware contact (vs our A3 beams)')
+                 '(surface-to-surface) contact; linear elastic E0; reference for radius-aware contact (vs our A3 beams). '
+                 'v2: 16x16 O-grid, surface-biased radial layers, axial slices graded to 0.03 mm at the crossing, '
+                 'enhanced hourglass control (v1 had 65% of its internal energy in hourglass modes)')
 
 
-def _ogrid(R, n, m):
+# v1 (first run, kept for the record): coarse 6x6 O-grid, uniform 0.25 mm slices, default hourglass control
+A3s1 = dict(A3s, name='A3s_crossed_solid_cylinders', n_sq=6, n_rad=3, rbias=1.0, ds_min=None, T=2e-3,
+            hourglass='RELAX STIFFNESS', ball_dt=2e-5,
+            title='A3s v1: coarse solid crossing (6x6 O-grid, 0.25 mm slices, default hourglass control); '
+                  'invalid: 65% of its internal energy is hourglass energy')
+
+
+def _ogrid(R, n, m, bias=1.0):
     """2D O-grid of a disc of radius R: centre square (half side R/2, n x n quads) + 4 blocks (n x m) to the
-    circle. Returns (P (k,2), Q (q,4) counter-clockwise quads, index of the centre node)."""
+    circle; bias > 1 makes the radial layers thinner toward the surface (f = 1 - (1 - u)^bias).
+    Returns (P (k,2), Q (q,4) counter-clockwise quads, index of the centre node)."""
     a = 0.5 * R
     pts, idx = [], {}
 
@@ -573,7 +584,7 @@ def _ogrid(R, n, m):
             th = t * math.pi / 4
             pa = (R * math.cos(th), R * math.sin(th))
             grid.append([node(rot(((1 - f) * ps[0] + f * pa[0], (1 - f) * ps[1] + f * pa[1])))
-                         for f in np.linspace(0, 1, m + 1)])
+                         for f in 1 - (1 - np.linspace(0, 1, m + 1)) ** bias])
         for i in range(n):
             for j in range(m):
                 q = (grid[i][j], grid[i][j + 1], grid[i + 1][j + 1], grid[i + 1][j])
@@ -588,12 +599,27 @@ def _ogrid(R, n, m):
     return P, Q, idx[(0.0, 0.0)]
 
 
-def _cylinder(R, L, axis, z0, n, m, ds, node0, elem0):
+def _graded(L, ds_min, ds_max, growth):
+    """Axial coordinates on [-L/2, L/2], symmetric, ds_min at 0 growing geometrically to ds_max."""
+    half, x, d = [0.0], 0.0, ds_min
+    while x + d < L / 2 - 1e-12:
+        x += d
+        half.append(x)
+        d = min(d * growth, ds_max)
+    half = np.array(half)
+    if L / 2 - half[-1] < 0.5 * d:                      # merge a sliver into the last interval
+        half = half[:-1]
+    half = np.append(half, L / 2)
+    return np.concatenate((-half[:0:-1], half))
+
+
+def _cylinder(R, L, axis, z0, n, m, ds, node0, elem0, bias=1.0, s=None):
     """Hex mesh of a cylinder along 'x' or 'y' centred at the origin (axis height z0). Returns nodes (k,3),
     C3D8R connectivity (1-based labels), axis-mid node label, end-face node labels, nodal lumped masses."""
-    P, Q, c0 = _ogrid(R, n, m)
-    ns = int(round(L / ds))
-    s = np.linspace(-L / 2, L / 2, ns + 1)
+    P, Q, c0 = _ogrid(R, n, m, bias)
+    if s is None:
+        s = np.linspace(-L / 2, L / 2, int(round(L / ds)) + 1)
+    ns = len(s) - 1
     k = len(P)
     X = []
     for sv in s:
@@ -618,15 +644,19 @@ def _cylinder(R, L, axis, z0, n, m, ds, node0, elem0):
             abs(np.linalg.det(np.stack((x[5] - x[6], x[7] - x[6], x[2] - x[6])))) * 0.5
         m_n[e] += RHO * V / 8
     mid = node0 + (ns // 2) * k + c0 + 1
+    axis_nodes = [node0 + i * k + c0 + 1 for i in range(ns + 1)]
     ends = list(range(node0 + 1, node0 + k + 1)) + list(range(node0 + ns * k + 1, node0 + (ns + 1) * k + 1))
-    return X, E + node0 + 1, mid, ends, m_n
+    return X, E + node0 + 1, mid, ends, m_n, axis_nodes
 
 
 def a3s_mesh(c=A3s):
-    XA, EA, midA, endsA, mA = _cylinder(c['rA'], c['L'], 'x', 0.0, c['n_sq'], c['n_rad'], c['ds'], 0, 0)
+    s = _graded(c['L'], c['ds_min'], c['ds'], c['growth']) if c.get('ds_min') else None
+    b = c.get('rbias', 1.0)
+    XA, EA, midA, endsA, mA, axA = _cylinder(c['rA'], c['L'], 'x', 0.0, c['n_sq'], c['n_rad'], c['ds'], 0, 0, b, s)
     zB = c['rA'] + c['rB'] + c['gap']
-    XB, EB, midB, endsB, mB = _cylinder(c['rB'], c['L'], 'y', zB, c['n_sq'], c['n_rad'], c['ds'], len(XA), len(EA))
-    return dict(XA=XA, EA=EA, midA=midA, endsA=endsA, XB=XB, EB=EB, midB=midB, mB=mB,
+    XB, EB, midB, endsB, mB, axB = _cylinder(c['rB'], c['L'], 'y', zB, c['n_sq'], c['n_rad'], c['ds'], len(XA),
+                                             len(EA), b, s)
+    return dict(XA=XA, EA=EA, midA=midA, endsA=endsA, XB=XB, EB=EB, midB=midB, mB=mB, axes=axA + axB,
                 labelsB=list(range(len(XA) + 1, len(XA) + len(XB) + 1)))
 
 
@@ -655,9 +685,16 @@ def a3s_inp(c=A3s):
 {g['midB']}
 *NSET, NSET=BALL, GENERATE
 {lb[0]}, {lb[-1]}, 1
-*SOLID SECTION, ELSET=CYLA, MATERIAL=EPU45_LIN
+*NSET, NSET=AXES
+{_wrap(', '.join(map(str, g['axes'])))}
+*SURFACE, TYPE=ELEMENT, NAME=SA
+CYLA,
+*SURFACE, TYPE=ELEMENT, NAME=SB
+CYLB,
+*SECTION CONTROLS, NAME=HG, HOURGLASS={c.get('hourglass', 'RELAX STIFFNESS')}
+*SOLID SECTION, ELSET=CYLA, MATERIAL=EPU45_LIN, CONTROLS=HG
 ,
-*SOLID SECTION, ELSET=CYLB, MATERIAL=EPU45_LIN
+*SOLID SECTION, ELSET=CYLB, MATERIAL=EPU45_LIN, CONTROLS=HG
 ,
 {MATERIAL_BLOCK}
 *SURFACE INTERACTION, NAME=FRICTIONLESS
@@ -677,13 +714,16 @@ BALL, 3, {-c['vB']:.10g}
 *CONTACT PROPERTY ASSIGNMENT
 , , FRICTIONLESS
 *OUTPUT, FIELD, NUMBER INTERVAL={c['field_frames']}
-*NODE OUTPUT
+*NODE OUTPUT, NSET=AXES
 U, V
 *OUTPUT, HISTORY, TIME INTERVAL={c['out_dt']:.10g}
 *NODE OUTPUT, NSET=BMID
 U3, V3
 *NODE OUTPUT, NSET=AMID
 U3, V3
+** total contact normal force on B (if this block is rejected, delete it: B momentum below still gives the impulse)
+*CONTACT OUTPUT, GENERAL CONTACT, SURFACE=SB
+CFN, CFNM
 *ENERGY OUTPUT
 ALLKE, ALLIE, ALLSE, ALLWK, ETOTAL, ALLAE, ALLVD, ALLFD
 *ENERGY OUTPUT, ELSET=CYLB
@@ -697,7 +737,7 @@ V3
 
 def a3s_ours(c=A3s):
     """Our beam model of the same crossing (A3), plus the solid model's B nodal masses for the momentum sum."""
-    out = a3_ours(A3)
+    out = a3_ours(dict(A3, T=max(A3['T'], c['T'])))
     out['massB_solid'] = a3s_mesh(c)['mB']
     return out
 
@@ -709,6 +749,7 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'A3': dict(spec=A3, inp=a3_inp, ours=a3_ours),
          'A3b': dict(spec=A3b, inp=lambda: a3_inp(A3b), ours=a3_ours),
          'A3c': dict(spec=A3c, inp=lambda: a3_inp(A3c), ours=lambda: a3_ours(A3c)),
+         'A3s1': dict(spec=A3s1, inp=lambda: a3s_inp(A3s1), ours=lambda: a3s_ours(A3s1)),
          'A3s': dict(spec=A3s, inp=a3s_inp, ours=a3s_ours),
          'A4': dict(spec=A4, inp=a4_inp, ours=a4_ours)}
 

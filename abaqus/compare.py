@@ -125,8 +125,8 @@ def labels(case):
     if case in ('A3', 'A3b', 'A3c'):
         n = cases.CASES[case]['spec']['n_el']
         return {'amid': n // 2 + 1, 'bmid': n + 1 + n // 2 + 1, 'b': list(range(n + 2, 2 * n + 3))}
-    if case == 'A3s':
-        g = cases.a3s_mesh()
+    if case in ('A3s', 'A3s1'):
+        g = cases.a3s_mesh(cases.CASES[case]['spec'])
         return {'amid': g['midA'], 'bmid': g['midB'], 'b': g['labelsB']}
     if case == 'A4':
         lat, rig = cases._a4_rig()
@@ -148,8 +148,8 @@ def signals(case, ours):
                 ('top V3', 'V3top', 'V3', ('node', L['top']), 'mm/s', None),
                 ('mid U1 (buckling)', 'U1mid', 'U1', ('node', L['mid']), 'mm', None),
                 ('root RF3', 'RF3', 'RF3', ('node', L['root']), 'N', None)] + E
-    if case in ('A3', 'A3b', 'A3c', 'A3s'):
-        mB = ours['massB_solid'] if case == 'A3s' else ours['massB']
+    if case in ('A3', 'A3b', 'A3c', 'A3s', 'A3s1'):
+        mB = ours['massB_solid'] if case.startswith('A3s') else ours['massB']
         return [('B mid U3', 'U3Bmid', 'U3', ('node', L['bmid']), 'mm', None),
                 ('A mid U3', 'U3Amid', 'U3', ('node', L['amid']), 'mm', None),
                 ('B momentum z', 'PB3', 'V3', ('wsum', L['b'], mB), 't mm/s', None)] + E
@@ -199,12 +199,23 @@ def scalar_metrics(case, ours, ab):
                 kr = rf[0] <= tcut
                 out.append(('root RF3 correlation, compression phase, 0.1 ms low-pass',
                             corr(rf[0][kr], rf[1][kr], ours['time'], ours['RF3'], window=1e-4), 1.0, None, 0.98))
-    if case in ('A3', 'A3b', 'A3c', 'A3s'):
-        mB = ours['massB_solid'] if case == 'A3s' else ours['massB']
+    if case in ('A3', 'A3b', 'A3c', 'A3s', 'A3s1'):
+        mB = ours['massB_solid'] if case.startswith('A3s') else ours['massB']
+        if case.startswith('A3s'):
+            ae, ie = pick(ab, 'ALLAE'), pick(ab, 'ALLIE')
+            if ae is not None and ie is not None:
+                fr = ae[1][-1] / max(ie[1][-1], 1e-300)
+                out.append(('Abaqus hourglass energy / internal energy (end)', fr, 0.0, fr, 0.10))
+            cf = [ty for (reg, v), ty in ab.items() if v == 'CFN3']
+            if cf:
+                tc, fc = cf[0]
+                Ic = abs(np.trapezoid(fc, tc)) / -ours['PB3'][0] * (ours['massB_solid'].sum() / ours['massB'].sum())
+                Io = (ours['PB3'][-1] - ours['PB3'][0]) / -ours['PB3'][0]
+                out.append(('impulse from contact force CFN3 / initial momentum', Io, Ic, rel(Io, Ic), 0.05))
         r = pick(ab, 'V3', ('wsum', L['b'], mB))
         if r is not None:
             Io, Ia = ours['PB3'][-1] - ours['PB3'][0], r[1][-1] - r[1][0]
-            if case == 'A3s':                                    # solid B has 1.1% less mass (24-gon section)
+            if case.startswith('A3s'):                                    # solid B has 1.1% less mass (24-gon section)
                 Io, Ia = Io / -ours['PB3'][0], Ia / -r[1][0]
                 out.append(('impulse on B / initial momentum', Io, Ia, rel(Io, Ia), 0.05))
             else:
