@@ -1,6 +1,6 @@
 """Design for an ideal-absorber force-stroke curve: fast rise 0 -> F_PLATEAU over D_RISE, then constant F_PLATEAU.
 Minimises the normalised F-delta MSE (loading branch) with exact adjoint gradients; 3 Midplane group radii.
-    PYTHONPATH=src:tests python tests/study_plateau_design.py [cuda|cpu] [mma|gcmma|lbfgsb] [r0,r1,r2 start] [maxiter]
+    [F_PLATEAU=120] PYTHONPATH=src:tests python tests/study_plateau_design.py [cuda|cpu] [mma|gcmma|lbfgsb] [r0,r1,r2 start] [maxiter]
 Writes (after the run finishes) a numbered figure + json in ResultsFig/explicit/ and notes/9_PlateauDesign_<opt>.md."""
 import datetime
 import json
@@ -24,7 +24,9 @@ from scipy.optimize import Bounds
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SYM, T = 'Midplane', 3.5e-3
-F_PLATEAU, D_RISE, D_END = 80.0, 0.3, 12.0          # [N], [mm], [mm]; 0.75 J at 80 N needs 9.4 mm of stroke
+import os
+F_PLATEAU = float(os.environ.get('F_PLATEAU', 80.0))  # [N] plateau force (env F_PLATEAU); 0.75 J at 80 N needs 9.4 mm
+D_RISE, D_END = 0.3, 12.0                           # [mm] rise length, target end
 R_RANGE = (0.4, 1.2)
 to_x = lambda r: [(v - R_RANGE[0]) / (R_RANGE[1] - R_RANGE[0]) for v in r]
 to_r = lambda x: [R_RANGE[0] + (R_RANGE[1] - R_RANGE[0]) * v for v in x]
@@ -47,7 +49,7 @@ target = plateau_target(F_PLATEAU, D_RISE, D_END)
 spec = dict(base, terms=lambda rig: make_terms(rig, target), outer=lambda rig: fd_mse_outer(target))
 g0 = [float(v) for v in sys.argv[3].split(',')] if len(sys.argv) > 3 else [0.80, 0.80, 0.80]
 MAXIT = int(sys.argv[4]) if len(sys.argv) > 4 else None
-TAG = OPT + ('' if len(sys.argv) <= 3 else '_from_' + '_'.join(f'{v:.3f}' for v in g0))
+TAG = (f'{F_PLATEAU:.0f}N_' if F_PLATEAU != 80.0 else '') + OPT + ('' if len(sys.argv) <= 3 else '_from_' + '_'.join(f'{v:.3f}' for v in g0))
 
 hist = {'J': [], 'g': [], 'time': []}
 memo, J0 = {}, {}
