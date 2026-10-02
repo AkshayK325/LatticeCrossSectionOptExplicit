@@ -145,14 +145,21 @@ def a1_ours(c=A1):
 
 
 # ------------------------------------------------------------------------------------------------ shared
-def _section(elset, r, n1):
+SCF_OFF = 1e-8      # Abaqus B31 slenderness compensation factor (default 0.25 scales kappa G A down by
+                    # 1/(1 + 0.25 l^2 A / 12 I): -8% on 0.8 mm elements of r 0.8). Ours has no such factor.
+
+
+def _section(elset, r, n1, scf=None):
+    """*BEAM SECTION + *TRANSVERSE SHEAR STIFFNESS (kappa G A; third entry = slenderness compensation factor,
+    given only when scf is not None: SCF_OFF effectively switches Abaqus's short-element shear reduction off)."""
     A = math.pi * r**2
     ks = KAPPA * G0 * A
+    extra = '' if scf is None else f', {scf:.10g}'
     return f"""*BEAM SECTION, ELSET={elset}, MATERIAL=EPU45_LIN, SECTION=CIRC
 {r:.10g}
 {n1[0]:.10g}, {n1[1]:.10g}, {n1[2]:.10g}
 *TRANSVERSE SHEAR STIFFNESS
-{ks:.10g}, {ks:.10g}"""
+{ks:.10g}, {ks:.10g}{extra}"""
 
 
 MATERIAL_BLOCK = f"""*MATERIAL, NAME=EPU45_LIN
@@ -185,9 +192,18 @@ def _pack(h, keys, dt, n):
 
 
 # ------------------------------------------------------------------------------------------------ A2
-A2 = dict(name='A2_strut_impact', L=6.4, n_el=8, r=0.8, imp=0.05, M=1e-5, v0=6000.0, T=2e-3, out_dt=2e-6,
+A2 = dict(name='A2_strut_impact', L=6.4, n_el=8, r=0.8, imp=0.05, M=1e-5, v0=6000.0, T=2e-3, out_dt=2e-6, scf=None,
           title='A2: single strut, clamped base; top node guided (only z free, rotations fixed) carrying a rigid '
                 'mass M at 6 m/s; first-mode imperfection 0.05 mm in x; linear elastic E0; buckles')
+
+
+A2a = dict(A2, name='A2a_strut_impact_32el', n_el=32, scf=SCF_OFF,
+           title='A2a: as A2 (stubby strut L/r = 8) with 32 elements and Abaqus shear slenderness compensation off; '
+                 'large axial strain (~12% on the buckling plateau, ~28% tension on rebound)')
+A2b = dict(A2, name='A2b_slender_strut_impact', r=0.2, n_el=32, imp=0.02, M=2e-6, v0=1000.0, T=8e-3, out_dt=1e-5,
+           scf=SCF_OFF,
+           title='A2b: slender strut L = 6.4, r = 0.2 (L/r = 32), 32 elements, imperfection 0.02 mm, top mass 2 g at '
+                 '1 m/s; buckles; axial strain <= 2% throughout (small-strain kinematics check); shear compensation off')
 
 
 def a2_mesh(c=A2):
@@ -219,7 +235,7 @@ def a2_inp(c=A2):
 {top}
 *NSET, NSET=MID
 {mid}
-{_section('BEAM', c['r'], (0., 1., 0.))}
+{_section('BEAM', c['r'], (0., 1., 0.), c['scf'])}
 *MASS, ELSET=IMPMASS
 {c['M']:.10g},
 {MATERIAL_BLOCK}
@@ -437,8 +453,15 @@ def a4_inp(c=A4):
     nodes = _fmt_rows([(i + 1, *map(float, x)) for i, x in enumerate(X)])      # last node = impactor = ref node
     t = Xr[connr[:, 1]] - Xr[connr[:, 0]]
     vert = np.abs(t[:, 2]) / np.linalg.norm(t, axis=1) > 0.9
-    ev = _fmt_rows([(e + 1, int(a) + 1, int(b) + 1) for e, (a, b) in enumerate(connr) if vert[e]])
-    eo = _fmt_rows([(e + 1, int(a) + 1, int(b) + 1) for e, (a, b) in enumerate(connr) if not vert[e]])
+    # beam orientation n1 must not be parallel to the element axis: two groups, empty groups are not written
+    # (the C4 cell has no vertical struts; an empty *ELEMENT block is a fatal input error in Abaqus)
+    groups = [(name, n1, [e for e in range(len(connr)) if vert[e] == isv])
+              for name, n1, isv in (('VERT', (1., 0., 0.), True), ('OBLQ', (0., 0., -1.), False))]
+    groups = [g for g in groups if g[2]]
+    elem_blocks = '\n'.join(
+        f"*ELEMENT, TYPE=B31, ELSET={name}\n" + _fmt_rows([(e + 1, int(connr[e, 0]) + 1, int(connr[e, 1]) + 1) for e in es])
+        for name, n1, es in groups)
+    sections = '\n'.join(_section(name, c['r'], n1, SCF_OFF) for name, n1, es in groups)
     top = ', '.join(str(int(k) + 1) for k in rig['top'].cpu().numpy())
     bot = ', '.join(str(int(k) + 1) for k in rig['bot'])
     Mref = rig['M'] + c['plate_mass']
@@ -449,12 +472,9 @@ def a4_inp(c=A4):
 ** lumped mass of the top nodes adds through the rigid body (as in ours). Rotations of the plate fixed.
 *NODE
 {nodes}
-*ELEMENT, TYPE=B31, ELSET=VERT
-{ev}
-*ELEMENT, TYPE=B31, ELSET=OBLQ
-{eo}
+{elem_blocks}
 *ELSET, ELSET=LATTICE
-VERT, OBLQ
+{', '.join(g[0] for g in groups)}
 *ELEMENT, TYPE=MASS, ELSET=IMPMASS
 {len(connr) + 1000}, {ref}
 *NSET, NSET=TOP
@@ -465,8 +485,7 @@ VERT, OBLQ
 {ref}
 *NSET, NSET=MOVING
 TOP, REF
-{_section('VERT', c['r'], (1., 0., 0.))}
-{_section('OBLQ', c['r'], (0., 0., -1.))}
+{sections}
 *MASS, ELSET=IMPMASS
 {Mref:.10g},
 {MATERIAL_BLOCK}
@@ -514,6 +533,8 @@ def a4_ours(c=A4):
 
 CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'A2': dict(spec=A2, inp=a2_inp, ours=a2_ours),
+         'A2a': dict(spec=A2a, inp=lambda: a2_inp(A2a), ours=lambda: a2_ours(A2a)),
+         'A2b': dict(spec=A2b, inp=lambda: a2_inp(A2b), ours=lambda: a2_ours(A2b)),
          'A3': dict(spec=A3, inp=a3_inp, ours=a3_ours),
          'A3b': dict(spec=A3b, inp=lambda: a3_inp(A3b), ours=a3_ours),
          'A4': dict(spec=A4, inp=a4_inp, ours=a4_ours)}

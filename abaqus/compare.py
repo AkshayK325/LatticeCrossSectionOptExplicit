@@ -30,7 +30,7 @@ def read_abaqus(name):
     with open(p) as f:
         for row in csv.DictReader(f):
             data.setdefault((row['region'], row['variable']), []).append((float(row['time']), float(row['value'])))
-    return {k: tuple(np.array(v).T) for k, v in data.items()}
+    return {k: tuple(np.array(v).T) for k, v in data.items()} or None     # header only (failed job) -> None
 
 
 def read_sta(name):
@@ -113,8 +113,8 @@ def first_time(t, y, level):
 def labels(case):
     if case == 'A1':
         return {'tip': cases.A1['n_el'] + 1, 'root': 1}
-    if case == 'A2':
-        n = cases.A2['n_el']
+    if case.startswith('A2'):
+        n = cases.CASES[case]['spec']['n_el']
         return {'top': n + 1, 'mid': n // 2 + 1, 'root': 1}
     if case in ('A3', 'A3b'):
         n = cases.A3['n_el']
@@ -134,7 +134,7 @@ def signals(case, ours):
         return [('tip U3', 'U3', 'U3', ('node', L['tip']), 'mm', 0.01), ('tip U1', 'U1', 'U1', ('node', L['tip']), 'mm', 0.02),
                 ('tip UR2', 'UR2', 'UR2', ('node', L['tip']), 'rad', 0.01),
                 ('root RF3', 'RF3', 'RF3', ('node', L['root']), 'N', None)] + E
-    if case == 'A2':
+    if case.startswith('A2'):
         return [('top U3 (stroke)', 'U3top', 'U3', ('node', L['top']), 'mm', 0.02),
                 ('top V3', 'V3top', 'V3', ('node', L['top']), 'mm/s', None),
                 ('mid U1 (buckling)', 'U1mid', 'U1', ('node', L['mid']), 'mm', None),
@@ -165,19 +165,30 @@ def scalar_metrics(case, ours, ab):
         elif pick(ab, 'ALLKE') is not None:                      # .sta only: KE period = U3 period / 2
             Tk, Tko = period(*pick(ab, 'ALLKE')), period(ours['time'], ours['ALLKE'])
             out.append(('kinetic-energy period [ms]', Tko * 1e3, Tk * 1e3, rel(Tko, Tk), 0.005))
-    if case == 'A2':
-        r = pick(ab, 'RF3', ('node', L['root']))
-        if r is not None:
-            pa, po = np.abs(r[1]).max(), np.abs(ours['RF3']).max()
-            out.append(('peak |root RF3| [N]', po, pa, rel(po, pa), 0.02))
-            out.append(('root RF3 correlation', corr(r[0], r[1], ours['time'], ours['RF3']), 1.0, None, 0.98))
-        r = pick(ab, 'U1', ('node', L['mid']))
-        if r is not None:
-            tb_o, tb_a = first_time(ours['time'], ours['U1mid'], 0.2), first_time(*r, 0.2)
-            out.append(('buckling time (|mid U1| > 0.2 mm) [ms]', tb_o * 1e3, tb_a * 1e3, rel(tb_o, tb_a), 0.03))
-        r = pick(ab, 'U3', ('node', L['top']))
-        if r is not None:
-            out.append(('max stroke [mm]', -ours['U3top'].min(), -r[1].min(), rel(ours['U3top'].min(), r[1].min()), 0.02))
+    if case.startswith('A2'):
+        # graded on the COMPRESSION phase (t <= Abaqus time of max stroke): the rebound then stretches the strut far
+        # into tension, where 'linear elastic' differs between codes (engineering vs log strain), see the plan
+        u = pick(ab, 'U3', ('node', L['top']))
+        rf = pick(ab, 'RF3', ('node', L['root']))
+        mu = pick(ab, 'U1', ('node', L['mid']))
+        if u is not None:
+            tcut = u[0][np.argmin(u[1])]
+            k = u[0] <= tcut
+            out.append(('max stroke [mm]', -ours['U3top'].min(), -u[1].min(), rel(ours['U3top'].min(), u[1].min()), 0.02))
+            e = nrmse(u[0][k], u[1][k], ours['time'], ours['U3top'])
+            out.append(('stroke nRMSE, compression phase', e, 0.0, e, 0.02))
+            if mu is not None:
+                lev = 0.2 * np.abs(mu[1]).max()                  # 20% of the Abaqus max lateral deflection
+                tb_o, tb_a = first_time(ours['time'], ours['U1mid'], lev), first_time(*mu, lev)
+                out.append((f'buckling time (|mid U1| > {lev:.3g} mm) [ms]', tb_o * 1e3, tb_a * 1e3, rel(tb_o, tb_a), 0.03))
+            if rf is not None and mu is not None:
+                w = (rf[0] >= tb_a) & (rf[0] <= tcut)
+                if w.sum() > 3:
+                    po, pa = np.interp(rf[0][w], ours['time'], ours['RF3']).mean(), rf[1][w].mean()
+                    out.append(('post-buckling plateau, mean root RF3 [N]', po, pa, rel(po, pa), 0.03))
+                kr = rf[0] <= tcut
+                out.append(('root RF3 correlation, compression phase', corr(rf[0][kr], rf[1][kr], ours['time'], ours['RF3']),
+                            1.0, None, 0.98))
     if case in ('A3', 'A3b'):
         r = pick(ab, 'V3', ('wsum', L['b'], ours['massB']))
         if r is not None:
