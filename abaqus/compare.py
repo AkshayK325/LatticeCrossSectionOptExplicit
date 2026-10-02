@@ -122,9 +122,12 @@ def labels(case):
     if case.startswith('A2'):
         n = cases.CASES[case]['spec']['n_el']
         return {'top': n + 1, 'mid': n // 2 + 1, 'root': 1}
-    if case in ('A3', 'A3b'):
-        n = cases.A3['n_el']
+    if case in ('A3', 'A3b', 'A3c'):
+        n = cases.CASES[case]['spec']['n_el']
         return {'amid': n // 2 + 1, 'bmid': n + 1 + n // 2 + 1, 'b': list(range(n + 2, 2 * n + 3))}
+    if case == 'A3s':
+        g = cases.a3s_mesh()
+        return {'amid': g['midA'], 'bmid': g['midB'], 'b': g['labelsB']}
     if case == 'A4':
         lat, rig = cases._a4_rig()
         return {'ref': len(lat['Xr']) + 1, 'bot': [int(k) + 1 for k in rig['bot']]}
@@ -145,10 +148,11 @@ def signals(case, ours):
                 ('top V3', 'V3top', 'V3', ('node', L['top']), 'mm/s', None),
                 ('mid U1 (buckling)', 'U1mid', 'U1', ('node', L['mid']), 'mm', None),
                 ('root RF3', 'RF3', 'RF3', ('node', L['root']), 'N', None)] + E
-    if case in ('A3', 'A3b'):
+    if case in ('A3', 'A3b', 'A3c', 'A3s'):
+        mB = ours['massB_solid'] if case == 'A3s' else ours['massB']
         return [('B mid U3', 'U3Bmid', 'U3', ('node', L['bmid']), 'mm', None),
                 ('A mid U3', 'U3Amid', 'U3', ('node', L['amid']), 'mm', None),
-                ('B momentum z', 'PB3', 'V3', ('wsum', L['b'], ours['massB']), 't mm/s', None)] + E
+                ('B momentum z', 'PB3', 'V3', ('wsum', L['b'], mB), 't mm/s', None)] + E
     if case == 'A4':
         return [('plate U3 (stroke)', 'U3ref', 'U3', ('node', L['ref']), 'mm', 0.02),
                 ('plate V3', 'V3ref', 'V3', ('node', L['ref']), 'mm/s', None),
@@ -195,11 +199,16 @@ def scalar_metrics(case, ours, ab):
                 kr = rf[0] <= tcut
                 out.append(('root RF3 correlation, compression phase, 0.1 ms low-pass',
                             corr(rf[0][kr], rf[1][kr], ours['time'], ours['RF3'], window=1e-4), 1.0, None, 0.98))
-    if case in ('A3', 'A3b'):
-        r = pick(ab, 'V3', ('wsum', L['b'], ours['massB']))
+    if case in ('A3', 'A3b', 'A3c', 'A3s'):
+        mB = ours['massB_solid'] if case == 'A3s' else ours['massB']
+        r = pick(ab, 'V3', ('wsum', L['b'], mB))
         if r is not None:
             Io, Ia = ours['PB3'][-1] - ours['PB3'][0], r[1][-1] - r[1][0]
-            out.append(('impulse on B [t mm/s]', Io, Ia, rel(Io, Ia), 0.05))
+            if case == 'A3s':                                    # solid B has 1.1% less mass (24-gon section)
+                Io, Ia = Io / -ours['PB3'][0], Ia / -r[1][0]
+                out.append(('impulse on B / initial momentum', Io, Ia, rel(Io, Ia), 0.05))
+            else:
+                out.append(('impulse on B [t mm/s]', Io, Ia, rel(Io, Ia), 0.05))
             ro, ra = -ours['PB3'][-1] / ours['PB3'][0], -r[1][-1] / r[1][0]
             out.append(('B rebound momentum ratio', ro, ra, rel(ro, ra), 0.05))
         r = pick(ab, 'U3', ('node', L['bmid']))
