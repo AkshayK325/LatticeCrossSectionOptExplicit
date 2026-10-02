@@ -183,3 +183,18 @@ src/__pycache__/utilFuncs.cpython-39.pyc
 geomData/
 savedNet/
 .DS_Store
+
+# Abaqus benchmark: odb and job scratch files stay local (inp, csv, reports are tracked)
+abaqus/odb/*
+!abaqus/odb/.gitkeep
+abaqus/**/*.odb
+abaqus/**/*.lck
+abaqus/**/*.sim
+abaqus/**/*.prt
+abaqus/**/*.com
+abaqus/**/*.abq
+abaqus/**/*.res
+abaqus/**/*.stt
+abaqus/**/*.mdl
+abaqus/**/*.pac
+abaqus/**/*.sel
