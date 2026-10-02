@@ -1,10 +1,11 @@
 """Our solver vs Abaqus/Explicit for one benchmark case.
 
-    PYTHONPATH=src python abaqus/compare.py A1
+    PYTHONPATH=src python abaqus/compare.py A1 [A2 ...]
 
 1. Runs our solver on the case (abaqus/cases.py) and saves abaqus/ours/<name>.csv (always: the 'prediction').
-2. If abaqus/csv/<name>_history.csv exists (from extract_odb.py), overlays both and computes the metrics.
-3. Writes a numbered figure in ResultsFig/explicit/ and abaqus/results/<name>.md.
+2. If abaqus/csv/<name>_history.csv exists (from extract_odb.py), overlays both and computes the metrics;
+   otherwise falls back to the .sta energy table if present.
+3. Writes a numbered figure in ResultsFig/abaqus/ and abaqus/results/<name>.md.
 """
 import csv
 import datetime
@@ -16,6 +17,8 @@ import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 import cases                                                     # noqa: E402
+
+FIGDIR = ROOT.parent / 'ResultsFig' / 'abaqus'
 
 
 def read_abaqus(name):
@@ -53,22 +56,38 @@ def read_sta(name):
             ('Assembly ASSEMBLY (from .sta)', 'ETOTAL'): (np.array(t), np.array(et))}
 
 
-def pick(ab, var, node=None):
-    """History of variable var at node label `node` (region 'Node <inst>.<label>'), or the assembly (energies)."""
+def pick(ab, var, where=None):
+    """Abaqus history of `var`. where: None (assembly, energies), ('node', label), ('sum', labels) or
+    ('wsum', labels, weights) (weighted sum over nodes, e.g. momentum = sum m v)."""
+    if where is None:
+        for (reg, v), ty in ab.items():
+            if v == var and reg.startswith('Assembly'):
+                return ty
+        return None
+    kind, labels = where[0], where[1]
+    labels = [labels] if kind == 'node' else list(labels)
+    w = where[2] if kind == 'wsum' else np.ones(len(labels))
+    found = {}
     for (reg, v), ty in ab.items():
-        if v != var:
-            continue
-        if node is None and reg.startswith('Assembly'):
-            return ty
-        if node is not None and reg.startswith('Node') and reg.rsplit('.', 1)[-1] == str(node):
-            return ty
-    return None
+        if v == var and reg.startswith('Node'):
+            lab = int(reg.rsplit('.', 1)[-1])
+            if lab in labels:
+                found[lab] = ty
+    if len(found) != len(labels):
+        return None
+    t = found[labels[0]][0]
+    return t, sum(wi * np.interp(t, *found[lab]) for wi, lab in zip(w, labels))
 
 
 def nrmse(t_ref, y_ref, t, y):
     """RMS of (ours - Abaqus) on Abaqus's time points, normalised by max |Abaqus|."""
     yi = np.interp(t_ref, t, y)
     return float(np.sqrt(np.mean((yi - y_ref) ** 2)) / max(np.abs(y_ref).max(), 1e-300))
+
+
+def corr(t_ref, y_ref, t, y):
+    yi = np.interp(t_ref, t, y)
+    return float(np.corrcoef(yi, y_ref)[0, 1])
 
 
 def period(t, y):
@@ -81,19 +100,104 @@ def period(t, y):
     return float(np.mean(np.diff(tc)))
 
 
-# per case: which signals to compare: (label, our key, Abaqus variable, node label or None, unit)
-SIGNALS = {
-    'A1': [('tip U3', 'U3', 'U3', 'tip', 'mm'), ('tip U1', 'U1', 'U1', 'tip', 'mm'),
-           ('tip UR2', 'UR2', 'UR2', 'tip', 'rad'), ('root RF3', 'RF3', 'RF3', 'root', 'N'),
-           ('kinetic energy', 'ALLKE', 'ALLKE', None, 'N mm'), ('strain energy', 'ALLSE', 'ALLSE', None, 'N mm')],
-}
-PASS = {'A1': {'tip U3': 0.01, 'tip U1': 0.02, 'tip UR2': 0.01}}       # nRMSE limits (plan); period: 0.5%
+def first_time(t, y, level):
+    """First time |y| exceeds level (linear interpolation)."""
+    k = int(np.argmax(np.abs(y) > level))
+    if k == 0:
+        return float('nan')
+    a, b = abs(y[k - 1]), abs(y[k])
+    return float(t[k - 1] + (level - a) / (b - a) * (t[k] - t[k - 1]))
 
 
-def node_label(case, which):
+# ------------------------------------------------------------------------------------------------ per case
+def labels(case):
     if case == 'A1':
-        return {'tip': cases.A1['n_el'] + 1, 'root': 1}[which]
+        return {'tip': cases.A1['n_el'] + 1, 'root': 1}
+    if case == 'A2':
+        n = cases.A2['n_el']
+        return {'top': n + 1, 'mid': n // 2 + 1, 'root': 1}
+    if case in ('A3', 'A3b'):
+        n = cases.A3['n_el']
+        return {'amid': n // 2 + 1, 'bmid': n + 1 + n // 2 + 1, 'b': list(range(n + 2, 2 * n + 3))}
+    if case == 'A4':
+        lat, rig = cases._a4_rig()
+        return {'ref': len(lat['Xr']) + 1, 'bot': [int(k) + 1 for k in rig['bot']]}
     raise KeyError(case)
+
+
+def signals(case, ours):
+    """(label, our key, Abaqus variable, where, unit, nRMSE limit or None)."""
+    L = labels(case)
+    E = [('kinetic energy', 'ALLKE', 'ALLKE', None, 'N mm', None),
+         ('strain energy', 'ALLSE', 'ALLSE', None, 'N mm', None)]
+    if case == 'A1':
+        return [('tip U3', 'U3', 'U3', ('node', L['tip']), 'mm', 0.01), ('tip U1', 'U1', 'U1', ('node', L['tip']), 'mm', 0.02),
+                ('tip UR2', 'UR2', 'UR2', ('node', L['tip']), 'rad', 0.01),
+                ('root RF3', 'RF3', 'RF3', ('node', L['root']), 'N', None)] + E
+    if case == 'A2':
+        return [('top U3 (stroke)', 'U3top', 'U3', ('node', L['top']), 'mm', 0.02),
+                ('top V3', 'V3top', 'V3', ('node', L['top']), 'mm/s', None),
+                ('mid U1 (buckling)', 'U1mid', 'U1', ('node', L['mid']), 'mm', None),
+                ('root RF3', 'RF3', 'RF3', ('node', L['root']), 'N', None)] + E
+    if case in ('A3', 'A3b'):
+        return [('B mid U3', 'U3Bmid', 'U3', ('node', L['bmid']), 'mm', None),
+                ('A mid U3', 'U3Amid', 'U3', ('node', L['amid']), 'mm', None),
+                ('B momentum z', 'PB3', 'V3', ('wsum', L['b'], ours['massB']), 't mm/s', None)] + E
+    if case == 'A4':
+        return [('plate U3 (stroke)', 'U3ref', 'U3', ('node', L['ref']), 'mm', 0.02),
+                ('plate V3', 'V3ref', 'V3', ('node', L['ref']), 'mm/s', None),
+                ('bottom reaction (sum RF3)', 'RF3bot', 'RF3', ('sum', L['bot']), 'N', 0.05)] + E
+    raise KeyError(case)
+
+
+def scalar_metrics(case, ours, ab):
+    """(name, ours, Abaqus, relative difference or None, limit) for the plan's pass criteria."""
+    L = labels(case)
+    out = []
+
+    def rel(a, b):
+        return abs(a - b) / max(abs(b), 1e-300)
+    if case == 'A1':
+        r = pick(ab, 'U3', ('node', L['tip']))
+        if r is not None:
+            Tp, Ta = period(ours['time'], ours['U3']), period(*r)
+            out.append(('U3 period [ms]', Tp * 1e3, Ta * 1e3, rel(Tp, Ta), 0.005))
+        elif pick(ab, 'ALLKE') is not None:                      # .sta only: KE period = U3 period / 2
+            Tk, Tko = period(*pick(ab, 'ALLKE')), period(ours['time'], ours['ALLKE'])
+            out.append(('kinetic-energy period [ms]', Tko * 1e3, Tk * 1e3, rel(Tko, Tk), 0.005))
+    if case == 'A2':
+        r = pick(ab, 'RF3', ('node', L['root']))
+        if r is not None:
+            pa, po = np.abs(r[1]).max(), np.abs(ours['RF3']).max()
+            out.append(('peak |root RF3| [N]', po, pa, rel(po, pa), 0.02))
+            out.append(('root RF3 correlation', corr(r[0], r[1], ours['time'], ours['RF3']), 1.0, None, 0.98))
+        r = pick(ab, 'U1', ('node', L['mid']))
+        if r is not None:
+            tb_o, tb_a = first_time(ours['time'], ours['U1mid'], 0.2), first_time(*r, 0.2)
+            out.append(('buckling time (|mid U1| > 0.2 mm) [ms]', tb_o * 1e3, tb_a * 1e3, rel(tb_o, tb_a), 0.03))
+        r = pick(ab, 'U3', ('node', L['top']))
+        if r is not None:
+            out.append(('max stroke [mm]', -ours['U3top'].min(), -r[1].min(), rel(ours['U3top'].min(), r[1].min()), 0.02))
+    if case in ('A3', 'A3b'):
+        r = pick(ab, 'V3', ('wsum', L['b'], ours['massB']))
+        if r is not None:
+            Io, Ia = ours['PB3'][-1] - ours['PB3'][0], r[1][-1] - r[1][0]
+            out.append(('impulse on B [t mm/s]', Io, Ia, rel(Io, Ia), 0.05))
+            ro, ra = -ours['PB3'][-1] / ours['PB3'][0], -r[1][-1] / r[1][0]
+            out.append(('B rebound momentum ratio', ro, ra, rel(ro, ra), 0.05))
+        r = pick(ab, 'U3', ('node', L['bmid']))
+        if r is not None:
+            out.append(('B mid max downward U3 [mm]', -ours['U3Bmid'].min(), -r[1].min(),
+                        rel(ours['U3Bmid'].min(), r[1].min()), None))
+    if case == 'A4':
+        r = pick(ab, 'U3', ('node', L['ref']))
+        if r is not None:
+            out.append(('max stroke [mm]', -ours['U3ref'].min(), -r[1].min(), rel(ours['U3ref'].min(), r[1].min()), 0.02))
+        r = pick(ab, 'RF3', ('sum', L['bot']))
+        if r is not None:
+            pa, po = np.abs(r[1]).max(), np.abs(ours['RF3bot']).max()
+            out.append(('peak |bottom reaction| [N]', po, pa, rel(po, pa), 0.05))
+    return out
 
 
 def main(case):
@@ -106,7 +210,7 @@ def main(case):
     name = c['spec']['name']
     ours = c['ours']()
     (ROOT / 'ours').mkdir(exist_ok=True)
-    keys = [k for k in ours if isinstance(ours[k], np.ndarray)]
+    keys = [k for k in ours if isinstance(ours[k], np.ndarray) and ours[k].shape == ours['time'].shape]
     with open(ROOT / 'ours' / f'{name}.csv', 'w', newline='') as f:
         w = csv.writer(f)
         w.writerow(keys)
@@ -116,61 +220,58 @@ def main(case):
     if ab is None:
         ab = read_sta(name)
         source = f'{name}.sta only (kinetic and total energy at the field frames, 4 digits): no odb/CSV yet'
-    sig = SIGNALS[case]
-    fig, axs = plt.subplots(2, (len(sig) + 1) // 2, figsize=(5 * ((len(sig) + 1) // 2), 7))
+    sig = signals(case, ours)
+    ncol = (len(sig) + 1) // 2
+    fig, axs = plt.subplots(2, ncol, figsize=(5 * ncol, 7))
     rows = []
-    for ax, (label, ok, av, nd, unit) in zip(axs.flat, sig):
+    for ax, (label, ok, av, where, unit, lim) in zip(axs.flat, sig):
         t = ours['time']
         ax.plot(t * 1e3, ours[ok], 'C3-', lw=1.5, label='ours')
-        ref = None if ab is None else pick(ab, av, None if nd is None else node_label(case, nd))
+        ref = None if ab is None else pick(ab, av, where)
         if ref is not None:
             ax.plot(ref[0] * 1e3, ref[1], 'k--', lw=1.2, label='Abaqus/Explicit')
             e = nrmse(ref[0], ref[1], t, ours[ok])
-            lim = PASS.get(case, {}).get(label)
             rows.append((label, f'{e:.2e}', '—' if lim is None else ('✔' if e <= lim else f'✘ (limit {lim})')))
         ax.set(xlabel='time [ms]', ylabel=f'{label} [{unit}]')
         ax.legend(fontsize=8)
+    for ax in list(axs.flat)[len(sig):]:
+        ax.axis('off')
     fig.suptitle(c['spec']['title'], fontsize=9)
     fig.tight_layout()
-    fp = numbered(ROOT.parent / 'ResultsFig' / 'explicit', f'abaqus_{name}.png')
+    fp = numbered(FIGDIR, f'{name}.png')
     fig.savefig(fp, dpi=120)
+    plt.close(fig)
     (ROOT / 'results').mkdir(exist_ok=True)
     md = [f'# {name}: ours vs Abaqus/Explicit', '',
           f'Generated by `abaqus/compare.py {case}` ({datetime.datetime.now():%Y-%m-%d %H:%M}).', '',
           c['spec']['title'] + '.', '',
           f'- Ours: {ours["n_steps"]} steps, dt = {ours["dt"]:.3e} s.',
           f'- Abaqus: {source if ab is not None else "**no CSV yet** (prediction only)"}.',
-          f'- Figure: `ResultsFig/explicit/{fp.name}`', '']
-    if case == 'A1':
-        Tp = period(ours['time'], ours['U3'])
-        md.append(f'- Ours: max tip U3 = {ours["U3"].max():.4f} mm, min UR2 = {np.degrees(ours["UR2"].min()):.2f} deg, '
-                  f'period of U3 = {Tp * 1e3:.4f} ms.')
-        if ab is not None and pick(ab, 'U3', node_label(case, 'tip')) is not None:
-            ta, ya = pick(ab, 'U3', node_label(case, 'tip'))
-            Ta = period(ta, ya)
-            ok = abs(Tp / Ta - 1) <= 0.005
-            md.append(f'- Abaqus: max tip U3 = {ya.max():.4f} mm, period = {Ta * 1e3:.4f} ms; '
-                      f'period error {abs(Tp / Ta - 1):.2%} {"✔" if ok else "✘ (limit 0.5%)"}.')
-    if case == 'A1' and ab is not None and pick(ab, 'U3', node_label(case, 'tip')) is None and pick(ab, 'ALLKE') is not None:
-        ta, ka = pick(ab, 'ALLKE')                               # .sta only: kinetic-energy period = U3 period / 2
-        Tk, Tko = period(ta, ka), period(ours['time'], ours['ALLKE'])
-        ok = abs(Tko / Tk - 1) <= 0.005
-        md.append(f'- Kinetic-energy period: Abaqus {Tk * 1e3:.4f} ms, ours {Tko * 1e3:.4f} ms; error '
-                  f'{abs(Tko / Tk - 1):.2%} {"✔" if ok else "✘"} (limit 0.5%). Max KE at the Abaqus sample times: '
-                  f'Abaqus {ka.max():.4f}, ours {np.interp(ta, ours["time"], ours["ALLKE"]).max():.4f} N mm.')
-    if ab is not None and pick(ab, 'ETOTAL') is not None:
+          f'- Figure: `ResultsFig/abaqus/{fp.name}`', '']
+    sm = [] if ab is None else scalar_metrics(case, ours, ab)
+    if sm:
+        md += ['| metric | ours | Abaqus | rel. diff | pass |', '|---|---|---|---|---|']
+        for nm, o, a, rd, lim in sm:
+            if rd is None:                                       # correlation-type: compare value to limit
+                md.append(f'| {nm} | {o:.4f} | — | — | {"✔" if o >= lim else f"✘ (≥ {lim})"} |')
+            else:
+                md.append(f'| {nm} | {o:.5g} | {a:.5g} | {rd:.2%} | '
+                          f'{"—" if lim is None else ("✔" if rd <= lim else f"✘ (limit {lim:.1%})")} |')
+        md.append('')
+    if ab is not None and pick(ab, 'ETOTAL') is not None and pick(ab, 'ALLKE') is not None:
         ta, ea = pick(ab, 'ETOTAL')
-        kmax = pick(ab, 'ALLKE')[1].max() if pick(ab, 'ALLKE') is not None else float('nan')
-        drift_ours = (lambda E: (E.max() - E.min()) / max(ours['ALLWK'].max(), 1e-300))(
-            ours['ALLKE'] + ours['ALLSE'] - ours['ALLWK']) if 'ALLWK' in ours else float('nan')
         md.append(f'- Energy balance: Abaqus |ETOTAL| max {np.abs(ea).max():.3e} N mm '
-                  f'({np.abs(ea).max() / kmax:.2%} of max KE); ours drift {drift_ours:.1e} of the external work.')
+                  f'({np.abs(ea).max() / pick(ab, "ALLKE")[1].max():.2%} of max KE).')
     if rows:
         md += ['', '| signal | nRMSE (ours − Abaqus, / max abs Abaqus) | pass |', '|---|---|---|']
         md += [f'| {a} | {b} | {p} |' for a, b, p in rows]
+    if ab is None:
+        md += ['', '### Our prediction (before Abaqus)']
+        md += [f'- {k}: min {ours[k].min():.5g}, max {ours[k].max():.5g}' for k in keys if k != 'time']
     (ROOT / 'results' / f'{name}.md').write_text('\n'.join(md) + '\n')
     print('\n'.join(md))
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else 'A1')
+    for case in (sys.argv[1:] or ['A1']):
+        main(case)
