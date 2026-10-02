@@ -128,7 +128,7 @@ def custom_minimize(objCall, x0, bounds,method='GCMMA',constraintCall=None, opti
     if constraintCall== None: # size of 1 constraint
         def constraintCall(x):
             c = 1e-6*np.ones((1,1))
-            dc = 1e-12*(x[np.newaxis]*0+1.)
+            dc = 1e-12*np.ones((1, np.size(x)))      # (m, n) for any x shape
             return c,dc
             
     if bounds == None:
@@ -204,6 +204,28 @@ def compute_move(outer_iter, max_iter, move_min=1e-3, move_max=1.0, decay_rate=5
     move = move_min + (move_max - move_min) * scaled
     return move
     
+def move_at(it, options, default=0.2):
+    """Move limit at outer iteration it. options['move_schedule']:
+    None        constant move_limit;
+    'cos'       cycling, no decay: move_min + (move_limit - move_min) * (1 + cos(2 pi (it-1) / move_period)) / 2,
+                period options.get('move_period', 10) (large steps, then small ones, repeatedly);
+    'damped_cos' compute_move, the decaying cosine of the legacy optimizeMMA / optBeam runs (decay over
+                maxiter/2 at rate miniter, wiggle options.get('wiggle', 0.5));
+    callable    it -> move.
+    Floor options.get('move_min', 1e-3) (for 'cos' default move_limit / 10)."""
+    move = options.get('move_limit', default)
+    sched = options.get('move_schedule')
+    if sched is None:
+        return move
+    if callable(sched):
+        return sched(it)
+    if sched == 'cos':
+        lo = options.get('move_min', 0.1 * move)
+        return lo + (move - lo) * 0.5 * (1 + np.cos(2 * np.pi * (it - 1) / options.get('move_period', 10)))
+    return compute_move(it, options['maxiter'] * 0.5, move_min=options.get('move_min', 1e-3), move_max=move,
+                        decay_rate=options.get('miniter', 10) * 1.0, wiggle=options.get('wiggle', 0.5))
+
+
 def optimizeMMA(objCall, x0, bounds, constraintCall, options,callback):
         """
         Optimize using the MMA method.
@@ -234,9 +256,14 @@ def optimizeMMA(objCall, x0, bounds, constraintCall, options,callback):
         max_fun = options['maxfun']
         func_evals = 0
 
-        # Initial values
-        f0val_init, df0dx_init = objCall(x0)
-        fval, dfdx = constraintCall(x0)
+        # Initial values (column x, (m,1) constraint values and (m,n) gradients, whatever shapes the caller uses)
+        x0 = np.asarray(x0, dtype=float).reshape(-1, 1)
+        f0val_init, df0dx_init = objCall(x0.reshape(-1))     # same 1-D x as every later call
+        f0val_init = np.asarray(f0val_init, dtype=float).reshape(1)
+        df0dx_init = np.asarray(df0dx_init, dtype=float).reshape(-1, 1)
+        fval, dfdx = constraintCall(x0.reshape(-1))
+        fval = np.asarray(fval, dtype=float).reshape(-1, 1)
+        dfdx = np.asarray(dfdx, dtype=float).reshape(fval.shape[0], -1)
         func_evals += 1
 
         n = len(x0)
@@ -297,6 +324,10 @@ def optimizeMMA(objCall, x0, bounds, constraintCall, options,callback):
             # Compute the objective and constraint values at the new point
             fvalnew,dfdxnew = constraintCall(xval.reshape(-1))
             f0valnew,df0dxnew = objCall(xval.reshape(-1))
+            f0valnew = np.asarray(f0valnew, dtype=float).reshape(1)
+            df0dxnew = np.asarray(df0dxnew, dtype=float).reshape(-1, 1)
+            fvalnew = np.asarray(fvalnew, dtype=float).reshape(-1, 1)
+            dfdxnew = np.asarray(dfdxnew, dtype=float).reshape(m, -1)
             func_evals += 1  # Increment the function evaluation count
 
             f0val, df0dx = f0valnew.copy(), df0dxnew.copy()
@@ -352,12 +383,12 @@ def optimizeMMAStandard(objCall, x0, bounds, constraintCall, options, callback=N
     from mmapy import kktcheck
     xval, n, m, f0, df0, fv, dfv, xmin, xmax, a0, a, c, d = _mma_setup(objCall, x0, bounds, constraintCall)
     xold1, xold2, low, upp = xval.copy(), xval.copy(), xmin.copy(), xmax.copy()
-    move = options.get('move_limit', 0.2)
     evals, hist = 1, [f0]
     for it in range(1, options['maxiter'] + 1):
+        move = move_at(it, options)
         xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, low, upp = mmasub(
             m, n, it, xval, xmin, xmax, xold1, xold2, f0, df0, fv, dfv, low, upp, a0, a, c, d, move=move,
-            asyinit=options.get('asyinit', 0.5))
+            asyinit=options.get('asyinit', 0.5), raa0=options.get('raa0', 1e-5))
         xold2, xold1, xval = xold1.copy(), xval.copy(), xmma.copy()
         f0, df0, fv, dfv = _eval(objCall, constraintCall, xval, m, n)
         evals += 1
@@ -365,7 +396,7 @@ def optimizeMMAStandard(objCall, x0, bounds, constraintCall, options, callback=N
         residu, kktnorm, _ = kktcheck(m, n, xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, xmin, xmax, df0, fv, dfv,
                                       a0, a, c, d)
         if options.get('disp'):
-            print(f'MMA {it}: f0 = {f0:.6g}, max con = {fv.max():.3g}, kkt = {kktnorm:.2e}')
+            print(f'MMA {it}: f0 = {f0:.6g}, max con = {fv.max():.3g}, move = {move:.3g}, kkt = {kktnorm:.2e}')
         if callback is not None:
             callback(xval.reshape(-1))
         if it >= options['miniter'] and kktnorm < options['kkttol'] and (fv <= options['kkttol']).all():
@@ -379,7 +410,10 @@ def optimizeGCMMA(objCall, x0, bounds, constraintCall, options, callback=None):
     underestimated), the curvature parameters raa0/raa are raised and the subproblem re-solved (inner loop,
     VALUE-only evaluations via options['value_call'](x) -> (f0, fval), default objCall/constraintCall).
     Result: monotone, globally convergent descent. Suited to expensive nonlinear simulations and to many
-    design variables with constraints. Variables normalised to [0, 1]."""
+    design variables with constraints. Variables normalised to [0, 1].
+    Optional move limit, only when options['move_schedule'] is given (see move_at; a constant move is
+    move_schedule=lambda it: m): the subproblem box is [xval - move, xval + move] clipped to the bounds
+    (gcmmasub itself has no move limit)."""
     from mmapy import asymp, gcmmasub, concheck, raaupdate, kktcheck
     xval, n, m, f0, df0, fv, dfv, xmin, xmax, a0, a, c, d = _mma_setup(objCall, x0, bounds, constraintCall)
     xold1, xold2, low, upp = xval.copy(), xval.copy(), xmin.copy(), xmax.copy()
@@ -397,7 +431,12 @@ def optimizeGCMMA(objCall, x0, bounds, constraintCall, options, callback=None):
     for it in range(1, options['maxiter'] + 1):
         low, upp, raa0, raa = asymp(it, n, xval, xold1, xold2, xmin, xmax, low, upp, raa0, raa, raa0eps, raaeps,
                                     df0, dfv)
-        out = gcmmasub(m, n, it, epsimin, xval, xmin, xmax, low, upp, raa0, raa, np.array([[f0]]), df0, fv, dfv,
+        if options.get('move_schedule') is None:                 # GCMMA default: no move limit
+            bmin, bmax = xmin, xmax
+        else:
+            move = move_at(it, options) * (xmax - xmin)
+            bmin, bmax = np.maximum(xmin, xval - move), np.minimum(xmax, xval + move)
+        out = gcmmasub(m, n, it, epsimin, xval, bmin, bmax, low, upp, raa0, raa, np.array([[f0]]), df0, fv, dfv,
                        a0, a, c, d)
         xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, f0app, fapp = out
         f0new, fvnew = values(xmma)
@@ -407,7 +446,7 @@ def optimizeGCMMA(objCall, x0, bounds, constraintCall, options, callback=None):
             inner += 1
             raa0, raa = raaupdate(xmma, xval, xmin, xmax, low, upp, f0new, fvnew, f0app, fapp, raa0, raa, raa0eps,
                                   raaeps, epsimin)
-            out = gcmmasub(m, n, it, epsimin, xval, xmin, xmax, low, upp, raa0, raa, np.array([[f0]]), df0, fv,
+            out = gcmmasub(m, n, it, epsimin, xval, bmin, bmax, low, upp, raa0, raa, np.array([[f0]]), df0, fv,
                            dfv, a0, a, c, d)
             xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, f0app, fapp = out
             f0new, fvnew = values(xmma)
