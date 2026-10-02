@@ -85,7 +85,7 @@ def circle_sections(r, nu=None):
 
 def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
              start='gap', lattice_contact=True, contact_model='line', fibre=True, mu=0.5, freeze=None,
-             crush=False):
+             crush=False, contact_ref_radius=None, contact_exclusion='smooth'):
     """law: a gap law, or a dict of contact.calibrate() kwargs (lets 'crit_damped' get the reduced mass).
     r_elem (ne,) radii [mm]. plate_mass [t] (default 2 mm aluminium 38x38: 7.8 g). gap0 [mm] initial
     impactor-plate gap.
@@ -103,6 +103,11 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
                        integrated along the beams; 'capsule': contact.SelfContact (one Hertz point per beam pair).
     mu:                Coulomb friction coefficient for beam-beam and beam-plate contact (line model; 0 = off).
     fibre:             large-strain (fibre-integrated Yeoh) bending and torsion in the section law.
+    contact_ref_radius: LineContact exclusion_radius: joint/overlap exclusions computed with this radius for all
+                       elements (design-independent excluded set; use the upper radius bound in optimisation).
+    contact_exclusion: 'smooth' (default; joint/overlap exclusion as a C1 weight of the radii, so J(x) is
+                       continuous and differentiable) or 'hard' (excluded set; J jumps when a design change moves
+                       quadrature points across the threshold).
     crush:             constant-velocity crush (standard SEA test): impactor mass 1 t, so the top plate keeps
                        ~v0 whatever the lattice does (energy_J ignored); stop at the target stroke via T.
     freeze:            a nominal rig: reuse its design-dependent constants (impactor mass and contact law,
@@ -160,8 +165,9 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         if contact_model == 'line':
             from contact import LineContact
             sc = LineContact(fr, r_elem, lat['beam_of_elem'], mat['E0'], mat['nu'], beam_conn=lat['conn'],
-                             eps=None if freeze is None else freeze['self_contact'].eps)
-            if freeze is not None:
+                             eps=None if freeze is None else freeze['self_contact'].eps,
+                             exclusion_radius=contact_ref_radius, exclusion=contact_exclusion)
+            if freeze is not None and contact_exclusion == 'hard':      # smooth weights are functions of r_elem
                 sc.excluded, sc.n_excluded_points = freeze['self_contact'].excluded, freeze['self_contact'].n_excluded_points
         else:
             sc = SelfContact(fr, r_elem, mat['E0'], mat['nu'], beam_of_elem=lat['beam_of_elem'])

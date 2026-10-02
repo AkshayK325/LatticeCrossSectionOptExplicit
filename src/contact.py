@@ -324,8 +324,18 @@ class LineContact:
     """
 
     def __init__(self, frame, r_e, beam_of_elem, E, nu, h_q=0.1, eps=None, margin=1.0, beam_conn=None,
-                 joint_buffer=None):
-        self.fr, self.r = frame, r_e
+                 joint_buffer=None, exclusion_radius=None, exclusion='hard', exclusion_width=None):
+        """exclusion_radius: if given, the reference exclusions (overlap at t = 0, joint crotch, buffer) are
+        computed as if every element had this radius, so the excluded set is the same for every design (use the
+        upper radius bound in optimisation: then no design starts with material overlap inside the contact set).
+        Default None: the actual radii (the excluded set then changes in steps with the design, so J(x) jumps).
+        exclusion='smooth': the same rule as a weight per (point, beam) combo instead of a set: w = smoothstep of
+        (g_ref - threshold) over exclusion_width (default h_q), threshold = joint buffer (beams sharing a joint;
+        default the mean radius of the two beams) or 0 (overlap). w is a C1 function of the radii (g_ref and the buffer depend on them), so the contact
+        energy -- and J(x) -- stay continuous and differentiable when a design change moves points across the
+        threshold. w = 1 exactly outside the transition, so the physics equals the hard rule away from it."""
+        self.fr = frame
+        self.r = r_e if exclusion_radius is None else torch.full_like(r_e.detach(), float(exclusion_radius))
         self.beam = torch.as_tensor(beam_of_elem)
         self.nb = int(self.beam.max()) + 1
         self.eps = 0.05 * r_e.min().item() if eps is None else eps
@@ -339,11 +349,16 @@ class LineContact:
         keep = self.beam[i] != self.beam[j]
         self.pairs_all = torch.stack((i[keep], j[keep]), 1)
         self.active = None
+        self.wkey = self.wval = None
         # reference exclusion: (point, beam) combos overlapping at t = 0
         self.excluded = torch.zeros(0, dtype=torch.long)
+        if exclusion == 'smooth':
+            self._smooth_exclusion(frame, r_e, beam_conn, joint_buffer, exclusion_radius,
+                                   h_q if exclusion_width is None else exclusion_width)
+            return
         self.refresh(frame.X)
         with torch.no_grad():
-            key, g = self._point_gaps(frame.X, exclude=False)
+            key, g, _ = self._point_gaps(frame.X, exclude=False)
         out = g <= 0
         if beam_conn is not None:
             # joint crotch: for two beams meeting at a lattice node, points within joint_buffer (default one
@@ -353,10 +368,58 @@ class LineContact:
             ob = key % self.nb
             share = ((bc[pb, 0] == bc[ob, 0]) | (bc[pb, 0] == bc[ob, 1]) |
                      (bc[pb, 1] == bc[ob, 0]) | (bc[pb, 1] == bc[ob, 1]))
-            buf = r_e.max().item() if joint_buffer is None else joint_buffer
+            buf = self.r.max().item() if joint_buffer is None else joint_buffer
             out = out | (share & (g < buf))
         self.excluded = torch.unique(key[out])
         self.n_excluded_points = len(self.excluded)
+        self.r = r_e
+        self.refresh(frame.X)
+
+    def _smooth_exclusion(self, frame, r_e, beam_conn, joint_buffer, exclusion_radius, s):
+        """Weights w(key) for the (point, beam) combos whose weight can be < 1 (see __init__)."""
+        rc = max(r_e.max().item(), 0.0 if exclusion_radius is None else float(exclusion_radius))
+        self.r = torch.full_like(r_e.detach(), rc)              # candidates: largest radius -> smallest gaps
+        self.refresh(frame.X)
+        with torch.no_grad():
+            key, gc, _ = self._point_gaps(frame.X, exclude=False)
+        self.r = r_e                                             # same active list -> same keys, actual gaps
+        key2, g, _ = self._point_gaps(frame.X, exclude=False)
+        assert torch.equal(key, key2)
+        share = torch.zeros_like(key, dtype=torch.bool)
+        if beam_conn is not None:
+            bc = torch.as_tensor(beam_conn)
+            pb, ob = self.beam[key // self.nb // self.nq], key % self.nb
+            share = ((bc[pb, 0] == bc[ob, 0]) | (bc[pb, 0] == bc[ob, 1]) |
+                     (bc[pb, 1] == bc[ob, 0]) | (bc[pb, 1] == bc[ob, 1]))
+        cand = gc < torch.where(share, torch.as_tensor(rc if joint_buffer is None else float(joint_buffer),
+                                                       dtype=g.dtype), torch.zeros_like(gc)) + 0.5 * s
+        if joint_buffer is None:
+            # per-pair joint buffer: mean radius of the two beams (smooth in the radii; a global max radius, as
+            # in the hard rule, has a kink wherever several struts share the largest radius)
+            ne_b = torch.zeros(self.nb, dtype=g.dtype).index_add(0, self.beam, torch.ones_like(r_e))
+            r_beam = torch.zeros(self.nb, dtype=g.dtype).index_add(0, self.beam, r_e) / ne_b
+            kc = key[cand]
+            buf = 0.5 * (r_beam[self.beam[kc // self.nb // self.nq]] + r_beam[kc % self.nb])
+        else:
+            buf = torch.full((int(cand.sum()),), float(joint_buffer), dtype=g.dtype)
+        thr = torch.where(share[cand], buf, torch.zeros_like(buf))
+        t = ((g[cand] - thr) / s + 0.5).clamp(0, 1)
+        self.wkey, self.wval = key[cand], t * t * (3 - 2 * t)  # C1 smoothstep: 0 inside, 1 outside
+        self.excluded = self.wkey[self.wval.detach() == 0]
+        self.n_excluded_points = len(self.excluded)
+        self.refresh(frame.X)
+
+    def key_weight(self, keys):
+        """Contact weight of (point, beam) keys: 0 excluded, 1 free, in between in the smooth transition."""
+        dt = self.fr.X.dtype
+        if self.wkey is not None:
+            if len(self.wkey) == 0:
+                return torch.ones(keys.shape, dtype=dt)
+            pos = torch.searchsorted(self.wkey, keys).clamp(max=len(self.wkey) - 1)
+            return torch.where(self.wkey[pos] == keys, self.wval[pos], torch.ones((), dtype=dt))
+        if len(self.excluded):
+            return (~torch.isin(keys, self.excluded)).to(dt)
+        return torch.ones(keys.shape, dtype=dt)
 
     def refresh(self, x):
         with torch.no_grad():
@@ -395,7 +458,7 @@ class LineContact:
         """Gaps of (point, other beam) combos for the near pairs: returns (key, g)."""
         pr = self.near_pairs(x) if exclude else self.active
         if len(pr) == 0:
-            return torch.zeros(0, dtype=torch.long), torch.zeros(0, dtype=x.dtype)
+            return torch.zeros(0, dtype=torch.long), torch.zeros(0, dtype=x.dtype), torch.zeros(0, dtype=x.dtype)
         a = torch.cat((pr[:, 0], pr[:, 1]))                    # element owning the points
         b = torch.cat((pr[:, 1], pr[:, 0]))                    # element (segment) measured against
         n1, n2 = self.fr.n1, self.fr.n2
@@ -412,20 +475,21 @@ class LineContact:
         gap = (dist - self.r[a][:, None] - self.r[b][:, None]).flatten()
         uk, inv = torch.unique(key, return_inverse=True)
         gmin = torch.full((len(uk),), torch.inf, dtype=x.dtype).scatter_reduce(0, inv, gap, 'amin')
-        if exclude and len(self.excluded):
-            ok = ~torch.isin(uk, self.excluded)
-            uk, gmin = uk[ok], gmin[ok]
-        return uk, gmin
+        if not exclude:
+            return uk, gmin, None
+        w = self.key_weight(uk)
+        ok = w.detach() > 0
+        return uk[ok], gmin[ok], w[ok]
 
     def energy(self, x):
         if self.active is None or self._stale(x):
             self.refresh(x)
-        key, g = self._point_gaps(x)
+        key, g, w = self._point_gaps(x)
         if len(g) == 0:
             return x.sum() * 0.0, g
         d = self.eps * F.softplus(-g / self.eps)
         wL = self.wL[key // self.nb // self.nq]
-        return 0.5 * (wL * 0.5 * self.k_line * d * d).sum(), g
+        return 0.5 * (w * wL * 0.5 * self.k_line * d * d).sum(), g
 
     def dt_terms(self, x, v, m, scale, frac=0.1):
         """(omega, dt_cap). omega: conservative row-sum bound. Each point's exact contact stiffness
@@ -435,13 +499,13 @@ class LineContact:
         if self.active is None or len(self.active) == 0:
             return 0.0, float('inf')
         with torch.no_grad():
-            key, g = self._point_gaps(x)
+            key, g, w = self._point_gaps(x)
             if len(g) == 0:
                 return 0.0, float('inf')
             el = key // self.nb // self.nq
             sig = torch.sigmoid(-g / self.eps)
             d = self.eps * F.softplus(-g / self.eps)
-            kp = 0.5 * self.wL[el] * self.k_line * (sig**2 + d * sig * (1 - sig) / self.eps)
+            kp = 0.5 * w * self.wL[el] * self.k_line * (sig**2 + d * sig * (1 - sig) / self.eps)
             Ke = torch.zeros(self.fr.ne, dtype=x.dtype).index_add(0, el, kp)
             Kn = torch.zeros(self.fr.N, dtype=x.dtype).index_add(0, self.fr.n1, Ke).index_add(0, self.fr.n2, Ke)
             lat = Kn > 0
@@ -492,10 +556,11 @@ def _line_friction(lc, x, v, mu, m, dt):
     idx = torch.arange(len(inv))
     big = torch.full((len(uk),), len(inv), dtype=torch.long)
     first = big.scatter_reduce(0, inv[win], idx[win], 'amin')
-    win = (idx == first[inv]) & ~torch.isin(key.flatten(), lc.excluded)
+    wk = lc.key_weight(key.flatten())                                           # exclusion weight (0..1)
+    win = (idx == first[inv]) & (wk.detach() > 0)
     sig = torch.sigmoid(-gap / lc.eps)
     dlt = lc.eps * F.softplus(-gap / lc.eps)
-    Fn = (0.5 * lc.wL[a][:, None] * lc.k_line * dlt * sig).flatten()          # normal force of the point
+    Fn = wk * (0.5 * lc.wL[a][:, None] * lc.k_line * dlt * sig).flatten()     # normal force of the point
     keep = win & (Fn > 1e-12)
     if not keep.any():
         return f, 0.0
