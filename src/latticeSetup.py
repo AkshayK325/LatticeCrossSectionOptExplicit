@@ -96,7 +96,7 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
                        relative speed. Total KE = E: M = 2E/v0^2 - plate mass. The contact force then
                        builds continuously as the lattice decelerates the plate, and releases continuously
                        on rebound: no collision event, no jump.
-    start='merged':    impactor rigidly bonded to the plate (one rigid body, no contact): zero jump by
+    start='merged':    impactor rigidly bonded to the plate (one rigid body, no impactor contact; lattice contact still active if requested): zero jump by
                        construction, but the impactor can never separate on rebound.
     lattice_contact: beam-to-beam contact and node-to-plate Hertz contact of every non-bonded node with both
                        plates (True), or only one of them ('self' / 'plates', for diagnostics). contact_model 'line' (default): contact.LineContact, line-contact density
@@ -269,7 +269,16 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         v_init[top_t, 2] = -v0
     tie = top_t
     if start == 'merged':
-        tie, contact = torch.cat((top_t, torch.tensor([imp]))), None
+        tie = torch.cat((top_t, torch.tensor([imp])))
+        if phi_lat is None:
+            contact = None
+        else:                                                    # bonded impactor: lattice contact only
+
+            def contact(u, v):
+                fp, Phi_l, ex = potential_force(phi_lat, fr.X + u)
+                ff, Pf = friction(u, v)
+                last.update(Phi_lat=Phi_l.item(), ex=ex, Pf=Pf, ff=ff.detach().clone())
+                return fp + ff
     return dict(fr=fr, A=A, I=I, beam_law=beam_law, law=law, m=m, j=j, M=M, imp=imp, top=top_t, bot=bot,
                 fix_u=fix_u, fix_r=fix_r, contact=contact, tie=tie, gap=gap, dt_fn=dt_fn, v_init=v_init, gap0=gap0,
                 v0=v0, plate_mass=plate_mass, phi_lat=phi_lat, self_contact=sc, friction=friction, mu=mu,
