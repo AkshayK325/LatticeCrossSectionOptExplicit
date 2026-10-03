@@ -1,0 +1,154 @@
+1
+
+   Abaqus 2024                                  Date 03-Oct-2026   Time 08:13:43
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+ ***WARNING: Line #2 has been truncated.
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          A5a-s: 3x3x1 C4 lattice, 3 mm elements (444 B31, edges 2.6-3.2 mm so the contact radius need not be reduced), r 0.8, linear elastic E = 40 MPa (stroke ~8.8 mm, contact active, no bottoming out), 0.75 J at 6 m/s, impactor bonded to the rigid top plate; beam-beam contact with the full section radius, frictionless; no plate contact; Abaqus B31 with DEFAULT shear slenderness compensation                                                                                                                              
+  *ELEMENT, TYPE=B31, ELSET=OBLQ
+  *ELSET, ELSET=LATTICE
+  *ELEMENT, TYPE=MASS, ELSET=IMPMASS
+  *MATERIAL, NAME=EPU45_LIN
+  *DENSITY
+  *ELASTIC
+  *MASS, ELSET=IMPMASS
+  *BEAM SECTION, ELSET=OBLQ, MATERIAL=EPU45_LIN, SECTION=CIRC
+  *TRANSVERSE SHEAR STIFFNESS
+  *MASS, ELSET=IMPMASS
+  *RIGID BODY, REF NODE=337, TIE NSET=TOP
+  *RIGID BODY, REF NODE=337, TIE NSET=TOP
+  *RIGID BODY, REF NODE=337, TIE NSET=TOP
+  *RIGID BODY, REF NODE=337, TIE NSET=TOP
+  *RIGID BODY, REF NODE=337, TIE NSET=TOP
+  *SURFACE INTERACTION, NAME=LATTICEINT
+  *FRICTION
+  *RIGID BODY, REF NODE=337, TIE NSET=TOP
+  *RIGID BODY, REF NODE=337, TIE NSET=TOP
+  *BOUNDARY
+  *RIGID BODY, REF NODE=337, TIE NSET=TOP
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  *FRICTION
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  *OUTPUT, FIELD, NUMBER INTERVAL=40
+  *OUTPUT, HISTORY, TIME INTERVAL=1e-05
+  *STEP, NAME=DROP, NLGEOM=YES
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *OUTPUT, FIELD, NUMBER INTERVAL=40
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=1e-05
+  *NODE OUTPUT, NSET=REF
+  *NODE OUTPUT, NSET=BOT
+  *ENERGY OUTPUT
+  *END STEP
+  *SURFACE INTERACTION, NAME=LATTICEINT
+  *FRICTION
+  *BOUNDARY
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *CONTACT
+  *CONTACT INCLUSIONS, ALL EXTERIOR
+  *CONTACT PROPERTY ASSIGNMENT
+  *CONTACT CONTROLS ASSIGNMENT, CONTACT THICKNESS REDUCTION=NOPERIMSELF
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                   445
+          NUMBER OF NODES IS                                     1225
+          NUMBER OF NODES DEFINED BY THE USER                     337
+          NUMBER OF INTERNAL NODES GENERATED BY THE PROGRAM       888
+          TOTAL NUMBER OF VARIABLES IN THE MODEL                 2022
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =      0.0    
+       SYSTEM TIME (SEC)    =     0.10    
+       TOTAL CPU TIME (SEC) =     0.10    
+       WALLCLOCK TIME (SEC) =            0
