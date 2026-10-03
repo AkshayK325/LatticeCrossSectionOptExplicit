@@ -51,7 +51,7 @@ Legend: ⬜ not started · 🟦 inp ready, waiting for Abaqus · 🟨 results in
 | **A5b** = A5a with Coulomb friction μ = 0.5 (ours: regularised Coulomb at line-contact points; Abaqus: `*FRICTION` 0.5 in general contact) | 🟨 as A5a | friction in lattice contact | as A5a + friction dissipation (ours W_fric vs ALLFD) ≤ 15% | `inp/A5b_lattice_drop_contact_mu05.inp` | max stroke 8.712 mm, peak reaction 188 N, friction work 58.5 N mm (7.8% of 750) | Ran 2026-10-03: max stroke 8.71 vs 7.59 mm (15%), time of max stroke 7.5%, peak reaction 188 vs 159 N (18%), friction dissipation 58.5 vs 42.5 N mm (38%); Abaqus energy drift 8.9%. Same element issue as A5a; repeat with the element that passes A5a-s/q. Fig `7_A5b_lattice_drop_contact_mu05.png` |
 | **A5a-s** = A5a with Abaqus B31 and its **default** shear slenderness compensation (0.25; ≈ 0.46 × κGA on 3 mm struts, which makes 1–2 B31 per strut approximate bending) | 🟨 loading ✅, densification peak ✘ | does the coarse-B31 correction recover the converged beam response? | as A5a | `inp/A5as_lattice_drop_contact_mu0_B31comp.inp` | ours at 3 mm (as A5a): 8.835 mm, 212 N; converged 9.05 mm, 229 N | Ran 2026-10-03 (contact radius ×0.986, no overclosures, energy drift 2.4%). **Loading phase passes:** max stroke 8.835 vs 8.994 mm (**1.8%**; 0.6% from our converged 9.046), loading stroke nRMSE **0.54%**, time of max stroke 4.9%, low-passed reaction correlation 0.96; plate velocity, KE and SE overlap to 2.3 ms. **Densification differs:** peak bottom reaction 212 vs 179 N (18%), and on unloading ours springs back faster (KE at 4 ms 470 vs 330 N mm; Abaqus keeps 400 vs 290 N mm of strain energy). That is the contact law at densification: ours is a material (Hertz-type) compliance with up to 0.45 mm strut indentation, Abaqus a stiff numerical penalty, so struts jam differently. For one crossing our contact matched solids within 0.7–1.6% (A3s2), so B3 (solid lattice) decides the lattice case. Fig `8_A5as_lattice_drop_contact_mu0_B31comp.png` |
 | **A5a-q** = A5a with **quadratic B32** (3-node; mid-side nodes added), same 3 mm mesh | ✖ Abaqus radius halved | an Abaqus beam that bends correctly within one element per strut while keeping the long contact edges | as A5a; **check the .sta** for contact-radius reduction (B32 edges may be split at the mid-side node) | `inp/A5aq_lattice_drop_contact_mu0_B32.inp` | as above | Ran 2026-10-03: Abaqus split the B32 contact edges at the mid-side node and **reduced the contact radius ×0.493** (.sta), so beams overlap more: max stroke 9.604 mm (8% over ours), peak 175 N. Not a valid contact comparison. Fig `9_A5aq_lattice_drop_contact_mu0_B32.png` |
-| **A5b-s** = A5a-s with Coulomb friction μ = 0.5 (B31, default shear compensation, full contact radius) | 🟦 | friction in lattice contact, with the element that passes A5a-s | as A5a-s + friction dissipation ≤ 15% | `inp/A5bs_lattice_drop_contact_mu05_B31comp.inp` | ours (3 mm): max stroke 8.712 mm, peak 188 N, friction work 58.5 N mm | — |
+| **A5b-s** = A5a-s with Coulomb friction μ = 0.5 (B31, default shear compensation, full contact radius) | ✅ mechanics / ✘ friction work | friction in lattice contact, with the element that passes A5a-s | as A5a-s + friction dissipation ≤ 15% | `inp/A5bs_lattice_drop_contact_mu05_B31comp.inp` | ours (3 mm): max stroke 8.712 mm, peak 188 N, friction work 58.5 N mm | Ran 2026-10-03 (contact radius ×0.986, no overclosures, energy drift 2.8%). **Mechanics pass:** max stroke 8.712 vs 8.703 mm (**0.11%**), time of max stroke **1.1%**, loading stroke nRMSE **0.24%**, peak bottom reaction 188.3 vs 192.8 N (**2.3%**), low-passed reaction correlation 0.978. **Friction dissipation fails:** 58.5 vs 40.6 N mm (44%); ours is 1.4–2.2× higher from contact onset on. Not micro-slip: raising our regularisation velocity 1 → 100 mm/s changes it by 1%. **Suspected model gap (to fix and test):** our slip velocity uses the beam centreline velocities only (no spin ω × r at the surface), so rolling contact counts as sliding, and the friction force is applied without its moment r n × F_t. This affects the energy split (friction is 5–8% of the budget), not stroke or force. Fig `10_A5bs_lattice_drop_contact_mu05_B31comp.png` |
 
 **Notes, level A:**
 - Rotary inertia. Ours is lumped ρL/2·max(Iy + Iz, AL²/12). Abaqus/Explicit B31 uses its own (isotropic) beam
@@ -70,7 +70,8 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
 |---|---|---|---|---|
 | **B0** (manual check) can Abaqus B31 take `*HYPERELASTIC` / `*VISCOELASTIC`? If yes: A1/A2 with Yeoh + Prony on beams (material only, same idealisation) | ⬜ | fibre-Yeoh + QLV implementation vs Abaqus section integration | tip / reaction histories ≤ 3% | |
 | **B1** single strut, C3D8R solid (≈ 8 elements across the diameter): axial compression and bending at impact rates, vs our single beam | ⬜ | section law vs continuum; QLV vs Abaqus finite-strain viscoelasticity | N(ε), M(κ), loss per cycle; expect ≤ 5% at moderate strain | |
-| **B2** one C4 unit cell, solid (STL from `beamBuild.py` → tet mesh, C3D10M), drop at 6 m/s, vs our beam cell | ⬜ | joint idealisation, stubby struts (L/r ≈ 3–8) | F–δ, peak, stroke, dissipation | |
+| **B2a** ONE C4 unit cell (12.7 mm cube, 36 struts, r 0.8) as a **solid**: strut cylinders + joint spheres fused (gmsh/OpenCASCADE), trimmed at the plate planes, **C3D10M h = 0.4 mm** (39 665 elements, Netgen-optimised; shortest altitude 0.088 mm → est. ~73k increments), bottom face clamped, top face tied to a rigid plate carrying the impactor (0.75/9 J at 6 m/s), linear elastic E = 40 MPa, ν 0.49, frictionless general self-contact, 4 ms | 🟦 | joint idealisation + densification contact on a solid reference (P1, P2), cheaply | max stroke, time of max stroke, loading stroke history, peak / correlation of the bottom reaction (as A5); expect the solid to be stiffer (joint material) | `inp/B2a_unit_cell_solid_h040.inp` (6 MB). Ours: the same cell as beams, 1 mm elements | max stroke 10.23 mm, peak bottom reaction 16.7 N, contact energy max 0.59 N mm | — |
+| **B2a-fine** = B2a with **h = 0.27 mm** (82 625 C3D10M, shortest altitude 0.062 mm, ~103k increments) | 🟦 | solid mesh convergence (B2a vs B2a-fine) before any full-lattice solid run | stroke and peak change between h 0.4 and 0.27 | `inp/B2a_unit_cell_solid_h027.inp` (12.6 MB) | as B2a | — |
 | **B3** full 3×3×1 lattice, solid C3D10M, general contact μ = 0.5, rigid plates, merged impactor, 0.75 J | ⬜ | **paper validation figure** | F–δ, peak, stroke, dissipation; expect peak within 10–20% | |
 | **B4** design ranking in Abaqus: initial vs optimized (80 N and 120 N plateau designs) | ⬜ | does the optimizer's improvement survive in the reference model? | sign and size of ΔJ, Δpeak, Δefficiency | |
 | **B5** (optional) FD gradient in Abaqus: ±Δr on one group (2 runs) | ⬜ | sign and rough size of dJ/dr vs our adjoint | sign agrees; magnitude within ~30% | |
@@ -78,7 +79,26 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
 ## Order
 A1 → A2 → A3 → A4 → A5a → A5b → B0 → B1 → B3 → B4 → (B2, B5).
 
+**Level-B staging (2026-10-03),** cheapest first. Solids are verification checkpoints; the beam model stays the design tool.
+1. **B2a / B2a-fine:** one unit cell, E = 40 MPa, mesh convergence (minutes to under an hour each).
+2. **B3a:** full 3×3 lattice solid at E = 40 MPa = the A5 conditions (~360k C3D10M at 0.4 mm; ~30 min on 8 CPUs). This decides the densification-contact difference seen in A5a-s.
+3. **B3:** full lattice with real EPU 45 (Yeoh + Prony): the paper validation figure, a few hours, once.
+4. **B4:** initial vs optimized design in the solid model (2 × B3).
+
+Options:
+- ν = 0.45 in both codes (≈ 2× cheaper);
+- a quarter model on the two symmetry planes, if the crush stays symmetric;
+- selective mass scaling of the few smallest tets (< 1% mass).
+
+Meshing:
+- gmsh (OpenCASCADE booleans + Netgen optimisation), installed in the env 2026-10-03.
+- The manifold3d/TetGen route left slivers (shortest altitude 0.001 mm).
+
 ## Log
+- 2026-10-03 (c): **A5b-s:** mechanics pass (0.1–2.3%); friction dissipation +44% vs Abaqus.
+  - Suspected cause: no beam-spin surface velocity and no friction moment in our friction model.
+  - **Level A complete for mechanics.**
+  - Level-B pipeline built: `abaqus/solid.py` (gmsh solid lattice → C3D10M), `example3(nx, ny)`. B2a / B2a-fine written.
 - 2026-10-03 (b): **A5a-s** (B31 with Abaqus's default shear compensation) matches the loading phase: stroke 1.8%, history 0.54%.
   - Contact at densification differs (peak 18%, slower rebound in Abaqus): material compliance in ours vs Abaqus's penalty.
   - **A5a-q** invalid: B32 contact radius halved by Abaqus.

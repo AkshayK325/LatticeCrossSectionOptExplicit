@@ -14,11 +14,12 @@ from mesher import MeshFrame
 SYM_TYPES = ('Independent', 'Unitcell', 'OneValue', 'Midplane')
 
 
-def example3(elemSize=3.0):
-    """exampleCase '3fz' lattice with the notebook cell-19 params. Returns a dict with base and refined mesh."""
+def example3(elemSize=3.0, nx=3, ny=3):
+    """exampleCase '3fz' lattice with the notebook cell-19 params (nx x ny x 1 C4 cells; default 3 x 3).
+    Returns a dict with base and refined mesh."""
     from examples import getExample
     H = 0.5 * 25.4                                    # 0.5 inch per row
-    params = {'base': H, 'height': H, 'phi': 0.0, 'delta': 0.0, 'nx': 3, 'ny': 3, 'nz': 1,
+    params = {'base': H, 'height': H, 'phi': 0.0, 'delta': 0.0, 'nx': nx, 'ny': ny, 'nz': 1,
               'Name': 'C4', 'Shape': 'Square'}
     _, X, conn, _, radiiNodIndex, radiiElemIndex = getExample('3fz', params)
     Xr, connr = MeshFrame().refineFrameMeshElemSize(X, conn, elemSize)
