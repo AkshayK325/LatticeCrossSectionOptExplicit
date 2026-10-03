@@ -447,6 +447,13 @@ A5a = dict(A4, name='A5a_lattice_drop_contact_mu0', elemSize=3.0, E=40.0, T=4e-3
            title='A5a: 3x3x1 C4 lattice, 3 mm elements (444 B31, edges 2.6-3.2 mm so the contact radius need not be '
                  'reduced), r 0.8, linear elastic E = 40 MPa (stroke ~8.8 mm, contact active, no bottoming out), 0.75 J at 6 m/s, impactor bonded to the rigid top '
                  'plate; beam-beam contact with the full section radius, frictionless; no plate contact')
+# A5a element variants (Abaqus side only; ours is the exact Timoshenko element either way):
+#   s: B31 with Abaqus's default shear slenderness compensation (0.25), which is what makes 1-2 linear B31 per strut
+#      approximate bending; q: quadratic B32 (3-node) on the same 3 mm mesh
+A5as = dict(A5a, name='A5as_lattice_drop_contact_mu0_B31comp', scf=None,
+            title=A5a['title'].replace('A5a', 'A5a-s') + '; Abaqus B31 with DEFAULT shear slenderness compensation')
+A5aq = dict(A5a, name='A5aq_lattice_drop_contact_mu0_B32', etype='B32', scf=None,
+            title=A5a['title'].replace('A5a', 'A5a-q') + '; Abaqus quadratic B32 elements')
 A5b = dict(A5a, name='A5b_lattice_drop_contact_mu05', mu=0.5,
            title=A5a['title'].replace('A5a', 'A5b').replace('frictionless', 'Coulomb friction mu = 0.5'))
 
@@ -469,7 +476,10 @@ def a4_inp(c=A4):
     Xr, connr = lat['Xr'], lat['connr']
     ref = len(Xr) + 1
     X = rig['fr'].X.cpu().numpy()
-    nodes = _fmt_rows([(i + 1, *map(float, x)) for i, x in enumerate(X)])      # last node = impactor = ref node
+    etype = c.get('etype', 'B31')
+    mid0 = len(X) + 1                                    # B32 mid-side nodes are numbered after the impactor node
+    Xm = 0.5 * (Xr[connr[:, 0]] + Xr[connr[:, 1]]) if etype == 'B32' else np.zeros((0, 3))
+    nodes = _fmt_rows([(i + 1, *map(float, x)) for i, x in enumerate(np.vstack((X, Xm)))])  # node len(Xr)+1 = impactor
     t = Xr[connr[:, 1]] - Xr[connr[:, 0]]
     vert = np.abs(t[:, 2]) / np.linalg.norm(t, axis=1) > 0.9
     # beam orientation n1 must not be parallel to the element axis: two groups, empty groups are not written
@@ -477,11 +487,14 @@ def a4_inp(c=A4):
     groups = [(name, n1, [e for e in range(len(connr)) if vert[e] == isv])
               for name, n1, isv in (('VERT', (1., 0., 0.), True), ('OBLQ', (0., 0., -1.), False))]
     groups = [g for g in groups if g[2]]
-    elem_blocks = '\n'.join(
-        f"*ELEMENT, TYPE=B31, ELSET={name}\n" + _fmt_rows([(e + 1, int(connr[e, 0]) + 1, int(connr[e, 1]) + 1) for e in es])
-        for name, n1, es in groups)
+    def econn(e):
+        a, b = int(connr[e, 0]) + 1, int(connr[e, 1]) + 1
+        return (e + 1, a, mid0 + e, b) if etype == 'B32' else (e + 1, a, b)
+    elem_blocks = '\n'.join(f"*ELEMENT, TYPE={etype}, ELSET={name}\n" + _fmt_rows([econn(e) for e in es])
+                             for name, n1, es in groups)
     E = c.get('E', E0)
-    sections = '\n'.join(_section(name, c['r'], n1, SCF_OFF, E) for name, n1, es in groups)
+    scf = c.get('scf', SCF_OFF)
+    sections = '\n'.join(_section(name, c['r'], n1, scf, E) for name, n1, es in groups)
     contact = '' if not c.get('contact') else f"""** beam-beam general contact: contact edges with the CIRC section radius; NOPERIMSELF limits Abaqus's automatic
 ** contact-radius reduction (CHECK the .sta for 'contact edge thicknesses ... were reduced'); no plates in contact
 *CONTACT
@@ -777,7 +790,9 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'A3s': dict(spec=A3s, inp=a3s_inp, ours=a3s_ours),
          'A4': dict(spec=A4, inp=a4_inp, ours=a4_ours),
          'A5a': dict(spec=A5a, inp=lambda: a4_inp(A5a), ours=lambda: a4_ours(A5a)),
-         'A5b': dict(spec=A5b, inp=lambda: a4_inp(A5b), ours=lambda: a4_ours(A5b))}
+         'A5b': dict(spec=A5b, inp=lambda: a4_inp(A5b), ours=lambda: a4_ours(A5b)),
+         'A5as': dict(spec=A5as, inp=lambda: a4_inp(A5as), ours=lambda: a4_ours(A5as)),
+         'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 
 
 def write_inp(case):
