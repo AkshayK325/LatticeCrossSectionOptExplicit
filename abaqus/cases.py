@@ -454,6 +454,8 @@ A5as = dict(A5a, name='A5as_lattice_drop_contact_mu0_B31comp', scf=None,
             title=A5a['title'].replace('A5a', 'A5a-s') + '; Abaqus B31 with DEFAULT shear slenderness compensation')
 A5aq = dict(A5a, name='A5aq_lattice_drop_contact_mu0_B32', etype='B32', scf=None,
             title=A5a['title'].replace('A5a', 'A5a-q') + '; Abaqus quadratic B32 elements')
+A5bs = dict(A5as, name='A5bs_lattice_drop_contact_mu05_B31comp', mu=0.5,
+            title=A5as['title'].replace('A5a-s', 'A5b-s').replace('frictionless', 'Coulomb friction mu = 0.5'))
 A5b = dict(A5a, name='A5b_lattice_drop_contact_mu05', mu=0.5,
            title=A5a['title'].replace('A5a', 'A5b').replace('frictionless', 'Coulomb friction mu = 0.5'))
 
@@ -791,6 +793,7 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'A4': dict(spec=A4, inp=a4_inp, ours=a4_ours),
          'A5a': dict(spec=A5a, inp=lambda: a4_inp(A5a), ours=lambda: a4_ours(A5a)),
          'A5b': dict(spec=A5b, inp=lambda: a4_inp(A5b), ours=lambda: a4_ours(A5b)),
+         'A5bs': dict(spec=A5bs, inp=lambda: a4_inp(A5bs), ours=lambda: a4_ours(A5bs)),
          'A5as': dict(spec=A5as, inp=lambda: a4_inp(A5as), ours=lambda: a4_ours(A5as)),
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 

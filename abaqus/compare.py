@@ -128,7 +128,7 @@ def labels(case):
     if case in ('A3s', 'A3s1'):
         g = cases.a3s_mesh(cases.CASES[case]['spec'])
         return {'amid': g['midA'], 'bmid': g['midB'], 'b': g['labelsB']}
-    if case in ('A4', 'A5a', 'A5b', 'A5as', 'A5aq'):
+    if case in ('A4', 'A5a', 'A5b', 'A5as', 'A5aq', 'A5bs'):
         lat, rig = cases._a4_rig(cases.CASES[case]['spec'])
         return {'ref': len(lat['Xr']) + 1, 'bot': [int(k) + 1 for k in rig['bot']]}
     raise KeyError(case)
@@ -153,7 +153,7 @@ def signals(case, ours):
         return [('B mid U3', 'U3Bmid', 'U3', ('node', L['bmid']), 'mm', None),
                 ('A mid U3', 'U3Amid', 'U3', ('node', L['amid']), 'mm', None),
                 ('B momentum z', 'PB3', 'V3', ('wsum', L['b'], mB), 't mm/s', None)] + E
-    if case in ('A5a', 'A5b', 'A5as', 'A5aq'):
+    if case in ('A5a', 'A5b', 'A5as', 'A5aq', 'A5bs'):
         return [('plate U3 (stroke)', 'U3ref', 'U3', ('node', L['ref']), 'mm', None),
                 ('plate V3', 'V3ref', 'V3', ('node', L['ref']), 'mm/s', None),
                 ('bottom reaction (sum RF3)', 'RF3bot', 'RF3', ('sum', L['bot']), 'N', None),
@@ -231,7 +231,7 @@ def scalar_metrics(case, ours, ab):
         if r is not None:
             out.append(('B mid max downward U3 [mm]', -ours['U3Bmid'].min(), -r[1].min(),
                         rel(ours['U3Bmid'].min(), r[1].min()), None))
-    if case in ('A5a', 'A5b', 'A5as', 'A5aq'):
+    if case in ('A5a', 'A5b', 'A5as', 'A5aq', 'A5bs'):
         r = pick(ab, 'U3', ('node', L['ref']))
         if r is not None:
             ia = np.argmin(r[1])
@@ -250,7 +250,7 @@ def scalar_metrics(case, ours, ab):
                 out.append(('bottom reaction correlation, loading, 0.1 ms low-pass',
                             corr(rf[0][k], rf[1][k], ours['time'], ours['RF3bot'], window=1e-4), 1.0, None, 0.95))
         fd = pick(ab, 'ALLFD')
-        if case == 'A5b' and fd is not None:
+        if case in ('A5b', 'A5bs') and fd is not None:
             out.append(('friction dissipation at end [N mm]', ours['WFRIC'][-1], fd[1][-1], rel(ours['WFRIC'][-1], fd[1][-1]), 0.15))
     if case == 'A4':
         r = pick(ab, 'U3', ('node', L['ref']))
