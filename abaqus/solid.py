@@ -105,14 +105,18 @@ def gmsh_lattice(X, conn, r, z_lo, z_hi, h, optimize=True, verbose=False):
     gmsh.initialize()
     gmsh.option.setNumber('General.Terminal', 1 if verbose else 0)
     occ = gmsh.model.occ
+    rs = np.broadcast_to(np.asarray(r, float), (len(conn),))      # per-strut radii (scalar allowed)
+    rn = np.zeros(len(X))
+    for (a, b), rr in zip(conn, rs):                               # joint sphere: largest radius at the node
+        rn[a], rn[b] = max(rn[a], rr), max(rn[b], rr)
     vols = []
-    for a, b in conn:
+    for (a, b), rr in zip(conn, rs):
         p, d = X[a], X[b] - X[a]
-        vols.append((3, occ.addCylinder(*p, *d, r)))
-    for p in X:
-        vols.append((3, occ.addSphere(*p, r)))
+        vols.append((3, occ.addCylinder(*p, *d, float(rr))))
+    for p, rr in zip(X, rn):
+        vols.append((3, occ.addSphere(*p, float(rr))))
     fused, _ = occ.fuse(vols[:1], vols[1:])
-    lo, hi = X.min(0) - 2 * r, X.max(0) + 2 * r
+    lo, hi = X.min(0) - 2 * rs.max(), X.max(0) + 2 * rs.max()
     box = occ.addBox(lo[0], lo[1], z_lo, hi[0] - lo[0], hi[1] - lo[1], z_hi - z_lo)
     out, _ = occ.intersect(fused, [(3, box)])
     occ.synchronize()

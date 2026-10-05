@@ -460,6 +460,22 @@ A5b = dict(A5a, name='A5b_lattice_drop_contact_mu05', mu=0.5,
            title=A5a['title'].replace('A5a', 'A5b').replace('frictionless', 'Coulomb friction mu = 0.5'))
 
 
+def strut_radii(c, lat):
+    """Per-strut radii (base struts): uniform c['r'], or Midplane group radii c['rg'] = (top, bottom, mid)
+    (symmetry_groups('Midplane'): group 0 = struts above the mid-plane, 1 = below, 2 = in it)."""
+    from latticeSetup import symmetry_groups
+    nb = len(lat['conn'])
+    if 'rg' not in c:
+        return np.full(nb, float(c['r']))
+    rs = np.zeros(nb)
+    nU = lat['numUnitLatElem']
+    groups = symmetry_groups('Midplane', lat)
+    idx = np.asarray(lat['radiiElemIndex'])                      # strut -> unit-cell strut
+    for g, rv in zip(groups, c['rg']):
+        rs[np.isin(idx, g)] = rv
+    return rs
+
+
 def _a4_rig(c=A4):
     import torch
     from latticeSetup import example3, drop_rig
@@ -467,7 +483,8 @@ def _a4_rig(c=A4):
     lat = example3(elemSize=c['elemSize'], nx=c.get('nx', 3), ny=c.get('ny', 3), name=c.get('cell', 'C4'))
     E = c.get('E', E0)
     mat = dict(E=E, G=E / (2 * (1 + NU)), nu=NU, rho=RHO, E0=E)      # E0 key = contact stiffness modulus
-    rig = drop_rig(lat, torch.full((lat['connr'].shape[0],), c['r']), {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}, mat=mat,
+    r_elem = torch.as_tensor(strut_radii(c, lat)[np.asarray(lat['beam_of_elem'])])
+    rig = drop_rig(lat, r_elem, {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}, mat=mat,
                    energy_J=c['energy_J'], v0_ms=c['v0'] / 1e3, plate_mass=c['plate_mass'], gap0=0.1,
                    start='merged', lattice_contact='self' if c.get('contact') else False, mu=c.get('mu', 0.0),
                    joint=c.get('joint'))
@@ -609,6 +626,24 @@ def _b2_topo(cell, r, energy_J, tag):
                       f'nu 0.49; frictionless self-contact. Ours: beams ({r:g} mm elements), fused-section joint model')
 
 
+# graded Midplane designs (3 design variables, mid = mean of top and bottom) on the C4 cell: does the fused-section
+# joint model hold when the struts meeting at a joint have different radii? h = r_min / 2, ours elemSize = r_min
+def _b2_graded(tag, r_top, r_bot, energy_J):
+    r_mid = 0.5 * (r_top + r_bot)
+    rmin = min(r_top, r_bot, r_mid)
+    return dict(B2a, name=f'B2{tag}_unit_cell_C4_graded_top{int(round(r_top*100)):03d}_bot{int(round(r_bot*100)):03d}',
+                rg=(r_top, r_bot, r_mid), r=r_mid, h=0.5 * rmin, elemSize=rmin, energy_J=energy_J,
+                title=f'B2{tag}: ONE C4 unit cell, GRADED radii (Midplane: top {r_top}, bottom {r_bot}, mid {r_mid:g}) as a '
+                      f'SOLID (C3D10M, h {0.5 * rmin:g} mm), bottom clamped, top tied to a rigid plate with the impactor '
+                      f'({energy_J * 1e3:.3g} N mm at 6 m/s); linear elastic E = 40 MPa, nu 0.49; frictionless self-contact. '
+                      f'Ours: beams ({rmin:g} mm elements), fused-section joint model')
+
+
+B2i = _b2_graded('i', 1.0, 0.6, 0.045)
+B2j = _b2_graded('j', 0.6, 1.0, 0.042)
+B2k = _b2_graded('k', 0.7, 0.9, 0.070)          # the twin-recovery design (top 0.7, bottom 0.9, mid 0.8)
+
+
 _SMALL = dict(T=5e-4, out_dt=2e-6)        # first compression cycle only (~0.7 mm, ~6% strain: stretch-dominated cells)
 B2e = dict(_b2_topo('B', 1.0, 0.020, 'e'), **_SMALL)
 B2f = dict(_b2_topo('B', 1.5, 0.045, 'f'), **_SMALL)
@@ -625,13 +660,13 @@ def b2_mesh(c=B2a):
     import sys
     sys.path.insert(0, str(ROOT))
     import solid
-    key = (c.get('cell', 'C4'), c['nx'], c['ny'], c['h'], c['r'])
+    key = (c.get('cell', 'C4'), c['nx'], c['ny'], c['h'], c['r'], tuple(c.get('rg', ())))
     if key not in _B2_cache:
         from latticeSetup import example3
         lat = example3(elemSize=c['elemSize'], nx=c['nx'], ny=c['ny'], name=c.get('cell', 'C4'))
         X, C = lat['X'], lat['conn']
         H = float(X[:, 2].max())
-        P, T = solid.gmsh_lattice(X, C, c['r'], 0.0, H, c['h'])
+        P, T = solid.gmsh_lattice(X, C, strut_radii(c, lat), 0.0, H, c['h'])
         P10, T10 = solid.quadratic(P, T)
         bot = np.nonzero(np.isclose(P10[:, 2], 0.0, atol=1e-6))[0]
         top = np.nonzero(np.isclose(P10[:, 2], H, atol=1e-6))[0]
@@ -929,7 +964,7 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'B2d': dict(spec=B2d, inp=lambda: b2_inp(B2d), ours=lambda: a4_ours(dict(B2d, joint={'k': 3.5}))),
          **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint={'mode': 'section'}))),
                     joint={'mode': 'section'})
-            for k, v in (('B2e', B2e), ('B2f', B2f), ('B2g', B2g), ('B2h', B2h))},
+            for k, v in (('B2e', B2e), ('B2f', B2f), ('B2g', B2g), ('B2h', B2h), ('B2i', B2i), ('B2j', B2j), ('B2k', B2k))},
          'B2af': dict(spec=B2a_f, inp=lambda: b2_inp(B2a_f), ours=lambda: a4_ours(B2a_f)),
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 

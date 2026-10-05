@@ -100,9 +100,13 @@ def element_factors(lat, r_beam, which='mean', **kw):
     return se, prof
 
 
-def _slice_moments(Pn, e1, e2, ra, cyl, sph, z_lo, z_hi, n_grid, half):
+def _slice_moments(Pn, e1, e2, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay=None):
     """Connected fused section in the slice (frame e1 = element y, e2 = element z): ratios to the bare strut of
-    (area, I about y = int z^2, I about z = int y^2) about the section centroid, each >= 1."""
+    (area, I about y = int z^2, I about z = int y^2) about the section centroid, each >= 1.
+    decay: None (all fused material fully effective: plane sections through the whole union, an upper bound) or a
+    length lam (in units of ra): fused material outside the strut's own circle counts with weight exp(-d / lam ra),
+    d = its distance from the circle ('Saint-Venant participation': bending stress diffuses into side-attached
+    material only over a length of the order of the section size, as for the effective width of flanges)."""
     u = np.linspace(-half, half, n_grid)
     Y, Z = np.meshgrid(u, u, indexing='ij')
     P = Pn[None, None, :] + Y[..., None] * e1 + Z[..., None] * e2
@@ -121,15 +125,19 @@ def _slice_moments(Pn, e1, e2, ra, cyl, sph, z_lo, z_hi, n_grid, half):
         return 1.0, 1.0, 1.0
     m = lab == c0
     dA = (u[1] - u[0]) ** 2
-    A = m.sum() * dA
-    yc, zc = Y[m].mean(), Z[m].mean()
-    Iy = ((Z[m] - zc) ** 2).sum() * dA                     # about local y (stress varies with z)
-    Iz = ((Y[m] - yc) ** 2).sum() * dA
+    w = np.ones(m.sum())
+    if decay is not None:
+        dist = np.maximum(np.sqrt(Y[m] ** 2 + Z[m] ** 2) - ra, 0.0)
+        w = np.exp(-dist / (decay * ra))
+    A = w.sum() * dA
+    yc, zc = (w * Y[m]).sum() / w.sum(), (w * Z[m]).sum() / w.sum()
+    Iy = (w * (Z[m] - zc) ** 2).sum() * dA                 # about local y (stress varies with z)
+    Iz = (w * (Y[m] - yc) ** 2).sum() * dA
     A0, I0 = np.pi * ra ** 2, np.pi * ra ** 4 / 4
     return max(A / A0, 1.0), max(Iy / I0, 1.0), max(Iz / I0, 1.0)
 
 
-def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0):
+def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0, decay=None):
     """Per-element (ne, 6) factors for the resultants [N, T, My1, Mz1, My2, Mz2]: series averages over each
     element of the fused-section ratios in the element's own local axes (explicitFE.Frame rule)."""
     X, C, Xr, connr = lat['X'], lat['conn'], lat['Xr'], lat['connr']
@@ -157,7 +165,7 @@ def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0)
         ra = r_beam[b]
         half = half_factor * max(ra, rn[i], rn[j])
         sgrid = np.arange(0.0, L + 1e-12, ds_frac * ra)
-        R = np.array([_slice_moments(p + sv * x, y, z, ra, cyl, sph, z_lo, z_hi, n_grid, half) for sv in sgrid])
+        R = np.array([_slice_moments(p + sv * x, y, z, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay) for sv in sgrid])
         prof.append((sgrid, R))
     F = np.ones((len(connr), 6))
     for e, (a, b) in enumerate(connr):
