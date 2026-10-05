@@ -302,7 +302,8 @@ class ViscoHyperLaw:
 
 
 class JointScaledLaw:
-    """Section law with per-element stiffness factors s (ne,): resultants s * law(d) (each element's energy scaled
+    """Section law with per-element stiffness factors s (ne,) or per resultant (ne, 6) [N, T, My1, Mz1, My2, Mz2]:
+    resultants s * law(d) (for an elastic law each element's energy is scaled
     by s, so the model stays conservative). Used for joint stiffening (latticeSetup.joint_factors). The wrapped
     law keeps its own (unscaled) history, so history-dependent laws (ViscoHyperLaw) and the adjoint, which reads
     and writes q / f_prev / last_q / last_f / step_dt, work unchanged through attribute forwarding."""
@@ -312,11 +313,13 @@ class JointScaledLaw:
         object.__setattr__(self, 's', s)
 
     def __call__(self, d):
-        return self.s[:, None] * self._law(d)
+        s = self.s
+        return (s if s.dim() == 2 else s[:, None]) * self._law(d)       # (ne,) scalar or (ne, 6) per resultant
 
     def stored_long_term(self, d):
         if hasattr(self._law, 'stored_long_term'):
-            return self._law.stored_long_term(d, w=self.s)
+            w = self.s if self.s.dim() == 1 else self.s[:, 2:].mean(1)    # diagnostics: mean bending factor
+            return self._law.stored_long_term(d, w=w)
         return 0.5 * (d * self(d)).sum()
 
     def __getattr__(self, name):

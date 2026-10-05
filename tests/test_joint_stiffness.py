@@ -43,3 +43,20 @@ def test_joint_factors_gradient_matches_fd():
         h = 1e-6
         fd = (f(r0 + h * e) - f(r0 - h * e)).item() / (2 * h)
         assert (g * e).sum().item() == pytest.approx(fd, rel=1e-5, abs=1e-8)
+
+
+def test_fused_section_factors_basic():
+    """Fused-section (topology-aware) joint model: factors >= 1, exactly 1 for a strut far from any node, and the
+    stiffened length is local (a few radii) and mesh independent in compliance."""
+    import jointSection
+    comps = []
+    for es in (0.5, 1.0):
+        lat = example3(elemSize=es, nx=1, ny=1)
+        F, prof = jointSection.element_factors_aniso(lat, np.full(len(lat['conn']), 0.6), ds_frac=0.1, n_grid=41)
+        assert (F >= 1.0 - 1e-12).all()
+        s, R = max(prof, key=lambda p: p[0][-1])            # the longest strut: mid-span is plain strut
+        mid = np.abs(s - 0.5 * s[-1]) < 0.3
+        assert np.allclose(R[mid], 1.0)
+        Le = np.linalg.norm(lat['Xr'][lat['connr'][:, 1]] - lat['Xr'][lat['connr'][:, 0]], axis=1)
+        comps.append((Le / F[:, 2]).sum())
+    assert comps[0] == pytest.approx(comps[1], rel=2e-3)

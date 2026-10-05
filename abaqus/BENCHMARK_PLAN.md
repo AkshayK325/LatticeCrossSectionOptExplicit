@@ -99,7 +99,36 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
 2. differentiable joint stiffening inside an adjoint-based design loop;
 3. validation in impact dynamics with contact and densification against solids (the literature is mostly quasi-static elastic).
 
-**Status after B2d (2026-10-05).**
+**Topology-aware joint model: fused-section stiffness (2026-10-05), `src/jointSection.py`, `drop_rig(joint={'mode': 'section'})`.**
+- **Method:**
+  - Each strut is sliced along its axis. In each slice, take the solid's material (union of the strut circle, the neighbouring cylinders at both of its nodes and the joint spheres, trimmed at the plates), keeping only the part connected to the strut's own section.
+  - The ratios to the bare strut of its second moments about the element's local y and z axes (about the section centroid), its polar moment and its area give per-direction stiffening profiles β(s) ≥ 1 (exactly 1 away from the nodes).
+  - Each element gets the series average l_e / ∫ ds/β(s) per resultant (My by I_y ratio, Mz by I_z ratio, torsion by the mean, axial by area).
+  - **No fitted constant**: no zone length and no k.
+- **Results against the three solid cells:**
+
+  | variant | C4 r 0.8 (B2a) | C4 r 0.6 (B2c) | C12 r 0.5 (B2d) |
+  |---|---|---|---|
+  | bare beams | +23% | +17% | +8.9% |
+  | geometric zone, k = 3.5 (fitted on B2a) | −0.4% (fit) | +0.46% | −9.5% |
+  | fused section, mean principal I (scalar) | −0.5% | −0.4% | −10.1% |
+  | fused section, min principal I (scalar) | +11.1% | +7.7% | +1.2% |
+  | **fused section, anisotropic (I_y, I_z per local axis)** | **+0.1%** (nRMSE 0.48%) | **+0.2%** (0.36%) | **−5.1%** (2.1%) |
+  | anisotropic + shear scaled by area ratio | +0.8% | +0.5% | −5.1% |
+
+  (Max-stroke error vs the solid. Our C12 result is mesh-converged: 0.5 → 0.25 mm elements changes it by 0.25%.)
+- **Reading:**
+  - The anisotropic fused-section model is **parameter-free**. It reproduces C4 at two radii to ≤ 0.2% and halves the C12 error (bare +8.9%, k-model −9.5%, this −5.1%).
+  - The scalar mean/min variants bracket C12, so the direction of the joint stiffening is what distinguishes the topologies. The anisotropic form captures most of it.
+- **Remaining C12 gap (−5%), candidate causes:**
+  - the fused node region is itself compliant (neighbour material attached at an angle does not fully take part in the strut's bending, which a plane-section union assumes);
+  - solid discretization of B2d (h/r = 0.5, converged within 0.7% for C4 only; finer B2d not run).
+- **Costs and open items:**
+  - The stiffer joint elements lower our stable time step: C12 needs 2.3× more steps.
+  - Not yet differentiable in r. Plan: keep the factors as a leaf tensor in the adjoint (exact ∂J/∂s_e) and add their geometric Jacobian ds_e/dr by finite differences of the slice computation.
+- **Next:** a blind check on a third topology (BCC 'B' or octet 'O'), and optionally a finer B2d solid to bound the solid's own error.
+
+**Status after B2d (2026-10-05)** (scalar k-model).
 - Within one topology the model is predictive across radius: B2c blind, stroke 0.46%.
 - **Across topologies a single k is not enough:** the C12 cell (B2d) needs k ≈ 1.7–1.8 against 3.5 for C4. The blind k = 3.5 is 9.5% too stiff there, and uncorrected beams 8.9% too soft. This matches the literature finding that the end-zone length/stiffness depends on topology, so claim (1) 'topology-free' does **not** hold for this model form.
 - Candidate topology-aware refinement (to test against B2a / B2c / B2d without new Abaqus runs, then confirm blind on a new topology, e.g. BCC 'B' or octet 'O'): derive the zone stiffening from the geometry of the fused section itself, i.e. the second moment of area of the union of the strut with the neighbouring material in slices along the zone, instead of one k.
@@ -133,6 +162,7 @@ Meshing:
 - The manifold3d/TetGen route left slivers (shortest altitude 0.001 mm).
 
 ## Log
+- 2026-10-05 (f): **topology-aware, parameter-free joint model** (anisotropic fused-section stiffness from the slice geometry): C4 r 0.8 +0.1%, C4 r 0.6 +0.2%, C12 −5.1% (k-model −9.5%, bare +8.9%). Not yet differentiable; next: blind third topology.
 - 2026-10-05 (e): **B2d (C12):** the blind joint model with k = 3.5 is 9.5% too stiff; a fit needs k ≈ 1.75. So the geometric zone + one k transfers across radius (C4: B2c) but not across topology.
   - Plateau re-runs with joints (k = 3.5, C4): 80 N → radii 0.799 / 0.803 / 0.400, error ×0.448, efficiency 0.70; 120 N → 0.871 / 0.869 / 1.172, error ×0.278, efficiency 0.69.
 - 2026-10-05 (d): **B2d** (C12 cell, r 0.5) written with a blind prediction: tests topology independence of the joint model. `example3(name=...)` exposes the notebook's lattice types ('C4', 'C12', 'B' BCC, 'O' octet).
