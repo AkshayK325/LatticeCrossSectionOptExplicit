@@ -23,13 +23,17 @@ FIGDIR = ROOT.parent / 'ResultsFig' / 'abaqus'
 
 def read_abaqus(name):
     """{(region, variable): (t, y)} from <name>_history.csv, or None."""
-    p = ROOT / 'csv' / f'{name}_history.csv'
-    if not p.exists():
+    # whole file, or split parts (<name>_history_*.csv / <name>_history_h1.csv ...) for large runs
+    parts = sorted((ROOT / 'csv').glob(f'{name}_history.csv')) + sorted((ROOT / 'csv').glob(f'{name}_history_*.csv'))
+    if not parts:
         return None
     data = {}
-    with open(p) as f:
-        for row in csv.DictReader(f):
-            data.setdefault((row['region'], row['variable']), []).append((float(row['time']), float(row['value'])))
+    for p in parts:
+        with open(p) as f:
+            for row in csv.DictReader(f):
+                data.setdefault((row['region'], row['variable']), []).append((float(row['time']), float(row['value'])))
+    for k in data:                                                    # parts may interleave: sort by time
+        data[k].sort()
     return {k: tuple(np.array(v).T) for k, v in data.items()} or None     # header only (failed job) -> None
 
 
