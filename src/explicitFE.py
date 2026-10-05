@@ -233,7 +233,7 @@ class ViscoHyperLaw:
         self.q = torch.zeros(self.tau.shape[0], ne, 6, dtype=self.A.dtype)
         self.f_prev = torch.zeros(ne, 6, dtype=self.A.dtype)
 
-    def _fibre_energy(self, d, quadratic):
+    def _fibre_energy(self, d, quadratic, w=None):
         """Section-integrated Yeoh energy per element (fibre model), or its small-strain quadratic form.
         Curvatures/twist from the corotational end rotations: kappa = (r2 - r1)/L0, twist = rx/L0."""
         L0, r = self.fr.L0, self.r_sec
@@ -249,7 +249,8 @@ class ViscoHyperLaw:
             lam = 1 + eps
             x = lam * lam + 2 / lam - 3 + g2                                    # I1 - 3 (uniaxial + simple shear)
             W = C10 * x + C20 * x * x + C30 * x * x * x
-        return (L0 * r * r * (W * self.fw[None, :]).sum(1)).sum()
+        Ue = L0 * r * r * (W * self.fw[None, :]).sum(1)
+        return (Ue if w is None else w * Ue).sum()
 
     def f_inf(self, d):
         """Long-term resultants. Fibre mode: exact linear Timoshenko law + large-strain correction
@@ -287,12 +288,39 @@ class ViscoHyperLaw:
         self.q = self._branches(f)
         self.f_prev = f
 
-    def stored_long_term(self, d):
-        """Long-term elastic energy (diagnostics). Fibre mode: linear Timoshenko energy + (U_fibre - U_quad)."""
+    def stored_long_term(self, d, w=None):
+        """Long-term elastic energy (diagnostics). Fibre mode: linear Timoshenko energy + (U_fibre - U_quad).
+        w (ne,): optional per-element energy weights (joint stiffening, JointScaledLaw)."""
         from material import yeoh_energy
         f = self.fr.elastic_law(d, self.A, self.I, self.mat['E'], self.mat['G'])
+        ww = 1.0 if w is None else w
         if self.fibre:
             with torch.no_grad():
-                return 0.5 * (d * f).sum() + self._fibre_energy(d, False) - self._fibre_energy(d, True)
+                return (0.5 * ww * (d * f).sum(1)).sum() + self._fibre_energy(d, False, w) - self._fibre_energy(d, True, w)
         lam = 1 + d[:, 0] / self.fr.L0
-        return (self.A[:, 0] * self.fr.L0 * yeoh_energy(lam, self.C)).sum() + 0.5 * (d[:, 1:] * f[:, 1:]).sum()
+        return (ww * (self.A[:, 0] * self.fr.L0 * yeoh_energy(lam, self.C) + 0.5 * (d[:, 1:] * f[:, 1:]).sum(1))).sum()
+
+
+class JointScaledLaw:
+    """Section law with per-element stiffness factors s (ne,): resultants s * law(d) (each element's energy scaled
+    by s, so the model stays conservative). Used for joint stiffening (latticeSetup.joint_factors). The wrapped
+    law keeps its own (unscaled) history, so history-dependent laws (ViscoHyperLaw) and the adjoint, which reads
+    and writes q / f_prev / last_q / last_f / step_dt, work unchanged through attribute forwarding."""
+
+    def __init__(self, law, s):
+        object.__setattr__(self, '_law', law)
+        object.__setattr__(self, 's', s)
+
+    def __call__(self, d):
+        return self.s[:, None] * self._law(d)
+
+    def stored_long_term(self, d):
+        if hasattr(self._law, 'stored_long_term'):
+            return self._law.stored_long_term(d, w=self.s)
+        return 0.5 * (d * self(d)).sum()
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, '_law'), name)
+
+    def __setattr__(self, name, value):
+        setattr(self._law, name, value)

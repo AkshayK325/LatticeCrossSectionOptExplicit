@@ -469,7 +469,8 @@ def _a4_rig(c=A4):
     mat = dict(E=E, G=E / (2 * (1 + NU)), nu=NU, rho=RHO, E0=E)      # E0 key = contact stiffness modulus
     rig = drop_rig(lat, torch.full((lat['connr'].shape[0],), c['r']), {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}, mat=mat,
                    energy_J=c['energy_J'], v0_ms=c['v0'] / 1e3, plate_mass=c['plate_mass'], gap0=0.1,
-                   start='merged', lattice_contact='self' if c.get('contact') else False, mu=c.get('mu', 0.0))
+                   start='merged', lattice_contact='self' if c.get('contact') else False, mu=c.get('mu', 0.0),
+                   joint=c.get('joint'))
     return lat, rig
 
 
@@ -585,6 +586,10 @@ B2a = dict(A5a, name='B2a_unit_cell_solid_h040', nx=1, ny=1, elemSize=1.0, h=0.4
                  'gmsh/OpenCASCADE, C3D10M, h 0.4 mm), bottom face clamped, top face tied to a rigid plate carrying the '
                  'impactor (0.75/9 J at 6 m/s); linear elastic E = 40 MPa, nu 0.49; frictionless general self-contact. '
                  'Ours: the same cell as beams (1 mm elements), beam-beam contact, impactor bonded to the plate')
+# independent validation of the joint correction (k = 3.5 calibrated on B2a): thinner struts, L/r 4.4-11
+B2c = dict(B2a, name='B2c_unit_cell_solid_r060_h030', r=0.6, h=0.30, energy_J=0.75 / 9 * (0.6 / 0.8) ** 4,
+           title=B2a['title'].replace('B2a', 'B2c').replace('r 0.8', 'r 0.6').replace('h 0.4 mm', 'h 0.30 mm')
+                 .replace('0.75/9 J', '0.75/9 (0.6/0.8)^4 J'))
 B2a_f = dict(B2a, name='B2a_unit_cell_solid_h027', h=0.27, title=B2a['title'].replace('B2a', 'B2a-fine').replace('h 0.4 mm', 'h 0.27 mm'))
 
 
@@ -891,6 +896,7 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'A5bs': dict(spec=A5bs, inp=lambda: a4_inp(A5bs), ours=lambda: a4_ours(A5bs)),
          'A5as': dict(spec=A5as, inp=lambda: a4_inp(A5as), ours=lambda: a4_ours(A5as)),
          'B2a': dict(spec=B2a, inp=lambda: b2_inp(B2a), ours=lambda: a4_ours(B2a)),
+         'B2c': dict(spec=B2c, inp=lambda: b2_inp(B2c), ours=lambda: a4_ours(dict(B2c, joint={'k': 3.5}))),
          'B2af': dict(spec=B2a_f, inp=lambda: b2_inp(B2a_f), ours=lambda: a4_ours(B2a_f)),
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 

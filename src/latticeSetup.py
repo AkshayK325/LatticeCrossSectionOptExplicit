@@ -79,6 +79,67 @@ def circle_sections(r, nu=None):
     return A, I
 
 
+def joint_factors(lat, r_elem, k, tau=0.02):
+    """Per-element joint-stiffening factors (ne,), differentiable in the radii.
+
+    Beam models of non-slender lattices miss the stiffness of the fused material at the nodes (Luxner et al. 2005;
+    Smith et al. 2013; Labeas & Sunaric 2010; Portela et al. 2018). Here each strut end gets a joint zone whose
+    length is GEOMETRIC, not fitted: the distance from the node at which the strut's cross-section has fully left
+    every neighbouring strut's cylinder, l = (r_b + r_a cos t) / sin t for struts a, b at angle t (= r cot(t/2)
+    for equal radii), smooth-maximised over the neighbours (log-sum-exp, width tau * r) and capped at L/2.
+    Inside the zone the section is k times stiffer; an element with a fraction phi of its length in a zone gets
+    the series (compliance-averaged) factor s = 1 / ((1 - phi) + phi / k), so the result does not depend on the
+    mesh. One material-independent constant k (calibrated once against a solid unit cell, abaqus/ B2a).
+    The zone length scales with the radii, so design gradients see how a radius change moves the stiffening."""
+    X, C = lat['X'], lat['conn']
+    Xr, connr = lat['Xr'], lat['connr']
+    boe_np = np.asarray(lat['beam_of_elem'])
+    boe = torch.as_tensor(boe_np)
+    nb = len(C)
+    dt = r_elem.dtype
+    # strut radius = mean of its elements (uniform per strut for all symmetry types)
+    cnt = torch.zeros(nb, dtype=dt).index_add(0, boe, torch.ones_like(r_elem))
+    rb = torch.zeros(nb, dtype=dt).index_add(0, boe, r_elem) / cnt
+    Lb = np.linalg.norm(X[C[:, 1]] - X[C[:, 0]], axis=1)
+    # (end, neighbour) pairs with cos/sin of the angle between the two struts leaving the shared node
+    ends, nbrs, cs, sn = [], [], [], []
+    for b, (i, j) in enumerate(C):
+        for e_side, (node, other) in enumerate(((i, j), (j, i))):
+            ta = (X[other] - X[node]) / Lb[b]
+            for c in np.nonzero((C[:, 0] == node) | (C[:, 1] == node))[0]:
+                if c == b:
+                    continue
+                o = C[c, 1] if C[c, 0] == node else C[c, 0]
+                tb = (X[o] - X[node]) / Lb[c]
+                ct = float(np.clip(ta @ tb, -1.0, 1.0))
+                st = float(np.sqrt(max(1.0 - ct * ct, 0.0)))
+                if st < 1e-6:
+                    continue
+                ends.append(2 * b + e_side); nbrs.append(c); cs.append(ct); sn.append(st)
+    ends, nbrs = torch.as_tensor(ends), torch.as_tensor(nbrs)
+    cs, sn = torch.tensor(cs, dtype=dt), torch.tensor(sn, dtype=dt)
+    ra = rb[ends // 2]
+    li = torch.clamp((rb[nbrs] + ra * cs) / sn, min=0.0)                 # per (end, neighbour)
+    w = tau * ra
+    m0 = torch.full((2 * nb,), -torch.inf, dtype=dt).scatter_reduce(0, ends, li.detach(), 'amax')
+    lse = torch.zeros(2 * nb, dtype=dt).index_add(0, ends, torch.exp((li - m0[ends]) / w))
+    wb = tau * torch.repeat_interleave(rb, 2)
+    ell = m0 + wb * torch.log(lse.clamp_min(1e-300))                       # smooth max over neighbours
+    ell = torch.minimum(ell, torch.as_tensor(np.repeat(0.5 * Lb, 2), dtype=dt))
+    # element positions along their strut
+    P0, tb_ = X[C[boe_np, 0]], (X[C[boe_np, 1]] - X[C[boe_np, 0]]) / Lb[boe_np, None]
+    s1 = ((Xr[connr[:, 0]] - P0) * tb_).sum(1)
+    s2 = ((Xr[connr[:, 1]] - P0) * tb_).sum(1)
+    lo = torch.as_tensor(np.minimum(s1, s2), dtype=dt)
+    hi = torch.as_tensor(np.maximum(s1, s2), dtype=dt)
+    le = hi - lo
+    l0, l1 = ell[2 * boe], ell[2 * boe + 1]
+    Lbt = torch.as_tensor(Lb[boe_np], dtype=dt)
+    ov = torch.clamp(torch.minimum(hi, l0) - lo, min=0.0) + torch.clamp(hi - torch.maximum(lo, Lbt - l1), min=0.0)
+    phi = torch.clamp(ov / le, max=1.0)
+    return 1.0 / ((1.0 - phi) + phi / k)
+
+
 # ------------------------------------------------------------------------------------------------
 # Drop rig: lattice bonded to a fixed rigid bottom plate, rigid top plate bonded to the top nodes,
 # separate rigid impactor (1 translational DOF) falling onto the top plate. Contact acts only between
@@ -86,7 +147,7 @@ def circle_sections(r, nu=None):
 
 def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6, gap0=0.3, courant=0.7,
              start='gap', lattice_contact=True, contact_model='line', fibre=True, mu=0.5, freeze=None,
-             crush=False, contact_ref_radius=None, contact_exclusion='smooth'):
+             crush=False, contact_ref_radius=None, contact_exclusion='smooth', joint=None):
     """law: a gap law, or a dict of contact.calibrate() kwargs (lets 'crit_damped' get the reduced mass).
     r_elem (ne,) radii [mm]. plate_mass [t] (default 2 mm aluminium 38x38: 7.8 g). gap0 [mm] initial
     impactor-plate gap.
@@ -106,6 +167,8 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     fibre:             large-strain (fibre-integrated Yeoh) bending and torsion in the section law.
     contact_ref_radius: LineContact exclusion_radius: joint/overlap exclusions computed with this radius for all
                        elements (design-independent excluded set; use the upper radius bound in optimisation).
+    joint:             None (bare beams meeting at points) or dict(k=..., tau=0.02): geometric joint-zone
+                       stiffening (joint_factors), the section k times stiffer within a joint zone.
     contact_exclusion: 'smooth' (default; joint/overlap exclusion as a C1 weight of the radii, so J(x) is
                        continuous and differentiable) or 'hard' (excluded set; J jumps when a design change moves
                        quadrature points across the threshold).
@@ -130,6 +193,9 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     else:
         E, G = mat['E'], mat['G']
         beam_law = lambda d: fr.elastic_law(d, A, I, E, G)
+    if joint is not None:                                        # stiffness only: mass and contact use true radii
+        from explicitFE import JointScaledLaw
+        beam_law = JointScaledLaw(beam_law, joint_factors(lat, r_elem, joint['k'], joint.get('tau', 0.02)))
     m, j = lumped_mass(fr, A, I, mat['rho'])
     v0 = v0_ms * 1e3
     M = 2 * energy_J * 1e3 / v0**2

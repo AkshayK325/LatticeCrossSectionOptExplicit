@@ -72,9 +72,42 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
 | **B1** single strut, C3D8R solid (≈ 8 elements across the diameter): axial compression and bending at impact rates, vs our single beam | ⬜ | section law vs continuum; QLV vs Abaqus finite-strain viscoelasticity | N(ε), M(κ), loss per cycle; expect ≤ 5% at moderate strain | |
 | **B2a** ONE C4 unit cell (12.7 mm cube, 36 struts, r 0.8) as a **solid**: strut cylinders + joint spheres fused (gmsh/OpenCASCADE), trimmed at the plate planes, **C3D10M h = 0.4 mm** (39 665 elements, Netgen-optimised; shortest altitude 0.088 mm → est. ~73k increments), bottom face clamped, top face tied to a rigid plate carrying the impactor (0.75/9 J at 6 m/s), linear elastic E = 40 MPa, ν 0.49, frictionless general self-contact, 4 ms | ✔ valid reference / ✘ beam model 24% too soft | joint idealisation + densification contact on a solid reference (P1, P2), cheaply | max stroke, time of max stroke, loading stroke history, peak / correlation of the bottom reaction (as A5); expect the solid to be stiffer (joint material) | `inp/B2a_unit_cell_solid_h040.inp` (6 MB). Ours: the same cell as beams, 1 mm elements | max stroke 10.23 mm, peak bottom reaction 16.7 N, contact energy max 0.59 N mm | Ran 2026-10-05 (3.3 h wall; time step 3.4e-8 s at start, falling to 8.2e-9 s as elements are crushed; 318k increments; energy drift 0.9%). Solid: max stroke 8.323 mm at 2.42 ms, peak bottom reaction 18.4 N. **Our beam cell is softer:** stroke 10.23 mm (+23%), time 2.89 ms (+20%), peak 16.7 N; the solid's reaction is higher from 0.5 ms on, before contact matters, so the cell's **elastic stiffness** differs. Cause: joint material. The solid has a fused lump at each node, while our beams meet at a point and bend right up to the node centre; the struts are short (L/r = 3–8). **Test:** stiffening only the end element of each strut (about 1 mm ≈ 1.25 r, mass and contact unchanged) by ×2.0 gives stroke 8.187 mm (**1.0%**), time 2.33 ms (3.3%), peak 22.0 N (6%), loading stroke nRMSE **0.42%** (×1.7: 3.8%, ×2.3: 4.6%). One-parameter calibration on this case only, so it still needs an independent check. Fig `12_B2a_unit_cell_solid_h040.png` |
 | **B2a-fine** = B2a with **h = 0.27 mm** (82 625 C3D10M, shortest altitude 0.062 mm, ~103k increments) | ✅ solid converged | solid mesh convergence (B2a vs B2a-fine) before any full-lattice solid run | stroke and peak change between h 0.4 and 0.27 | `inp/B2a_unit_cell_solid_h027.inp` (12.6 MB) | as B2a | Ran 2026-10-05 (7.2 h wall; 357k increments; energy drift 1.3%). Solid max stroke 8.267 vs 8.323 mm at h 0.4 (**0.7%**), time 2.41 vs 2.42 ms, peak 20.7 vs 18.4 N (the peak is a noisy maximum). **h = 0.4 mm is converged for stroke and timing.** Fig `13_B2a_unit_cell_solid_h027.png` |
+| **B2c** (validation of the joint model, written 2026-10-05): the same C4 cell with **r = 0.6** (L/r 4.4–11 instead of 3.3–8), solid C3D10M h = 0.30 mm (47 578 elements, shortest altitude 0.064 mm), impact energy scaled by (0.6/0.8)⁴ to keep a comparable crush (26.4 N mm at 6 m/s), otherwise B2a | 🟦 | **independent check of k = 3.5** (calibrated on B2a only) | max stroke ≤ 3%; time of max stroke ≤ 5%; loading stroke nRMSE ≤ 3% | `inp/B2c_unit_cell_solid_r060_h030.inp` (7.4 MB) | **Blind prediction, recorded before the Abaqus run.** With joint k = 3.5: max stroke **8.328 mm at 2.39 ms**, peak bottom reaction **7.32 N**. Without the joint model: 9.791 mm at 2.80 ms, 5.85 N | — |
 | **B3** full 3×3×1 lattice, solid C3D10M, general contact μ = 0.5, rigid plates, merged impactor, 0.75 J | ⬜ | **paper validation figure** | F–δ, peak, stroke, dissipation; expect peak within 10–20% | |
 | **B4** design ranking in Abaqus: initial vs optimized (80 N and 120 N plateau designs) | ⬜ | does the optimizer's improvement survive in the reference model? | sign and size of ΔJ, Δpeak, Δefficiency | |
 | **B5** (optional) FD gradient in Abaqus: ±Δr on one group (2 runs) | ⬜ | sign and rough size of dJ/dr vs our adjoint | sign agrees; magnitude within ~30% | |
+
+## Joint-stiffness model (2026-10-05), from B2a
+**Problem.** A beam model of a non-slender lattice misses the stiffness of the fused material at the nodes. Ours was 23% too soft in stroke against the solid unit cell (B2a), from the elastic phase on.
+
+**Literature (grounding).**
+- Luxner, Stampfl & Pettermann (2005, J. Mater. Sci. 40): beam models with the stiffness adapted near the vertices.
+- Smith, Guan & Cantwell (2013, Int. J. Mech. Sci. 67) and Labeas & Sunaric (2010, Strain 46): thicker strut ends in beam models of BCC lattices.
+- 'Modified beam' models: rigid strut extremities whose length is calibrated against solid models and found to depend on strut diameter and cell topology (e.g. Int. J. Mech. Sci. 2023, S0020740323005015).
+- Portela, Greer & Kochmann (2018, Extreme Mech. Lett. 22, 138–148, doi:10.1016/j.eml.2018.06.004): node effects dominate the stiffness of non-slender lattices.
+- (Full citations to verify before the paper.)
+
+**Ours** (`latticeSetup.joint_factors`, `explicitFE.JointScaledLaw`; `drop_rig(..., joint={'k': 3.5})`).
+- **Zone length is geometric, not fitted:** the distance from the node at which a strut's cross-section has fully left every neighbouring strut's cylinder, ℓ = (r_b + r_a cos θ)/sin θ (= r cot(θ/2) for equal radii). Smooth-maximised over the neighbours, capped at L/2. On the C4 cell: ℓ = 0.58–1.0 r, median 1.0 r.
+- **Stiffness:** inside a zone the section is k times stiffer (stiffness only: mass and contact use the true radii). Per element, s = 1/((1 − φ) + φ/k), with φ the zone fraction of its length, so the strut compliance is mesh-independent (identical at 0.5 / 1 / 3 mm elements, test).
+- **One constant**, k = 3.5, calibrated once on B2a: stroke 0.4%, loading history 0.44%, peak 1.0%, time of max stroke 2.5% (k = 3: 1.4%, k = 4: 1.7%). Interpretation: a ≈ 1.37× wider effective section over ≈ one radius.
+- **Differentiable in the design:** ℓ scales with the radii, so the adjoint carries how a radius change moves the stiffening. Adjoint vs FD through a full EPU 45 drop with joints on: **7e-11, 5e-10, 2e-9** (3 Midplane groups).
+
+**Possible contributions** (honest scope):
+1. geometric, topology-free zone length (the literature calibrates the length per topology / diameter);
+2. differentiable joint stiffening inside an adjoint-based design loop;
+3. validation in impact dynamics with contact and densification against solids (the literature is mostly quasi-static elastic).
+
+The validation of (1) + k on an independent case is **B2c** (r = 0.6). Then B3 (full lattice).
+
+## Cost: 3D solid (Abaqus) vs our beam model (for future planning)
+| Model | Abaqus solid C3D10M | Abaqus beams B31 | Ours (beams) |
+|---|---|---|---|
+| unit cell, 4 ms, E = 40 MPa | h 0.4 mm: 39.7k el, 318k increments, **3.3 h** wall; h 0.27 mm: 82.6k el, 357k incr, **7.2 h** (user's machine) | — | **20 s** (1 mm elements, joint model, 1653 steps, CPU 4 threads, shared machine) |
+| 3×3 lattice, 4 ms, E = 40 MPa, contact | est. ~9× unit cell ≈ **30 h** at h 0.4 (quarter symmetry ≈ 4× less, ν 0.45 ≈ 2× less) | **~1 s** (A5a-s, 444 B31) | **3 min** (3 mm elements, 7914 steps, CPU 4 threads, shared) |
+| 3×3 lattice, real EPU 45, 8 ms, gradient | — | — | ~2–7 min per evaluation (value + adjoint gradient; 3 mm GPU ≈ 80–140 s at 3 ms) |
+
+The solid time step falls 3–4× during the crush (element distortion): 3.4e-8 → 8.2e-9 s in B2a.
 
 ## Order
 A1 → A2 → A3 → A4 → A5a → A5b → B0 → B1 → B3 → B4 → (B2, B5).
@@ -95,6 +128,10 @@ Meshing:
 - The manifold3d/TetGen route left slivers (shortest altitude 0.001 mm).
 
 ## Log
+- 2026-10-05 (b): **joint-stiffness model implemented** (geometric zones, k = 3.5 from B2a, mesh-independent, exact adjoint).
+  - **B2c** (r = 0.6) written with a recorded blind prediction.
+  - Plateau optimisations (80 N GPU, 120 N CPU) re-launched with joints.
+  - Cost table added.
 - 2026-10-05: **B2a (solid unit cell):** the solid reference is mesh-converged (0.7% between h 0.4 and 0.27).
   - **Our beam model is 23% too soft in stroke:** missing joint stiffness.
   - A ×2 stiffness on the strut end elements (≈ 1.25 r) matches the solid to 1% (stroke) / 0.42% (history): calibrated, still to be validated.

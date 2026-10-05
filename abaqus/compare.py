@@ -132,7 +132,7 @@ def labels(case):
     if case in ('A3s', 'A3s1'):
         g = cases.a3s_mesh(cases.CASES[case]['spec'])
         return {'amid': g['midA'], 'bmid': g['midB'], 'b': g['labelsB']}
-    if case in ('B2a', 'B2af'):
+    if case in ('B2a', 'B2af', 'B2c'):
         g = cases.b2_mesh(cases.CASES[case]['spec'])
         return {'ref': len(g['P']) + 1, 'bot': [int(k) + 1 for k in g['bot']]}
     if case in ('A4', 'A5a', 'A5b', 'A5as', 'A5aq', 'A5bs'):
@@ -160,7 +160,7 @@ def signals(case, ours):
         return [('B mid U3', 'U3Bmid', 'U3', ('node', L['bmid']), 'mm', None),
                 ('A mid U3', 'U3Amid', 'U3', ('node', L['amid']), 'mm', None),
                 ('B momentum z', 'PB3', 'V3', ('wsum', L['b'], mB), 't mm/s', None)] + E
-    if case in ('A5a', 'A5b', 'A5as', 'A5aq', 'A5bs', 'B2a', 'B2af'):
+    if case in ('A5a', 'A5b', 'A5as', 'A5aq', 'A5bs', 'B2a', 'B2af', 'B2c'):
         return [('plate U3 (stroke)', 'U3ref', 'U3', ('node', L['ref']), 'mm', None),
                 ('plate V3', 'V3ref', 'V3', ('node', L['ref']), 'mm/s', None),
                 ('bottom reaction (sum RF3)', 'RF3bot', 'RF3', ('sum', L['bot']), 'N', None),
@@ -238,7 +238,7 @@ def scalar_metrics(case, ours, ab):
         if r is not None:
             out.append(('B mid max downward U3 [mm]', -ours['U3Bmid'].min(), -r[1].min(),
                         rel(ours['U3Bmid'].min(), r[1].min()), None))
-    if case in ('A5a', 'A5b', 'A5as', 'A5aq', 'A5bs', 'B2a', 'B2af'):
+    if case in ('A5a', 'A5b', 'A5as', 'A5aq', 'A5bs', 'B2a', 'B2af', 'B2c'):
         r = pick(ab, 'U3', ('node', L['ref']))
         if r is not None:
             ia = np.argmin(r[1])
