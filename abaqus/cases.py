@@ -642,9 +642,14 @@ def b2_mesh(c=B2a):
 def b2_inp(c=B2a):
     g = b2_mesh(c)
     P, T = g['P'], g['T']
-    lat, rig = _a4_rig(c)                                   # same impactor mass as our model
+    lat, rig = _a4_rig(c)
     ref = len(P) + 1
-    Mref = rig['M'] + c['plate_mass']
+    # total moving mass as ours, 2 E / v0^2: impactor + plate on the reference node, minus the solid's own tied
+    # top-face mass (until 2026-10-05 the beam model's top-node mass was subtracted instead, which for cells with
+    # struts in the plate planes left the solid 12-16% short of the impact energy; compare.py energy-matches those)
+    import solid as _solid
+    m_face = _solid.lumped_masses_c3d10m(P, T, RHO)[g['top']].sum()
+    Mref = 2 * c['energy_J'] * 1e3 / c['v0'] ** 2 - m_face
     nodes = _fmt_rows([(i + 1, *map(float, x)) for i, x in enumerate(P)] +
                       [(ref, float(g['center'][0]), float(g['center'][1]), g['H'] + 0.1)])
     elems = _fmt_rows([(e + 1, *map(int, t + 1)) for e, t in enumerate(T)])
@@ -922,7 +927,8 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'B2a': dict(spec=B2a, inp=lambda: b2_inp(B2a), ours=lambda: a4_ours(B2a)),
          'B2c': dict(spec=B2c, inp=lambda: b2_inp(B2c), ours=lambda: a4_ours(dict(B2c, joint={'k': 3.5}))),
          'B2d': dict(spec=B2d, inp=lambda: b2_inp(B2d), ours=lambda: a4_ours(dict(B2d, joint={'k': 3.5}))),
-         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint={'mode': 'section'}))))
+         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint={'mode': 'section'}))),
+                    joint={'mode': 'section'})
             for k, v in (('B2e', B2e), ('B2f', B2f), ('B2g', B2g), ('B2h', B2h))},
          'B2af': dict(spec=B2a_f, inp=lambda: b2_inp(B2a_f), ours=lambda: a4_ours(B2a_f)),
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}

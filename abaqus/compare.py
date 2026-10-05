@@ -295,6 +295,12 @@ def main(case):
     if ab is None:
         ab = read_sta(name)
         source = f'{name}.sta only (kinetic and total energy at the field frames, 4 digits): no odb/CSV yet'
+    if case.startswith('B2') and ab is not None and pick(ab, 'ALLKE') is not None:
+        ke0, ke_nom = pick(ab, 'ALLKE')[1][0], c['spec']['energy_J'] * 1e3
+        if abs(ke0 / ke_nom - 1) > 0.01:                       # solid started with a different moving mass
+            jm = cases.CASES[case].get('joint', c['spec'].get('joint'))
+            ours = cases.a4_ours(dict(c['spec'], energy_J=ke0 * 1e-3, joint=jm))
+            source += f' (ours re-run energy-matched to the solid: {ke0:.3f} vs nominal {ke_nom:.3f} N mm)'
     sig = signals(case, ours)
     ncol = (len(sig) + 1) // 2
     fig, axs = plt.subplots(2, ncol, figsize=(5 * ncol, 7))
