@@ -597,6 +597,23 @@ B2d = dict(B2a, name='B2d_unit_cell_C12_solid_r050_h025', cell='C12', r=0.5, h=0
                  'joint spheres, gmsh/OpenCASCADE, C3D10M, h 0.25 mm), bottom face clamped, top face tied to a rigid '
                  'plate carrying the impactor (17 N mm at 6 m/s, plate 0.1 g); linear elastic E = 40 MPa, nu 0.49; '
                  'frictionless general self-contact. Ours: the same cell as beams (0.5 mm elements), joint k = 3.5')
+# third / fourth topologies for the fused-section joint model (blind): BCC 'B' and octet 'O', two radii each.
+# Solid h = r/2 (as the converged B2a); ours: elemSize = r; energy set by our anisotropic model for ~8 mm crush.
+def _b2_topo(cell, r, energy_J, tag):
+    nm = {'B': 'BCC', 'O': 'octet'}[cell]
+    return dict(B2a, name=f'B2{tag}_unit_cell_{nm}_solid_r{int(round(r * 100)):03d}_h{int(round(r * 50)):03d}',
+                cell=cell, r=r, h=0.5 * r, elemSize=r, energy_J=energy_J, plate_mass=1e-7,
+                title=f'B2{tag}: ONE {nm} unit cell (12.7 mm cube, r {r}) as a SOLID (strut cylinders + joint spheres, '
+                      f'gmsh/OpenCASCADE, C3D10M, h {0.5 * r:g} mm), bottom face clamped, top face tied to a rigid plate '
+                      f'carrying the impactor ({energy_J * 1e3:.3g} N mm at 6 m/s, plate 0.1 g); linear elastic E = 40 MPa, '
+                      f'nu 0.49; frictionless self-contact. Ours: beams ({r:g} mm elements), fused-section joint model')
+
+
+_SMALL = dict(T=5e-4, out_dt=2e-6)        # first compression cycle only (~0.7 mm, ~6% strain: stretch-dominated cells)
+B2e = dict(_b2_topo('B', 1.0, 0.020, 'e'), **_SMALL)
+B2f = dict(_b2_topo('B', 1.5, 0.045, 'f'), **_SMALL)
+B2g = dict(_b2_topo('O', 1.0, 0.016, 'g'), **_SMALL)
+B2h = dict(_b2_topo('O', 1.5, 0.045, 'h'), **_SMALL)
 B2a_f = dict(B2a, name='B2a_unit_cell_solid_h027', h=0.27, title=B2a['title'].replace('B2a', 'B2a-fine').replace('h 0.4 mm', 'h 0.27 mm'))
 
 
@@ -905,6 +922,8 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'B2a': dict(spec=B2a, inp=lambda: b2_inp(B2a), ours=lambda: a4_ours(B2a)),
          'B2c': dict(spec=B2c, inp=lambda: b2_inp(B2c), ours=lambda: a4_ours(dict(B2c, joint={'k': 3.5}))),
          'B2d': dict(spec=B2d, inp=lambda: b2_inp(B2d), ours=lambda: a4_ours(dict(B2d, joint={'k': 3.5}))),
+         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint={'mode': 'section'}))))
+            for k, v in (('B2e', B2e), ('B2f', B2f), ('B2g', B2g), ('B2h', B2h))},
          'B2af': dict(spec=B2a_f, inp=lambda: b2_inp(B2a_f), ours=lambda: a4_ours(B2a_f)),
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 
