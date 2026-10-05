@@ -79,6 +79,11 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
 | B2f BCC r 1.5, 45 N mm | ✔ ran | | | `inp/B2f_unit_cell_BCC_solid_r150_h075.inp` (33 303 el., 0.116 mm) | **fused-section: 0.6975 mm @ 0.207 ms, peak 176.4 N**; bare 0.8340 mm @ 0.252 ms, 134.9 N; k 3.5: 0.6852 mm @ 0.203 ms, 183.5 N | — |
 | B2g octet r 1.0, 16 N mm | ✔ ran | | | `inp/B2g_unit_cell_octet_solid_r100_h050.inp` (65 662 el., 0.070 mm) | **fused-section: 0.7485 mm @ 0.275 ms, peak 46.3 N**; bare 0.8866 mm @ 0.341 ms, 36.7 N; k 3.5: 0.7433 mm @ 0.278 ms, 61.8 N | — |
 | B2h octet r 1.5, 45 N mm | ✔ ran | | | `inp/B2h_unit_cell_octet_solid_r150_h075.inp` (50 085 el., 0.103 mm) | **fused-section: 0.7176 mm @ 0.236 ms, peak 153.0 N**; bare 1.0017 mm @ 0.338 ms, 97.8 N; k 3.5: 0.7324 mm @ 0.243 ms, 171.3 N | — |
+| **B2i–k** (graded Midplane designs on the C4 cell, written 2026-10-05): top / bottom radii differ, mid = their mean (3 design variables); solid h = r_min/2; impactor mass from the solid's top-face mass (fixed rule); E = 40 MPa | 🟦 | does the joint model hold when struts of different radii meet at a joint (joint sphere = largest radius at the node, as in the model)? | as A5 / B2 (stroke ≤ 3%, time ≤ 5%) | see below | blind predictions below (four joint models) | — |
+| B2i top 1.0, bottom 0.6, mid 0.8, 45 N mm | 🟦 | | | `inp/B2i_unit_cell_C4_graded_top100_bot060.inp` (71.6k el., min alt. 0.040 mm) | **fused+SV: 8.2312 mm @ 2.589 ms, peak 10.02 N**; fused 7.9766 mm @ 2.559 ms; k 3.5: 7.9422 mm @ 2.543 ms; bare 9.8966 mm @ 2.988 ms | — |
+| B2j top 0.6, bottom 1.0, mid 0.8, 42 N mm | 🟦 | | | `inp/B2j_unit_cell_C4_graded_top060_bot100.inp` (72.8k el., 0.035 mm) | **fused+SV: 8.0857 mm @ 2.489 ms, peak 15.76 N**; fused 7.8407 mm @ 2.412 ms; k 3.5: 7.7812 mm @ 2.353 ms; bare 9.7447 mm @ 2.908 ms | — |
+| B2k top 0.7, bottom 0.9, mid 0.8 (= twin-recovery design), 70 N mm | 🟦 | | | `inp/B2k_unit_cell_C4_graded_top070_bot090.inp` (46.7k el., 0.032 mm) | **fused+SV: 8.5729 mm @ 2.533 ms, peak 17.81 N**; fused 8.2846 mm @ 2.451 ms; k 3.5: 8.2558 mm @ 2.390 ms; bare 10.3263 mm @ 2.920 ms | — |
+| (dropped) top 1.1 / bottom 0.5 | ✖ | | | gmsh slivers where a 0.5 mm strut leaves a 1.1 mm joint sphere (min alt. 0.0065–0.012 mm even at h 0.35): ~a day in Abaqus; replaced by B2k | — | — |
 | **B3** full 3×3×1 lattice, solid C3D10M, general contact μ = 0.5, rigid plates, merged impactor, 0.75 J | ⬜ | **paper validation figure** | F–δ, peak, stroke, dissipation; expect peak within 10–20% | |
 | **B4** design ranking in Abaqus: initial vs optimized (80 N and 120 N plateau designs) | ⬜ | does the optimizer's improvement survive in the reference model? | sign and size of ΔJ, Δpeak, Δefficiency | |
 | **B5** (optional) FD gradient in Abaqus: ±Δr on one group (2 runs) | ⬜ | sign and rough size of dJ/dr vs our adjoint | sign agrees; magnitude within ~30% | |
@@ -145,6 +150,15 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
   2. The parameter-free fused-section model is best or tied on 6 of 7 cells: ≤ 1.2% on C4 (the design lattice), 3–9.5% elsewhere.
   3. The residual is systematically too stiff. That is consistent with the model's upper-bound assumption: all fused material in a slice fully takes part in the strut's bending, whereas material attached at an angle only partly does. 90° C4 corners come closest.
   4. Next refinements to consider: a participation reduction for angled fused material (from the local geometry, not fitted), and solid mesh convergence for the stretch-dominated cells (coarse C3D10M is stiff, so refinement would likely widen, not close, the gap).
+- **Saint-Venant participation** (2026-10-05), `joint={'mode': 'section', 'decay': 1.0}`.
+  - Fused material outside the strut's own circle counts with weight exp(−d/λ), with d its distance from the circle and **λ = r** (the section's own size). Rationale: bending stress diffuses into side-attached material only over about one section size (Saint-Venant; cf. the effective width of flanges).
+  - λ = r was chosen *before* evaluation and **not tuned**; only λ = r has been run.
+  - Energy-matched max-stroke error vs the seven solids: C4 r 0.8 **+2.8%**, C4 r 0.6 **+1.2%**, C12 **−3.2%**, BCC r 1.0 **+0.9%**, BCC r 1.5 **−0.2%**, octet r 1.0 **−1.3%**, octet r 1.5 **+1.0%**. **Mean absolute 1.5%** (fused section without decay 4.9%, k = 3.5 5.9%, bare 15.2%), and no longer one-sided. Time of max stroke within 7%; loading nRMSE ≤ 2.8%.
+- **Prior art to cite** (2026-10-05 search):
+  - Parametrized superelements for lattice joints (Comput. Mech. 2022, doi:10.1007/s00466-022-02176-9): solid-meshed joints, reduced and surrogate-fitted; differentiable, elastic; needs solid analyses per joint family.
+  - 'Junction beams' of individually determined length (Int. J. Mech. Mater. Des. 2023, doi:10.1007/s10999-023-09659-4).
+  - Rigid-zone factors at beam-column joints (structural frame practice, 0–1, often 0.5).
+  - Ours needs no solid analysis, works inside explicit impact with contact, and adds the Saint-Venant participation idea (not found in the lattice literature in this search; verify further before claiming novelty).
 - **Costs and open items:**
   - The stiffer joint elements lower our stable time step: C12 needs 2.3× more steps.
   - Not yet differentiable in r. Plan: keep the factors as a leaf tensor in the adjoint (exact ∂J/∂s_e) and add their geometric Jacobian ds_e/dr by finite differences of the slice computation.
@@ -185,6 +199,9 @@ Meshing:
 - The manifold3d/TetGen route left slivers (shortest altitude 0.001 mm).
 
 ## Log
+- 2026-10-05 (i): **Saint-Venant participation (λ = r, untuned) brings all seven solid cells within ±3.2%** (mean 1.5%; before 4.9%).
+  - Graded designs B2i–k written with blind predictions from four joint models.
+  - Prior art recorded: parametrized superelements 2022, junction beams 2023, rigid-zone factors.
 - 2026-10-05 (h): **B2e–h done.** Energy-matched, the fused-section joint model is within 3–9.5% on BCC / octet (bare 10–26%) and ≤ 1.2% on C4; residual systematically too stiff.
   - Fixed: solid impactor mass now from the solid's own top-face mass. `compare.py` energy-matches B2 cells whose solid KE(0) differs from nominal by > 1%.
 - 2026-10-05 (g): B2e–h written (BCC / octet, r 1.0 / 1.5) with blind predictions: fused-section model, plus bare beams and the k = 3.5 model.
