@@ -93,7 +93,7 @@ def _interior_dihedral(m, H):
 def test_filleted_joints_smooth_and_watertight(tmp_path, cell):
     """smooth_joints=True (smoothJoint: round-union fillets, fine mesh at the joints, stitched tubes): closed when
     re-read, no crease anywhere (the cylinder + sphere / hull joints have 90-150 deg edges), and the volume is the
-    plain strut union plus < 0.5 % (rolling-ball fillets fill only the concave crevices)."""
+    plain strut union plus < 2 % (rounded hull gussets + rolling-ball fillets in the concave crevices)."""
     import trimesh
     lat = example3(elemSize=1.0, nx=1, ny=1, name=cell)
     X, C = lat['X'], lat['conn']
@@ -107,7 +107,7 @@ def test_filleted_joints_smooth_and_watertight(tmp_path, cell):
     assert _interior_dihedral(m, H).max() < 35.0
     assert m.bounds[0][2] == pytest.approx(0.0, abs=1e-6) and m.bounds[1][2] == pytest.approx(H, abs=1e-6)
     if cell == 'C4':
-        assert m.volume == pytest.approx(287.4, rel=0.005)  # 32-gon -> same-area circle r 0.797; plain union 286.2
+        assert m.volume == pytest.approx(291.7, rel=0.005)  # r 0.797 (same-area 32-gon); plain 286.2 (+1.9 % gussets)
 
 
 def test_filleted_joints_mixed_radii_and_polygons(tmp_path):
@@ -146,8 +146,8 @@ def test_smooth_adaptive_matches_uniform():
 
 
 def test_rolling_ball_adds_material_only_where_concave():
-    """Two struts merging at one node: collinear (no crevice) gets no added volume, and the fill grows with the
-    concavity of the joint (150 < 90 < 45 deg between the struts). The old round union added ~2 % in every case."""
+    """Two struts merging at one node: collinear (no crevice) gets (almost) no added volume, and the fill grows with
+    the concavity of the joint (150 < 90 < 45 deg between the struts). The old round union added ~2 % in every case."""
     from smoothJoint import build_smooth_stl
     def two(between):
         t = np.radians(between)
@@ -158,14 +158,14 @@ def test_rolling_ball_adds_material_only_where_concave():
         X, C = two(between)
         plain = build_smooth_stl(X, C, 0.8, fillet=1e-4, adaptive=False).volume
         added[between] = build_smooth_stl(X, C, 0.8, fillet=0.5, adaptive=False).volume / plain - 1
-    assert abs(added[180]) < 2e-4
+    assert abs(added[180]) < 1e-2          # equal coaxial caps: the hull is the strut (800-direction sampling: ~6 um)
     assert added[150] < added[90] < added[45] < 0.015
 
 
-def test_flare_tapers_big_to_small():
-    """A 1.0 mm strut continuing into a 0.5 mm one: without a flare the thin strut leaves the 1.0 mm end sphere with a
-    step (section radius slope ~1.7 at the root); with the flare the radius falls along a tangent 20 deg cone into a
-    rolling-ball fillet, so the slope stays near tan(20 deg) = 0.36 everywhere. Same both ways round."""
+def test_hull_joint_tapers_big_to_small():
+    """A 1.0 mm strut continuing into a 0.5 mm one: with plain struts the thin one leaves the 1.0 mm end sphere with a
+    step (section radius slope ~1.2); the rounded hull joint (caps at R and R + (R - r)/tan 20 deg, capped at 0.3 L)
+    tapers instead, so the slope stays below tan 20 deg. Same both ways round."""
     import manifold3d as m3
     from smoothJoint import build_smooth_stl
     for order in ((1.0, 0.5), (0.5, 1.0)):

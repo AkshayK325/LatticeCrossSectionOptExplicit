@@ -26,6 +26,7 @@ is optional.
 """
 import numpy as np
 
+BAND_MIN = 24        # grids larger than this are evaluated exactly only in a narrow band around the surface
 DIV = 10            # joint-patch cells per strut size (adaptive); the uniform grid uses 8
 
 
@@ -52,32 +53,11 @@ def _polygon_sdf(Q, S):
     return np.where(inside, -1.0, 1.0) * np.sqrt(d2)
 
 
-def _round_cone(P, a, b, r1, r2):
-    """Exact SDF and unit gradient of the round cone: sphere r1 at a, sphere r2 at b, joined by their common tangent
-    cone (Quilez sdRoundCone). Needs |r1 - r2| < |b - a|."""
-    h = np.linalg.norm(b - a)
-    e = (b - a) / h
-    w = P - a
-    z = w @ e
-    rv = w - z[:, None] * e
-    rho = np.linalg.norm(rv, axis=1)
-    rh = rv / np.maximum(rho, 1e-12)[:, None]
-    sb = (r1 - r2) / h
-    ca = np.sqrt(1.0 - sb * sb)
-    kq = -sb * rho + ca * z
-    wb = P - b
-    n0, n1 = np.linalg.norm(w, axis=1), np.linalg.norm(wb, axis=1)
-    d = np.where(kq < 0, n0 - r1, np.where(kq > ca * h, n1 - r2, rho * ca + z * sb - r1))
-    g = np.where((kq < 0)[:, None], w / np.maximum(n0, 1e-12)[:, None],
-                 np.where((kq > ca * h)[:, None], wb / np.maximum(n1, 1e-12)[:, None], ca * rh + sb * e))
-    return d, g
-
-
 def _strut_sdf_grad(P, s, a, b):
-    """(SDF, unit gradient) of strut s between a and b: analytic for a capsule or a flare, finite differences for a
+    """(SDF, unit gradient) of strut s between a and b: analytic for a capsule or a joint hull, finite differences for a
     polygon."""
-    if s.get('flare'):
-        return _round_cone(P, a, b, s['R'], s['size'])
+    if s.get('hull'):
+        return _hull_field(P, s)
     if s['S'] is None:
         ab = b - a
         t = np.clip(((P - a) @ ab) / (ab @ ab), 0.0, 1.0)
@@ -94,8 +74,8 @@ def _strut_sdf(P, s, a=None, b=None):
     """SDF of strut s (dict from _struts) between a and b (default its own end points)."""
     a = s['a'] if a is None else a
     b = s['b'] if b is None else b
-    if s.get('flare'):
-        return _round_cone(P, a, b, s['R'], s['size'])[0]
+    if s.get('hull'):
+        return _hull_field(P, s)[0]
     if s['S'] is None:
         return _capsule_sdf(P, a, b, s['R'])
     e = (b - a) / np.linalg.norm(b - a)
@@ -176,27 +156,88 @@ def _struts(X, conn, sections, orientations=None):
 
 
 # ------------------------------------------------------------------ grid SDF + marching cubes
-TAPER = np.radians(20.0)     # flare half-angle: a thinner strut tapers into the joint's largest radius (30 deg leaves a
-                             # visible cone-to-strut turn; 15 deg adds 2 % volume for no gain in root fillet radius)
+TAPER = np.radians(20.0)     # taper of a thin strut into the joint hull (30 deg: visible turn; 15 deg: more volume)
+HULL_MAX = 0.3               # the joint hull reaches at most this fraction of a strut's length
+HULL_ROUND = 0.5             # hull edge rounding radius / smallest strut size at the node
 
 
-def _flares(X, conn, struts, nodes):
-    """Flares at the given nodes: each strut thinner than the thickest strut at its node gets a round cone from the
-    node (the thickest radius R) down to its own size r over the length (R - r) / sin(TAPER), so big-to-small
-    transitions taper instead of stepping (the convex hull of the paper tapers too, but with creases). Equal radii:
-    no flare. Returns [(flare dict, a, b)]."""
+def _hull_extent(R, r, L):
+    """Distance from the node of a strut's cap in the joint hull: R + (R - r) / tan(TAPER), at most HULL_MAX * L.
+    Equal radii: the cap sits at R (a short gusset). A thinner strut reaches further, so the hull tapers from the
+    largest radius R down to r at about TAPER. Too far would swallow the strut's own (optimised) section, too near
+    leaves a steep step; the cap at HULL_MAX * L bounds the first, the taper the second."""
+    return min(R + (R - r) / np.tan(TAPER), HULL_MAX * L)
+
+
+def _fibonacci(n):
+    k = np.arange(n) + 0.5
+    z = 1 - 2 * k / n
+    t = np.pi * (1 + 5 ** 0.5) * k
+    return np.column_stack((np.sqrt(1 - z * z) * np.cos(t), np.sqrt(1 - z * z) * np.sin(t), z))
+
+
+_DIRS = _fibonacci(800)
+
+
+def _joint_hulls(X, conn, struts, nodes):
+    """Rounded convex hull joint of every node with >= 2 struts: the hull of the struts' end caps (their sections at
+    _hull_extent from the node), Minkowski-rounded with radius rho = HULL_ROUND * smallest strut size there.
+    Built from the support function of the caps shrunk by rho (circle: h(u) = u.c + (r - rho) sqrt(1 - (u.e)^2);
+    polygon: max over its points), sampled on 800 directions: the signed distance of a convex body is
+    max_u (u.x - h(u)), here as a sharp soft maximum, minus rho. Every hull edge is rounded with radius rho, flat
+    faces stay flat, and at each cap the rounded rim has outer radius r, so the hull meets the strut tangentially.
+    Returns [(hull dict, node, node)]."""
     out = []
     for n in nodes:
         inc = [(i, k) for i, ab in enumerate(conn) for k in (0, 1) if ab[k] == n]
+        if len(inc) < 2:
+            continue
         R = max(struts[i]['size'] for i, _ in inc)
+        rmin = min(struts[i]['size'] for i, _ in inc)
+        rho = HULL_ROUND * rmin
+        h = np.full(len(_DIRS), -np.inf)
+        reach = 0.0
         for i, k in inc:
-            r = struts[i]['size']
-            if R - r > 1e-3 * R:
-                e = (X[conn[i][1 - k]] - X[n]) / np.linalg.norm(X[conn[i][1 - k]] - X[n])
-                L = min((R - r) / np.sin(TAPER), 0.45 * np.linalg.norm(X[conn[i][1 - k]] - X[n]))
-                if R - r < 0.99 * L:
-                    out.append((dict(flare=True, S=None, size=r, R=R), X[n], X[n] + L * e))
+            s = struts[i]
+            d = X[conn[i][1 - k]] - X[n]
+            L = np.linalg.norm(d)
+            e = d / L
+            c = X[n] + _hull_extent(R, s['size'], L) * e
+            if s['S'] is None:
+                ue = _DIRS @ e
+                hi = _DIRS @ c + (s['R'] - rho) * np.sqrt(np.maximum(1 - ue * ue, 0.0))
+            else:
+                S = s['S'] * (1 - rho / s['R'])
+                pts = c + np.outer(S[:, 0], s['ex']) + np.outer(S[:, 1], s['ey'])
+                hi = (_DIRS @ pts.T).max(1)
+            h = np.maximum(h, hi)
+            reach = max(reach, np.linalg.norm(c - X[n]) + s['R'])
+        out.append((dict(hull=True, S=None, A=_DIRS, b=-h, tau=0.02 * rmin, rho=rho, size=rmin, R=reach), X[n], X[n]))
     return out
+
+
+def _strut_start(X, conn, struts, i, k):
+    """Where strut i begins at its end k: at its hull cap centre if that node has a joint hull (>= 2 struts; the
+    rounded hull is the node, as in the paper's hull joints, so no end sphere of the thickest strut bulges out of
+    it), else at the node."""
+    n = conn[i][k]
+    inc = [j for j, ab in enumerate(conn) if n in ab]
+    if len(inc) < 2:
+        return X[n]
+    d = X[conn[i][1 - k]] - X[n]
+    L = np.linalg.norm(d)
+    return X[n] + _hull_extent(max(struts[j]['size'] for j in inc), struts[i]['size'], L) * d / L
+
+
+def _hull_field(P, s):
+    """Rounded hull field: sharp soft maximum of the supporting-plane distances, minus rho; and its unit gradient."""
+    d = P @ s['A'].T + s['b']
+    m = d.max(1, keepdims=True)
+    w = np.exp((d - m) / s['tau'])
+    sw = w.sum(1, keepdims=True)
+    f = m[:, 0] + s['tau'] * np.log(sw[:, 0]) - s['rho']
+    g = (w / sw) @ s['A']
+    return f, g / np.maximum(np.linalg.norm(g, axis=1), 1e-12)[:, None]
 
 
 def _fillet_k(struts, fillet):
@@ -284,16 +325,32 @@ def _sdf_points(P, struts, fillet, ends=None, k=None, grad=False):
     return (D, G) if grad else D
 
 
-def _sdf_grid(struts, lo, h, n, fillet, ends=None):
-    """Filleted union on the grid lo + h*index (shape n), block by block (only the struts near each block)."""
+def _sdf_grid(struts, lo, h, n, fillet, ends=None, band=True):
+    """Filleted union on the grid lo + h*index (shape n), block by block (only the struts near each block), exact in
+    a narrow band only: the field is first computed exactly on a 4x coarser grid and interpolated; only the points
+    within 10h of the surface are then evaluated exactly (one level: a recursive coarse level left wrong signs). The field is distance-like (changes by at most the
+    distance moved), so the surface cannot lie outside the band, and away from it only the sign is used."""
+    from scipy.ndimage import map_coordinates
     k = _fillet_k(struts, fillet)
-    D = np.full(n, 10 * h)
+    n = np.asarray(n)
+    mask = None
+    if band and n.min() > BAND_MIN:                          # one coarse level, computed exactly everywhere
+        nc = (n - 1) // 4 + 2
+        Dc = _sdf_grid(struts, lo, 4 * h, nc, fillet, ends, band=False)
+        q = np.stack(np.meshgrid(*[np.arange(m) / 4.0 for m in n], indexing='ij'), 0)
+        D = map_coordinates(Dc, q.reshape(3, -1), order=1, mode='nearest').reshape(n)
+        mask = np.abs(D) < 10 * h
+    else:
+        D = np.full(n, 10 * h)
     B = 24
     ab = [ends[i] if ends is not None else (s['a'], s['b']) for i, s in enumerate(struts)]
     for i0 in range(0, n[0], B):
         for j0 in range(0, n[1], B):
             for k0 in range(0, n[2], B):
                 idx = [np.arange(o, min(o + B, n[d])) for d, o in enumerate((i0, j0, k0))]
+                sub = mask[np.ix_(*idx)] if mask is not None else np.ones([len(x) for x in idx], bool)
+                if not sub.any():
+                    continue
                 blo = lo + h * np.array([x[0] for x in idx])
                 bhi = lo + h * np.array([x[-1] for x in idx])
                 near = [i for i, s in enumerate(struts)
@@ -302,8 +359,9 @@ def _sdf_grid(struts, lo, h, n, fillet, ends=None):
                 if not near:
                     continue
                 g = np.stack(np.meshgrid(*[lo[d] + h * idx[d] for d in range(3)], indexing='ij'), -1)
-                d = _sdf_points(g.reshape(-1, 3), [struts[i] for i in near], fillet, [ab[i] for i in near], k)
-                D[np.ix_(*idx)] = d.reshape(g.shape[:3])
+                blk = D[np.ix_(*idx)]
+                blk[sub] = _sdf_points(g[sub], [struts[i] for i in near], fillet, [ab[i] for i in near], k)
+                D[np.ix_(*idx)] = blk
     return D
 
 
@@ -336,6 +394,23 @@ def _relax(V, F, sdf, h, n_iter=8, loops=()):
     return V
 
 
+def _grid_field(D, lo, h):
+    """Cubic-spline interpolant of a field sampled on the grid lo + h*index, with its unit gradient: C2, and accurate
+    far below the cell size for these smooth fields. The relaxation calls it many times; the exact joint field
+    (support-function hulls, ball projections) is then evaluated only once per grid point."""
+    from scipy.ndimage import map_coordinates, spline_filter
+    coef = spline_filter(D, order=3, mode='nearest')
+    eps = 1e-3
+
+    def f(P):
+        q = ((P - lo) / h).T
+        v = map_coordinates(coef, q, order=3, mode='nearest', prefilter=False)
+        g = np.stack([(map_coordinates(coef, q + eps * np.eye(3)[d][:, None], order=3, mode='nearest',
+                                       prefilter=False) - v) / (eps * h) for d in range(3)], 1)
+        return v, g / np.maximum(np.linalg.norm(g, axis=1, keepdims=True), 1e-12)
+    return f
+
+
 def _mc_manifold(D, lo, h, sdf=None):
     """Closed manifold of {D < 0} by marching cubes (grid origin lo, spacing h), relaxed onto sdf if given."""
     import manifold3d as m3
@@ -363,12 +438,12 @@ def _frame(e):
 
 
 def _cut_length(node, s, e, others, k, h):
-    """Distance from the node at which the fillets on strut s have died out and a cut disk (radius R + 2h, depth
+    """Distance from the node at which the fillets on strut s have died out and a cut disk (radius R + 3h, depth
     R + 6h) holds strut s only. others = [(strut, a, b)]: the other struts of the patch; k: its fillet radius."""
     u, v = _frame(e)
     ang = np.linspace(0, 2 * np.pi, 24, endpoint=False)
     ring = np.vstack([np.zeros((1, 3))] + [rho * (np.outer(np.cos(ang), u) + np.outer(np.sin(ang), v))
-                                           for rho in (s['R'], s['R'] + 2 * h)])
+                                           for rho in (0.5 * s['R'], s['R'], s['R'] + 3 * h)])
     L = h
     while L < 50 * s['R']:
         P = np.vstack([node + (L + dt) * e + ring for dt in np.linspace(0, s['R'] + 6 * h, 4)])
@@ -389,6 +464,8 @@ def _boundary_loops(F):
         loop = [a0]
         while b != a0:
             loop.append(b)
+            if b not in nxt:
+                raise _Fallback(f'pinched cut loop at vertex {b}')
             b = nxt.pop(b)
         loops.append(loop)
     return loops
@@ -521,6 +598,71 @@ def _check_isolated(X, conn, struts, fillet):
                 raise _Fallback(f'struts {i} and {j} come close away from a node')
 
 
+def _patch_mesh(X, conn, struts, dirs, fillet, nodes, inner, ends, cut, h, fl, st0):
+    """Mesh of one joint patch, cut at the given lengths: (V, F, cut loops). Raises _Fallback on a bad cut."""
+    import manifold3d as m3
+    loc = [struts[i] for i in inner] + [struts[i] for i, _ in ends] + [f for f, _, _ in fl]
+    tips = [(st0[i, 0], st0[i, 1]) for i in inner]
+    tips += [(st0[i, k], X[conn[i][k]] + (cut[i, k] + 3 * h) * dirs[i, k]) for i, k in ends]
+    tips += [(a, b) for _, a, b in fl]
+    ext = max([cut[ie] + struts[ie[0]]['R'] + 6 * h for ie in ends] +
+              [struts[i]['R'] * (1 + fillet) + 3 * h for i in inner])
+    ext = np.ceil(ext / h) * h
+    lo = X[nodes].min(0) - ext - 0.3819660 * h                 # no grid plane on a node or cut plane
+    n = np.ceil((X[nodes].max(0) + ext - lo) / h).astype(int) + 2
+    D = _sdf_grid(loc, lo, h, n, fillet, tips)
+    sdf = _grid_field(D, lo, h)
+    J = _mc_manifold(D, lo, h, sdf)
+    parts = J.decompose()
+    if len(parts) > 1:                                         # a stray shell can never belong to the joint
+        J = max(parts, key=lambda p: p.volume())
+    planes = {ie: (dirs[ie], X[conn[ie[0]][ie[1]]] @ dirs[ie] + cut[ie]) for ie in ends}
+    if ends:
+        cutters = []
+        for ie in ends:
+            R = struts[ie[0]]['R']
+            u, v = _frame(dirs[ie])
+            c = m3.Manifold.cylinder(R + 5 * h, R + 3 * h, R + 3 * h, 64)
+            o = X[conn[ie[0]][ie[1]]] + cut[ie] * dirs[ie]
+            cutters.append(c.transform(np.column_stack((u, v, dirs[ie], o)).tolist()))
+        J = J - m3.Manifold.batch_boolean(cutters, m3.OpType.Add)
+    mesh = J.to_mesh64()
+    V = np.asarray(mesh.vert_properties)[:, :3].astype(float)
+    F = np.asarray(mesh.tri_verts, np.int64)
+    on = {ie: np.abs(V @ e - c) < 1e-6 * h for ie, (e, c) in planes.items()}
+    cap = np.zeros(len(F), bool)
+    for ie in ends:
+        cap |= on[ie][F].all(1)
+    F = F[~cap]
+    found = {}
+    try:
+        bl = _boundary_loops(F)
+    except _Fallback as err:
+        vb = V[int(str(err).split()[-1])]
+        raise _Fallback(f'nodes {nodes}: pinched cut loop at {vb.round(3)}, distance to the cut planes '
+                        f'{[round(float(abs(vb @ e - c)), 4) for e, c in planes.values()]}')
+    for lp in bl:
+        ie = [ie for ie in ends if on[ie][lp].all()]
+        if len(ie) != 1 or ie[0] in found:
+            raise _Fallback(f'nodes {nodes}: unexpected cut loop')
+        found[ie[0]] = np.asarray(lp)
+    if len(found) != len(ends):
+        raise _Fallback(f'nodes {nodes}: missing cut loop')
+    F = _collapse_near_cut(V, F, found, planes, 0.2 * h)
+    F, found = _clip_ears(F, found)
+    used = np.unique(F)
+    remap = np.full(len(V), -1)
+    remap[used] = np.arange(len(used))
+    V, F = V[used], remap[F]
+    found = {ie: remap[lp] for ie, lp in found.items()}
+    if ends:                                                   # the cut leaves slivers along the loops
+        V = _relax(V, F, sdf, h, loops=[(found[ie], *planes[ie]) for ie in ends])
+    E = np.vstack((F[:, [0, 1]], F[:, [1, 2]], F[:, [2, 0]]))
+    if np.linalg.norm(V[E[:, 0]] - V[E[:, 1]], axis=1).max() > 4 * h:   # a cut that went wrong: never accept it
+        raise _Fallback(f'nodes {nodes}: patch edge longer than 4h after the cut')
+    return V, F, found
+
+
 def _adaptive(X, conn, struts, fillet, resolution):
     """Joint patches (fine marching cubes, cut flat where the fillets end) + ruled tubes between the cuts. Nodes
     joined by a strut too short for two patches are meshed as one patch (cluster)."""
@@ -552,15 +694,17 @@ def _adaptive(X, conn, struts, fillet, resolution):
             if not inner and not ends:
                 continue
             h = float(resolution) if resolution else min(struts[i]['size'] for i in inner + [i for i, _ in ends]) / DIV
-            seg = [(struts[i], struts[i]['a'], struts[i]['b']) for i in inner]
-            seg += [(struts[i], X[conn[i][k]], X[conn[i][k]] + 10 * struts[i]['R'] * dirs[i, k]) for i, k in ends]
-            fl = _flares(X, conn, struts, nodes)
+            st0 = {(i, k): _strut_start(X, conn, struts, i, k) for i in inner for k in (0, 1)}
+            st0.update({(i, k): _strut_start(X, conn, struts, i, k) for i, k in ends})
+            seg = [(struts[i], st0[i, 0], st0[i, 1]) for i in inner]
+            seg += [(struts[i], st0[i, k], X[conn[i][k]] + 10 * struts[i]['R'] * dirs[i, k]) for i, k in ends]
+            fl = _joint_hulls(X, conn, struts, nodes)
             cut = {}
             for q, (i, k) in enumerate(ends):
                 cut[i, k] = _cut_length(X[conn[i][k]], struts[i], dirs[i, k], seg[:len(inner) + q] +
                                         seg[len(inner) + q + 1:] + fl, _fillet_k([t for t, _, _ in seg], fillet), h)
             cuts.update(cut)
-            patches.append((nodes, inner, ends, cut, h, fl))
+            patches.append((nodes, inner, ends, cut, h, fl, st0))
         patch_h = [p[4] for p in patches]
         short = [i for i in range(len(struts)) if (i, 0) in cuts and (i, 1) in cuts and
                  cuts[i, 0] + cuts[i, 1] > length[i] - 0.5 * min(patch_h)]
@@ -570,59 +714,23 @@ def _adaptive(X, conn, struts, fillet, resolution):
             root[find(conn[i][0])] = find(conn[i][1])
 
     Vs, Fs, loops, nv = [], [], {}, 0
-    for nodes, inner, ends, cut, h, fl in patches:
-        loc = [struts[i] for i in inner] + [struts[i] for i, _ in ends] + [f for f, _, _ in fl]
-        tips = [(struts[i]['a'], struts[i]['b']) for i in inner]
-        tips += [(X[conn[i][k]], X[conn[i][k]] + (cut[i, k] + 3 * h) * dirs[i, k]) for i, k in ends]
-        tips += [(a, b) for _, a, b in fl]
-        ext = max([cut[ie] + struts[ie[0]]['R'] + 6 * h for ie in ends] +
-                  [struts[i]['R'] * (1 + fillet) + 3 * h for i in inner])
-        ext = np.ceil(ext / h) * h
-        lo = X[nodes].min(0) - ext - 0.3819660 * h                 # no grid plane on a node or cut plane
-        n = np.ceil((X[nodes].max(0) + ext - lo) / h).astype(int) + 2
-        sdf = lambda P, loc=loc, tips=tips: _sdf_points(P, loc, fillet, tips, grad=True)
-        J = _mc_manifold(_sdf_grid(loc, lo, h, n, fillet, tips), lo, h, sdf)
-        planes = {ie: (dirs[ie], X[conn[ie[0]][ie[1]]] @ dirs[ie] + cut[ie]) for ie in ends}
-        if ends:
-            cutters = []
-            for ie in ends:
-                R = struts[ie[0]]['R']
-                u, v = _frame(dirs[ie])
-                c = m3.Manifold.cylinder(R + 5 * h, R + 2 * h, R + 2 * h, 48)
-                o = X[conn[ie[0]][ie[1]]] + cut[ie] * dirs[ie]
-                cutters.append(c.transform(np.column_stack((u, v, dirs[ie], o)).tolist()))
-            J = J - m3.Manifold.batch_boolean(cutters, m3.OpType.Add)
-        mesh = J.to_mesh64()
-        V = np.asarray(mesh.vert_properties)[:, :3].astype(float)
-        F = np.asarray(mesh.tri_verts, np.int64)
-        on = {ie: np.abs(V @ e - c) < 1e-6 * h for ie, (e, c) in planes.items()}
-        cap = np.zeros(len(F), bool)
-        for ie in ends:
-            cap |= on[ie][F].all(1)
-        F = F[~cap]
-        found = {}
-        for lp in _boundary_loops(F):
-            ie = [ie for ie in ends if on[ie][lp].all()]
-            if len(ie) != 1 or ie[0] in found:
-                raise _Fallback(f'nodes {nodes}: unexpected cut loop')
-            found[ie[0]] = np.asarray(lp)
-        if len(found) != len(ends):
-            raise _Fallback(f'nodes {nodes}: missing cut loop')
-        F = _collapse_near_cut(V, F, found, planes, 0.2 * h)
-        F, found = _clip_ears(F, found)
-        used = np.unique(F)
-        remap = np.full(len(V), -1)
-        remap[used] = np.arange(len(used))
-        V, F = V[used], remap[F]
-        found = {ie: remap[lp] for ie, lp in found.items()}
-        if ends:                                                   # the cut leaves slivers along the loops
-            V = _relax(V, F, sdf, h, loops=[(found[ie], *planes[ie]) for ie in ends])
+    for nodes, inner, ends, cut, h, fl, st0 in patches:
+        for attempt in range(4):                                 # a degenerate cut: shift it and retry
+            try:
+                V, F, found = _patch_mesh(X, conn, struts, dirs, fillet, nodes, inner, ends, cut, h, fl, st0)
+                break
+            except _Fallback:
+                if attempt == 3:
+                    raise
+                for ie in ends:
+                    cut[ie] += 0.37 * h
+                    cuts[ie] = cut[ie]
         loops.update({ie: lp + nv for ie, lp in found.items()})
         Vs.append(V)
         Fs.append(F + nv)
         nv += len(V)
     V = np.vstack(Vs)
-    hs = {ie: h for _, _, ends, _, h, _ in patches for ie in ends}
+    hs = {ie: h for _, _, ends, _, h, _, _ in patches for ie in ends}
     for i in range(len(struts)):
         if (i, 0) in loops:
             u, v = _frame(dirs[i, 0])
@@ -686,11 +794,12 @@ def build_smooth_stl(X, conn, sections, stl_filename=None, fillet=0.5, resolutio
         pad = max(s['R'] for s in struts) * (1 + fillet) + 2 * h
         lo = X.min(0) - pad - 0.3819660 * h
         n = np.ceil((X.max(0) + pad - lo) / h).astype(int) + 1
-        fl = _flares(X, conn, struts, range(len(X)))
+        fl = _joint_hulls(X, conn, struts, range(len(X)))
         prim = struts + [f for f, _, _ in fl]
-        tips = [(t['a'], t['b']) for t in struts] + [(a, b) for _, a, b in fl]
-        solid = _mc_manifold(_sdf_grid(prim, lo, h, n, fillet, tips), lo, h,
-                             lambda P: _sdf_points(P, prim, fillet, tips, grad=True))
+        tips = [(_strut_start(X, conn, struts, i, 0), _strut_start(X, conn, struts, i, 1)) for i in range(len(struts))]
+        tips += [(a, b) for _, a, b in fl]
+        D = _sdf_grid(prim, lo, h, n, fillet, tips)
+        solid = _mc_manifold(D, lo, h, _grid_field(D, lo, h))
     if z_range is not None:
         bb = solid.bounding_box()
         slab = m3.Manifold.cube((bb[3] - bb[0] + 2, bb[4] - bb[1] + 2, z_range[1] - z_range[0]))
