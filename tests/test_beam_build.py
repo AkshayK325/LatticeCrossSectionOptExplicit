@@ -93,7 +93,7 @@ def _interior_dihedral(m, H):
 def test_filleted_joints_smooth_and_watertight(tmp_path, cell):
     """smooth_joints=True (smoothJoint: round-union fillets, fine mesh at the joints, stitched tubes): closed when
     re-read, no crease anywhere (the cylinder + sphere / hull joints have 90-150 deg edges), and the volume is the
-    struts plus a few percent of fillet material."""
+    plain strut union plus < 0.5 % (rolling-ball fillets fill only the concave crevices)."""
     import trimesh
     lat = example3(elemSize=1.0, nx=1, ny=1, name=cell)
     X, C = lat['X'], lat['conn']
@@ -107,7 +107,7 @@ def test_filleted_joints_smooth_and_watertight(tmp_path, cell):
     assert _interior_dihedral(m, H).max() < 35.0
     assert m.bounds[0][2] == pytest.approx(0.0, abs=1e-6) and m.bounds[1][2] == pytest.approx(H, abs=1e-6)
     if cell == 'C4':
-        assert m.volume == pytest.approx(300.0, rel=0.005)  # same-area circle of the 32-gon (r 0.797); cyl+sph 286.1
+        assert m.volume == pytest.approx(287.4, rel=0.005)  # 32-gon -> same-area circle r 0.797; plain union 286.2
 
 
 def test_filleted_joints_mixed_radii_and_polygons(tmp_path):
@@ -143,3 +143,20 @@ def test_smooth_adaptive_matches_uniform():
     u = build_smooth_stl(X, C, 0.8, adaptive=False)
     assert a.is_watertight and u.is_watertight
     assert a.volume == pytest.approx(u.volume, rel=2e-3)
+
+
+def test_rolling_ball_adds_material_only_where_concave():
+    """Two struts merging at one node: collinear (no crevice) gets no added volume, and the fill grows with the
+    concavity of the joint (150 < 90 < 45 deg between the struts). The old round union added ~2 % in every case."""
+    from smoothJoint import build_smooth_stl
+    def two(between):
+        t = np.radians(between)
+        X = np.array([[-6.0, 0, 0], [0, 0, 0], [-6 * np.cos(t), 6 * np.sin(t), 0.0]])
+        return X, np.array([[0, 1], [1, 2]])
+    added = {}
+    for between in (180, 150, 90, 45):
+        X, C = two(between)
+        plain = build_smooth_stl(X, C, 0.8, fillet=1e-4, adaptive=False).volume
+        added[between] = build_smooth_stl(X, C, 0.8, fillet=0.5, adaptive=False).volume / plain - 1
+    assert abs(added[180]) < 2e-4
+    assert added[150] < added[90] < added[45] < 0.015

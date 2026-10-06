@@ -1,11 +1,17 @@
-"""Smooth (filleted) lattice joints for printing: signed-distance-field union of the struts.
+"""Smooth (filleted) lattice joints for printing: rolling-ball fillets on the signed-distance-field union of the struts.
 
 Each strut is its own section swept along the beam (circle: a capsule of its own radius; polygon: the section with
-its corners rounded, swept, with a smooth rounded end), with no max-radius joint sphere. The struts are fused by a
-round union (circular fillet), with one fillet radius per joint: `fillet` times the smallest strut size at that joint.
-A thin strut entering a thick one therefore blends in through a fillet instead of meeting the cylinder +
-max-radius-sphere joint of the solid models at a step / crease. Away from the joints every strut stays exactly
-prismatic.
+its corners rounded, swept, with a smooth rounded end), with no max-radius joint sphere. The joint is the
+morphological closing of the strut union by a ball of radius k = `fillet` × the smallest strut radius at the joint
+(constant-radius rolling-ball fillet; Rossignac & Requicha). It is evaluated per point in closed form, without a
+second distance transform:
+- each strut is linearised at the point by the tangent half-space of its exact (convex) distance field;
+- the field is k - (distance to the intersection of the offset half-spaces {a_i >= k}, the allowed ball centres),
+  found by projection onto 1-3 planes (_ball_fill).
+Concave crevices get an exact constant-radius fillet for locally planar surfaces at any angle. Convex sides and
+tangent / collinear junctions keep exactly the plain union, so no material is added where none is needed (a smooth
+min / round union bulges there: +2 % for two collinear struts merging). The result does not depend on the strut
+order and is C1.
 
 Adaptive surface (default): marching cubes only in a patch around every joint (cell = smallest strut size there / 10).
 The vertices are relaxed (tangential smoothing + projection onto the exact field) to remove the marching-cubes
@@ -46,6 +52,20 @@ def _polygon_sdf(Q, S):
     return np.where(inside, -1.0, 1.0) * np.sqrt(d2)
 
 
+def _strut_sdf_grad(P, s, a, b):
+    """(SDF, unit gradient) of strut s between a and b: analytic for a capsule, finite differences for a polygon."""
+    if s['S'] is None:
+        ab = b - a
+        t = np.clip(((P - a) @ ab) / (ab @ ab), 0.0, 1.0)
+        w = P - (a + t[:, None] * ab)
+        n = np.linalg.norm(w, axis=1)
+        return n - s['R'], w / np.maximum(n, 1e-12)[:, None]
+    d = _strut_sdf(P, s, a, b)
+    eps = 1e-4 * s['size']
+    g = np.column_stack([(_strut_sdf(P + eps * np.eye(3)[k], s, a, b) - d) / eps for k in range(3)])
+    return d, g / np.maximum(np.linalg.norm(g, axis=1), 1e-12)[:, None]
+
+
 def _strut_sdf(P, s, a=None, b=None):
     """SDF of strut s (dict from _struts) between a and b (default its own end points)."""
     a = s['a'] if a is None else a
@@ -63,15 +83,6 @@ def _strut_sdf(P, s, a=None, b=None):
     x = np.maximum(d + rho, 0.0)
     tt = np.where(t < 0, t, np.maximum(t - L, 0.0))
     return np.sqrt(x * x + tt * tt) - rho
-
-
-def _smin(a, b, k):
-    """Round union (circular fillet of radius k between two surfaces meeting at 90 deg; hg_sdf fOpUnionRound):
-    equal to min(a, b) wherever a or b >= k. Constant fillet curvature 1/k (a cubic smooth-min blend of the same
-    support peaks at ~4x that curvature)."""
-    u = np.maximum(k - a, 0.0)
-    v = np.maximum(k - b, 0.0)
-    return np.maximum(k, np.minimum(a, b)) - np.sqrt(u * u + v * v)
 
 
 def _round_section(S, frac=0.25):
@@ -145,33 +156,105 @@ def _fillet_k(struts, fillet):
     return max(fillet * min(s['size'] for s in struts), 1e-9)
 
 
+def _ball_fill(P, struts, k, ends=None):
+    """Rolling-ball filleted union at points P (n,3): the morphological closing of the strut union by a ball of
+    radius k, with each strut linearised at the point (tangent half-space of its exact distance field). The allowed
+    ball centres are W = intersection of {a_i >= k}. The result is k - dist(P, W) outside W and min_i a_i inside it.
+    - Concave crevices get the exact constant-radius fillet for locally planar surfaces, at any angle.
+    - Convex sides and tangent junctions keep exactly the plain union, so no material is added where none is needed.
+    - Symmetric in the struts (no blending order). C1 outside W.
+    - Each distance field is convex, so the tangent half-space lies inside the true {a_i >= k}: the linearised W is
+      conservative (fills at least the true closing near the joint).
+    dist(P, W) is the nearest feasible projection y onto the planes of 1, 2 or 3 struts within 2k of the point (near
+    the surface |y - x| ~ k, so a farther strut cannot bind; deeper inside D stays negative either way).
+    Returns (D, unit gradient): (y - x) / |y - x| in the fillet, the nearest strut's normal elsewhere."""
+    from itertools import combinations
+    n, m = len(P), len(struts)
+    A = np.full((m, n), np.inf)
+    Nr = np.zeros((m, n, 3))
+    for i, s in enumerate(struts):
+        a, b = ends[i] if ends is not None else (s['a'], s['b'])
+        pad = 1.25 * s['R'] + 3 * k
+        sel = np.where(((P >= np.minimum(a, b) - pad) & (P <= np.maximum(a, b) + pad)).all(1))[0]
+        A[i, sel], Nr[i, sel] = _strut_sdf_grad(P[sel], s, a, b)
+    j = A.argmin(0)
+    D = A[j, np.arange(n)]
+    G = Nr[j, np.arange(n)]
+    pq = k - A                                             # > 0: the point is inside that strut's k-dilation
+    act = A < 2.05 * k
+    need = np.where((pq > 0).any(0))[0]
+    if len(need) == 0:
+        return D, G
+    best = np.full(len(need), np.inf)
+    bdy = np.zeros((len(need), 3))
+    pq_n, act_n, N_n = pq[:, need], act[:, need], Nr[:, need]
+    tol = 1e-9 * k
+    for size in (1, 2, 3):
+        for S in combinations(range(m), size):
+            rows = np.where(act_n[list(S)].all(0))[0]
+            if len(rows) == 0:
+                continue
+            ns = N_n[list(S)][:, rows]                     # (size, r, 3)
+            ps = pq_n[list(S)][:, rows]
+            if size == 1:
+                dy, ok = ps[0][:, None] * ns[0], np.ones(len(rows), bool)
+            elif size == 2:                                # midpoint / half-difference form: no 1/(1 - c^2) loss
+                mid, half = 0.5 * (ns[0] + ns[1]), 0.5 * (ns[0] - ns[1])
+                om = 2.0 * (half * half).sum(-1)           # 1 - c
+                ok = om > 1e-12
+                om = np.where(ok, om, 1.0)
+                dy = ((ps[0] + ps[1]) / (2.0 - om))[:, None] * mid + ((ps[0] - ps[1]) / om)[:, None] * half
+            else:
+                M = np.transpose(ns, (1, 0, 2))            # rows = plane normals
+                ok = np.abs(np.linalg.det(M)) > 1e-6
+                Ms = np.where(ok[:, None, None], M, np.eye(3))
+                dy = np.linalg.solve(Ms, ps.T[:, :, None])[:, :, 0]
+            # feasible: every active plane satisfied at y = x + dy
+            feas = ok & (((np.einsum('mrj,rj->mr', N_n[:, rows], dy) - pq_n[:, rows]) >= -tol) | ~act_n[:, rows]).all(0)
+            dist = np.where(feas, np.linalg.norm(dy, axis=1), np.inf)
+            better = dist < best[rows]
+            best[rows[better]] = dist[better]
+            bdy[rows[better]] = dy[better]
+    f = np.isfinite(best) & (best > 0)
+    D[need[f]] = k - best[f]
+    G[need[f]] = bdy[f] / best[f][:, None]
+    return D, G
+
+
+def _sdf_points(P, struts, fillet, ends=None, k=None, grad=False):
+    """Filleted union at points P (n,3) (and its unit gradient if grad); k defaults to the joint fillet radius."""
+    k = _fillet_k(struts, fillet) if k is None else k
+    D = np.ones(len(P))                                    # far from every strut (never on the surface)
+    G = np.zeros((len(P), 3))
+    for c0 in range(0, len(P), 200000):
+        sl = slice(c0, c0 + 200000)
+        d, g = _ball_fill(P[sl], struts, k, ends)
+        fin = np.isfinite(d)
+        D[sl] = np.where(fin, d, 1.0)
+        G[sl] = np.where(fin[:, None], g, 0.0)
+    return (D, G) if grad else D
+
+
 def _sdf_grid(struts, lo, h, n, fillet, ends=None):
-    """Filleted union of the struts sampled on the grid lo + h*index (shape n). ends[i] = (a, b) overrides."""
-    D = np.full(n, np.inf)
+    """Filleted union on the grid lo + h*index (shape n), block by block (only the struts near each block)."""
     k = _fillet_k(struts, fillet)
-    for i, s in enumerate(struts):
-        a, b = ends[i] if ends is not None else (s['a'], s['b'])
-        m = s['R'] + k + 2 * h
-        blo = np.maximum(((np.minimum(a, b) - m - lo) / h).astype(int), 0)
-        bhi = np.minimum(((np.maximum(a, b) + m - lo) / h).astype(int) + 2, n)
-        if np.any(bhi <= blo):
-            continue
-        sl = tuple(slice(blo[d], bhi[d]) for d in range(3))
-        g = np.stack(np.meshgrid(*[lo[d] + h * np.arange(blo[d], bhi[d]) for d in range(3)], indexing='ij'), -1)
-        D[sl] = _smin(D[sl], _strut_sdf(g.reshape(-1, 3), s, a, b).reshape(g.shape[:3]), k)   # smin(inf, d) = d
-    D[~np.isfinite(D)] = 10 * h
-    return D
-
-
-def _sdf_points(P, struts, fillet, ends=None):
-    """Same filleted union as _sdf_grid, at arbitrary points P (n,3) (same strut order, so the same surface)."""
-    D = np.full(len(P), np.inf)
-    k = _fillet_k(struts, fillet)
-    for i, s in enumerate(struts):
-        a, b = ends[i] if ends is not None else (s['a'], s['b'])
-        m = s['R'] + k
-        sel = np.where(((P >= np.minimum(a, b) - m) & (P <= np.maximum(a, b) + m)).all(1))[0]
-        D[sel] = _smin(D[sel], _strut_sdf(P[sel], s, a, b), k)
+    D = np.full(n, 10 * h)
+    B = 24
+    ab = [ends[i] if ends is not None else (s['a'], s['b']) for i, s in enumerate(struts)]
+    for i0 in range(0, n[0], B):
+        for j0 in range(0, n[1], B):
+            for k0 in range(0, n[2], B):
+                idx = [np.arange(o, min(o + B, n[d])) for d, o in enumerate((i0, j0, k0))]
+                blo = lo + h * np.array([x[0] for x in idx])
+                bhi = lo + h * np.array([x[-1] for x in idx])
+                near = [i for i, s in enumerate(struts)
+                        if (np.minimum(*ab[i]) - 1.25 * s['R'] - 3 * k <= bhi).all()
+                        and (np.maximum(*ab[i]) + 1.25 * s['R'] + 3 * k >= blo).all()]
+                if not near:
+                    continue
+                g = np.stack(np.meshgrid(*[lo[d] + h * idx[d] for d in range(3)], indexing='ij'), -1)
+                d = _sdf_points(g.reshape(-1, 3), [struts[i] for i in near], fillet, [ab[i] for i in near], k)
+                D[np.ix_(*idx)] = d.reshape(g.shape[:3])
     return D
 
 
@@ -180,13 +263,10 @@ def _relax(V, F, sdf, h, n_iter=8, loops=()):
     [(vertex indices in order, plane normal e, plane offset c)] whose vertices slide along the loop in their plane."""
     import scipy.sparse as sp
     M = sp.csr_matrix((np.ones(F.size), (F.ravel(), np.repeat(np.arange(len(F)), 3))), shape=(len(V), len(F)))
-    eps = 1e-3 * h
-    I = np.eye(3) * eps
 
     def project(V):
         for _ in range(2 if loops else 1):
-            f = sdf(V)
-            g = np.column_stack([(sdf(V + I[d]) - f) / eps for d in range(3)])
+            f, g = sdf(V)
             V = V - (f / np.maximum((g * g).sum(1), 1e-12))[:, None] * g
             for lp, e, c in loops:
                 V[lp] -= np.outer(V[lp] @ e - c, e)
@@ -243,7 +323,7 @@ def _cut_length(node, s, e, others, k, h):
     L = h
     while L < 50 * s['R']:
         P = np.vstack([node + (L + dt) * e + ring for dt in np.linspace(0, s['R'] + 6 * h, 4)])
-        if all(_strut_sdf(P, t, ta, tb).min() > k + h for t, ta, tb in others):
+        if all(_strut_sdf(P, t, ta, tb).min() > 2 * k + h for t, ta, tb in others):   # beyond any ball fill
             return L
         L += 0.5 * h
     return L
@@ -442,7 +522,7 @@ def _adaptive(X, conn, struts, fillet, resolution):
         ext = np.ceil(ext / h) * h
         lo = X[nodes].min(0) - ext - 0.3819660 * h                 # no grid plane on a node or cut plane
         n = np.ceil((X[nodes].max(0) + ext - lo) / h).astype(int) + 2
-        sdf = lambda P, loc=loc, tips=tips: _sdf_points(P, loc, fillet, tips)
+        sdf = lambda P, loc=loc, tips=tips: _sdf_points(P, loc, fillet, tips, grad=True)
         J = _mc_manifold(_sdf_grid(loc, lo, h, n, fillet, tips), lo, h, sdf)
         planes = {ie: (dirs[ie], X[conn[ie[0]][ie[1]]] @ dirs[ie] + cut[ie]) for ie in ends}
         if ends:
@@ -522,7 +602,7 @@ def build_smooth_stl(X, conn, sections, stl_filename=None, fillet=0.5, resolutio
         pad = max(s['R'] for s in struts) * (1 + fillet) + 2 * h
         lo = X.min(0) - pad - 0.3819660 * h
         n = np.ceil((X.max(0) + pad - lo) / h).astype(int) + 1
-        solid = _mc_manifold(_sdf_grid(struts, lo, h, n, fillet), lo, h, lambda P: _sdf_points(P, struts, fillet))
+        solid = _mc_manifold(_sdf_grid(struts, lo, h, n, fillet), lo, h, lambda P: _sdf_points(P, struts, fillet, grad=True))
     if z_range is not None:
         bb = solid.bounding_box()
         slab = m3.Manifold.cube((bb[3] - bb[0] + 2, bb[4] - bb[1] + 2, z_range[1] - z_range[0]))
