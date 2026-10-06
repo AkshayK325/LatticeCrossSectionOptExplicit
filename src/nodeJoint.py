@@ -157,7 +157,8 @@ def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.
             n = ring_count(r, r_min, n_min)
             u, v = _frame(e)
             t = np.linspace(0, 2 * np.pi, n, endpoint=False) + np.pi / n
-            V.append(node + r * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v)))
+            rc = r / loop_shrink(n, levels=levels)                 # same Loop-shrink compensation as the tubes
+            V.append(node + rc * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v)))
             cores.append(np.arange(nv, nv + n))
             nv += n
     V = np.vstack(V)
@@ -209,13 +210,76 @@ def cotan_laplacian(V, F):
     return sp.diags(1.0 / M) @ Cm
 
 
-def fair_node(mesh, node, dirs, radii, t_ring, free_len=1.5, cotan=True, core=True):
+def core_clearance(P, node, dirs, radii, reach):
+    """Smooth distance from P to the union of the beam cores (each beam's capsule from the node point to reach_i):
+    cubic smooth minimum (width 0.5 r_min) of the capsule distances, so it has no jumps and no creases where two
+    cores meet."""
+    k = 0.5 * radii.min()
+    out = None
+    for e, r, l in zip(dirs, radii, reach):
+        w = np.clip((P - node) @ e, 0.0, l)
+        d = np.linalg.norm((P - node) - np.outer(w, e), axis=1) - r
+        if out is None:
+            out = d
+        else:
+            hh = np.maximum(k - np.abs(out - d), 0.0) / k
+            out = np.minimum(out, d) - hh ** 3 * k / 6.0
+    return out
+
+
+def flank_weights(V, node, dirs, radii, reach):
+    """Anchor weight per vertex for the anchored fairing, in [0, 1]: ~1 on a beam's own flank (close to its core,
+    i.e. the beam cylinder continued to the node point, and away from every other core) where the thin plate would
+    neck the beam; ~0 in the crevices (comparably close to two cores), which stay free to fair."""
+    D = []
+    for e, r, l in zip(dirs, radii, reach):
+        w = np.clip((V - node) @ e, 0.0, l)
+        D.append(np.linalg.norm((V - node) - np.outer(w, e), axis=1) - r)
+    D = np.sort(np.array(D), axis=0)
+    a = 0.3 * radii.min()
+    b = 0.5 * radii.min()
+    return np.exp(-(np.maximum(D[0], 0.0) / a) ** 2) * (1.0 - np.exp(-((D[1] - D[0]) / b) ** 2))
+
+
+def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=1.0):
+    """Method C3 (anchored): least-squares fairing, min x^T K x + sum_v w_v |x_v - x0_v|^2, with the thin-plate
+    energy K = C^T M^-1 C (cotangent C, lumped area M), the beams fixed beyond t_ring_i + free_len * r_i, and soft
+    anchors w = anchor * area / r_min^4 * flank_weights on the beams' flanks, so the crevices fair freely but no beam
+    necks. One linear solve (no clamping, no folds). Returns (mesh, fixed mask)."""
+    import scipy.sparse as sp
+    import scipy.sparse.linalg as spl
+    V = np.asarray(mesh.vertices, float)
+    F = np.asarray(mesh.faces)
+    fixed = np.zeros(len(V), bool)
+    for e, r, t in zip(dirs, radii, t_ring):
+        w = (V - node) @ e
+        rad = np.linalg.norm((V - node) - np.outer(w, e), axis=1)
+        fixed |= (w > t + free_len * r) & (np.abs(rad - r) < 0.05 * r)
+    Lc = cotan_laplacian(V, F)                                        # M^-1 C
+    area = 0.5 * np.linalg.norm(np.cross(V[F[:, 1]] - V[F[:, 0]], V[F[:, 2]] - V[F[:, 0]]), axis=1)
+    M = sp.diags(np.bincount(F.ravel(), weights=np.repeat(area / 3, 3), minlength=len(V)))
+    K = (Lc.T @ M @ Lc).tocsr()                                       # = C^T M^-1 C
+    # data term anchor * integral |x - x0|^2 / r_min^4 dA, consistent with the thin-plate energy integral |Lap x|^2 dA
+    wv = anchor * M.diagonal() / radii.min() ** 4 * flank_weights(V, node, dirs, radii,
+                                                                   t_ring + free_len * radii + 2 * radii)
+    A = (K + sp.diags(wv)).tocsr()
+    fr = np.where(~fixed)[0]
+    fx = np.where(fixed)[0]
+    solve = spl.factorized(A[fr][:, fr].tocsc())
+    Vn = V.copy()
+    for k in range(3):
+        Vn[fr, k] = solve(wv[fr] * V[fr, k] - A[fr][:, fx] @ V[fx, k])
+    return trimesh.Trimesh(Vn, F, process=False), fixed
+
+
+def fair_node(mesh, node, dirs, radii, t_ring, free_len=1.5, cotan=True, core=True, limit=False):
     """Method C3: variational fairing of the node. The vertices of the node region (everything that is not beam
     beyond t_ring_i + free_len * r_i) are moved to the thin-plate (minimal bending) surface: bi-Laplacian
     L^2 x = 0 with the beam vertices fixed (two rings of fixed beam give a tangent-continuous join). One sparse
     solve; spreads the curvature of the crevices instead of concentrating it at the beam rings. core: the node keeps
     every beam's own cylinder up to the node point (vertices that the fairing pulls into a core are projected onto it
-    and fixed, then the rest is solved again), so no beam necks on its way into the node.
+    and fixed, then the rest is solved again; folds, not used). limit: keep only the normal displacement, limited
+    (smooth max) by the clearance to the beam cores: crevices fill, no beam necks on its way into the node.
     Returns (mesh, fixed mask)."""
     import scipy.sparse as sp
     import scipy.sparse.linalg as spl
@@ -253,4 +317,17 @@ def fair_node(mesh, node, dirs, radii, t_ring, free_len=1.5, cotan=True, core=Tr
         if not hit.any():
             break
         fixed |= hit
+    if limit:
+        # normal displacement only, and never deeper than the clearance to the beam cores (smooth max): the
+        # fairing fills the crevices freely but cannot neck a beam on its way into the node
+        nrm = mesh.vertex_normals
+        dn = ((Vn - V) * nrm).sum(1)
+        eps = 0.05 * radii.min()
+        cl = core_clearance(V, node, dirs, radii, t_ring + free_len * radii + 2 * radii)
+        # inward bound: the clearance where the vertex is outside the cores, ~0 where it is already inside (no
+        # outward push: the cores overlap near the node and the crevices of C1 already lie inside their union)
+        g = -eps * np.logaddexp(0.0, cl / eps)
+        dn = 0.5 * (dn + g + np.sqrt((dn - g) ** 2 + eps * eps))
+        dn[fixed] = 0.0
+        Vn = V + dn[:, None] * nrm
     return trimesh.Trimesh(Vn, F, process=False), fixed
