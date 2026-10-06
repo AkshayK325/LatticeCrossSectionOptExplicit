@@ -160,3 +160,21 @@ def test_rolling_ball_adds_material_only_where_concave():
         added[between] = build_smooth_stl(X, C, 0.8, fillet=0.5, adaptive=False).volume / plain - 1
     assert abs(added[180]) < 2e-4
     assert added[150] < added[90] < added[45] < 0.015
+
+
+def test_flare_tapers_big_to_small():
+    """A 1.0 mm strut continuing into a 0.5 mm one: without a flare the thin strut leaves the 1.0 mm end sphere with a
+    step (section radius slope ~1.7 at the root); with the flare the radius falls along a tangent 20 deg cone into a
+    rolling-ball fillet, so the slope stays near tan(20 deg) = 0.36 everywhere. Same both ways round."""
+    import manifold3d as m3
+    from smoothJoint import build_smooth_stl
+    for order in ((1.0, 0.5), (0.5, 1.0)):
+        X = np.array([[-6.0, 0, 0], [0, 0, 0], [6.0, 0, 0]])
+        m = build_smooth_stl(X, np.array([[0, 1], [1, 2]]), np.array(order), adaptive=False)
+        assert m.is_watertight
+        V = np.asarray(m.vertices)[:, [1, 2, 0]]                     # strut axis -> z
+        man = m3.Manifold(m3.Mesh(np.ascontiguousarray(V, np.float32), np.ascontiguousarray(m.faces, np.uint32)))
+        z = np.linspace(-3.0, 3.0, 301)
+        r = np.array([np.sqrt(man.slice(float(t)).area() / np.pi) for t in z])
+        assert np.abs(np.gradient(r, z)).max() < 0.5
+        assert r.max() < 1.01 and r.min() > 0.49

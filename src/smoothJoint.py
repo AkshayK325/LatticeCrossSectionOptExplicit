@@ -52,8 +52,32 @@ def _polygon_sdf(Q, S):
     return np.where(inside, -1.0, 1.0) * np.sqrt(d2)
 
 
+def _round_cone(P, a, b, r1, r2):
+    """Exact SDF and unit gradient of the round cone: sphere r1 at a, sphere r2 at b, joined by their common tangent
+    cone (Quilez sdRoundCone). Needs |r1 - r2| < |b - a|."""
+    h = np.linalg.norm(b - a)
+    e = (b - a) / h
+    w = P - a
+    z = w @ e
+    rv = w - z[:, None] * e
+    rho = np.linalg.norm(rv, axis=1)
+    rh = rv / np.maximum(rho, 1e-12)[:, None]
+    sb = (r1 - r2) / h
+    ca = np.sqrt(1.0 - sb * sb)
+    kq = -sb * rho + ca * z
+    wb = P - b
+    n0, n1 = np.linalg.norm(w, axis=1), np.linalg.norm(wb, axis=1)
+    d = np.where(kq < 0, n0 - r1, np.where(kq > ca * h, n1 - r2, rho * ca + z * sb - r1))
+    g = np.where((kq < 0)[:, None], w / np.maximum(n0, 1e-12)[:, None],
+                 np.where((kq > ca * h)[:, None], wb / np.maximum(n1, 1e-12)[:, None], ca * rh + sb * e))
+    return d, g
+
+
 def _strut_sdf_grad(P, s, a, b):
-    """(SDF, unit gradient) of strut s between a and b: analytic for a capsule, finite differences for a polygon."""
+    """(SDF, unit gradient) of strut s between a and b: analytic for a capsule or a flare, finite differences for a
+    polygon."""
+    if s.get('flare'):
+        return _round_cone(P, a, b, s['R'], s['size'])
     if s['S'] is None:
         ab = b - a
         t = np.clip(((P - a) @ ab) / (ab @ ab), 0.0, 1.0)
@@ -70,6 +94,8 @@ def _strut_sdf(P, s, a=None, b=None):
     """SDF of strut s (dict from _struts) between a and b (default its own end points)."""
     a = s['a'] if a is None else a
     b = s['b'] if b is None else b
+    if s.get('flare'):
+        return _round_cone(P, a, b, s['R'], s['size'])[0]
     if s['S'] is None:
         return _capsule_sdf(P, a, b, s['R'])
     e = (b - a) / np.linalg.norm(b - a)
@@ -150,6 +176,29 @@ def _struts(X, conn, sections, orientations=None):
 
 
 # ------------------------------------------------------------------ grid SDF + marching cubes
+TAPER = np.radians(20.0)     # flare half-angle: a thinner strut tapers into the joint's largest radius (30 deg leaves a
+                             # visible cone-to-strut turn; 15 deg adds 2 % volume for no gain in root fillet radius)
+
+
+def _flares(X, conn, struts, nodes):
+    """Flares at the given nodes: each strut thinner than the thickest strut at its node gets a round cone from the
+    node (the thickest radius R) down to its own size r over the length (R - r) / sin(TAPER), so big-to-small
+    transitions taper instead of stepping (the convex hull of the paper tapers too, but with creases). Equal radii:
+    no flare. Returns [(flare dict, a, b)]."""
+    out = []
+    for n in nodes:
+        inc = [(i, k) for i, ab in enumerate(conn) for k in (0, 1) if ab[k] == n]
+        R = max(struts[i]['size'] for i, _ in inc)
+        for i, k in inc:
+            r = struts[i]['size']
+            if R - r > 1e-3 * R:
+                e = (X[conn[i][1 - k]] - X[n]) / np.linalg.norm(X[conn[i][1 - k]] - X[n])
+                L = min((R - r) / np.sin(TAPER), 0.45 * np.linalg.norm(X[conn[i][1 - k]] - X[n]))
+                if R - r < 0.99 * L:
+                    out.append((dict(flare=True, S=None, size=r, R=R), X[n], X[n] + L * e))
+    return out
+
+
 def _fillet_k(struts, fillet):
     """Fillet radius of a joint: fillet * the smallest strut size there. One radius per joint keeps the field smooth
     (a radius switching between struts inside a three-strut blend leaves a crease)."""
@@ -431,7 +480,14 @@ def _tube(P, Q, V, u, v, e, delta, nv):
         return I, np.concatenate(([0.0], np.cumsum(d))) / d.sum()
     P, sP = start(np.asarray(P))
     Q, sQ = start(np.asarray(Q))
-    sM = np.unique(np.round(np.concatenate((sP[:-1], sQ[:-1])), 12))
+    # merged parameters, without near-duplicates (< 1/4 of the finer loop spacing: they would give sliver triangles)
+    tol = 0.25 / max(len(P), len(Q))
+    sM = np.unique(np.concatenate((sP[:-1], sQ[:-1])))
+    keep = [0]
+    for q in range(1, len(sM)):
+        if sM[q] - sM[keep[-1]] > tol and 1.0 - sM[q] > tol:
+            keep.append(q)
+    sM = sM[keep]
 
     def ring(I, s_, shift):
         C = V[np.append(I, I[0])]
@@ -498,12 +554,13 @@ def _adaptive(X, conn, struts, fillet, resolution):
             h = float(resolution) if resolution else min(struts[i]['size'] for i in inner + [i for i, _ in ends]) / DIV
             seg = [(struts[i], struts[i]['a'], struts[i]['b']) for i in inner]
             seg += [(struts[i], X[conn[i][k]], X[conn[i][k]] + 10 * struts[i]['R'] * dirs[i, k]) for i, k in ends]
+            fl = _flares(X, conn, struts, nodes)
             cut = {}
             for q, (i, k) in enumerate(ends):
                 cut[i, k] = _cut_length(X[conn[i][k]], struts[i], dirs[i, k], seg[:len(inner) + q] +
-                                        seg[len(inner) + q + 1:], _fillet_k([t for t, _, _ in seg], fillet), h)
+                                        seg[len(inner) + q + 1:] + fl, _fillet_k([t for t, _, _ in seg], fillet), h)
             cuts.update(cut)
-            patches.append((nodes, inner, ends, cut, h))
+            patches.append((nodes, inner, ends, cut, h, fl))
         patch_h = [p[4] for p in patches]
         short = [i for i in range(len(struts)) if (i, 0) in cuts and (i, 1) in cuts and
                  cuts[i, 0] + cuts[i, 1] > length[i] - 0.5 * min(patch_h)]
@@ -513,10 +570,11 @@ def _adaptive(X, conn, struts, fillet, resolution):
             root[find(conn[i][0])] = find(conn[i][1])
 
     Vs, Fs, loops, nv = [], [], {}, 0
-    for nodes, inner, ends, cut, h in patches:
-        loc = [struts[i] for i in inner] + [struts[i] for i, _ in ends]
+    for nodes, inner, ends, cut, h, fl in patches:
+        loc = [struts[i] for i in inner] + [struts[i] for i, _ in ends] + [f for f, _, _ in fl]
         tips = [(struts[i]['a'], struts[i]['b']) for i in inner]
         tips += [(X[conn[i][k]], X[conn[i][k]] + (cut[i, k] + 3 * h) * dirs[i, k]) for i, k in ends]
+        tips += [(a, b) for _, a, b in fl]
         ext = max([cut[ie] + struts[ie[0]]['R'] + 6 * h for ie in ends] +
                   [struts[i]['R'] * (1 + fillet) + 3 * h for i in inner])
         ext = np.ceil(ext / h) * h
@@ -564,7 +622,7 @@ def _adaptive(X, conn, struts, fillet, resolution):
         Fs.append(F + nv)
         nv += len(V)
     V = np.vstack(Vs)
-    hs = {ie: h for _, _, ends, _, h in patches for ie in ends}
+    hs = {ie: h for _, _, ends, _, h, _ in patches for ie in ends}
     for i in range(len(struts)):
         if (i, 0) in loops:
             u, v = _frame(dirs[i, 0])
@@ -578,6 +636,32 @@ def _adaptive(X, conn, struts, fillet, resolution):
     if solid.status() != m3.Error.NoError or solid.is_empty():
         raise _Fallback(f'stitched mesh invalid: {solid.status()}')
     return solid
+
+
+def _float32_weld(solid):
+    """The mesh as an STL stores it: vertices snapped to float32 and merged, the triangles that collapse dropped
+    (edge collapses of sub-micron edges), re-validated as a manifold. The written STL is then exactly this mesh."""
+    import manifold3d as m3
+    import trimesh
+    mesh = solid.to_mesh64()
+    V = np.asarray(mesh.vert_properties)[:, :3].astype(np.float32)
+    F = np.asarray(mesh.tri_verts, np.int64)
+    for _ in range(3):
+        Vu, inv = np.unique(V, axis=0, return_inverse=True)
+        F = inv.ravel()[F]
+        F = F[(F[:, 0] != F[:, 1]) & (F[:, 1] != F[:, 2]) & (F[:, 0] != F[:, 2])]
+        used = np.unique(F)
+        remap = np.full(len(Vu), -1)
+        remap[used] = np.arange(len(used))
+        V, F = Vu[used], remap[F]
+        welded = m3.Manifold(m3.Mesh(np.ascontiguousarray(V), np.ascontiguousarray(F, np.uint32)))
+        if welded.status() == m3.Error.NoError:
+            break
+        # a collapse broke the manifold: let manifold3d resolve it by its own tolerance, then weld again
+        mesh = solid.simplify(4 * float(np.spacing(np.abs(V).max()))).to_mesh64()
+        V = np.asarray(mesh.vert_properties)[:, :3].astype(np.float32)
+        F = np.asarray(mesh.tri_verts, np.int64)
+    return trimesh.Trimesh(V.astype(float), F, process=False)
 
 
 def build_smooth_stl(X, conn, sections, stl_filename=None, fillet=0.5, resolution=None, z_range=None,
@@ -602,17 +686,18 @@ def build_smooth_stl(X, conn, sections, stl_filename=None, fillet=0.5, resolutio
         pad = max(s['R'] for s in struts) * (1 + fillet) + 2 * h
         lo = X.min(0) - pad - 0.3819660 * h
         n = np.ceil((X.max(0) + pad - lo) / h).astype(int) + 1
-        solid = _mc_manifold(_sdf_grid(struts, lo, h, n, fillet), lo, h, lambda P: _sdf_points(P, struts, fillet, grad=True))
+        fl = _flares(X, conn, struts, range(len(X)))
+        prim = struts + [f for f, _, _ in fl]
+        tips = [(t['a'], t['b']) for t in struts] + [(a, b) for _, a, b in fl]
+        solid = _mc_manifold(_sdf_grid(prim, lo, h, n, fillet, tips), lo, h,
+                             lambda P: _sdf_points(P, prim, fillet, tips, grad=True))
     if z_range is not None:
         bb = solid.bounding_box()
         slab = m3.Manifold.cube((bb[3] - bb[0] + 2, bb[4] - bb[1] + 2, z_range[1] - z_range[0]))
         solid = solid ^ slab.translate((bb[0] - 1, bb[1] - 1, z_range[0]))
     if solid.status() != m3.Error.NoError or solid.is_empty():
         raise RuntimeError(f'smooth lattice is not a valid manifold: {solid.status()}')
-    # collapse edges below float32 resolution: an STL stores float32, and such an edge would be merged on re-read
-    solid = solid.simplify(4 * float(np.spacing(np.float32(np.abs(X).max() + 1.0))))
-    mesh = solid.to_mesh64()
-    tm = trimesh.Trimesh(np.asarray(mesh.vert_properties)[:, :3], np.asarray(mesh.tri_verts, np.int64), process=False)
+    tm = _float32_weld(solid)
     if stl_filename is not None:
         tm.export(stl_filename)
         tm = trimesh.load(stl_filename, process=True)
