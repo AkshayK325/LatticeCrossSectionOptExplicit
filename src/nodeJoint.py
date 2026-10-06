@@ -1,0 +1,256 @@
+"""One lattice node, studied in isolation: beams meeting at a point, trimmed so that none enters another, and the
+methods that connect the trimmed ends (plan and log: notes/12_ThreeBeamJointStudy.md).
+"""
+import numpy as np
+import manifold3d as m3
+import trimesh
+
+
+def three_beam_case():
+    """Big / medium / small beam meeting in 3D (unequal angles 107 / 117 / 87 deg, not coplanar), flat far ends.
+    Returns (node (3,), unit directions (3,3), radii (3,), lengths (3,))."""
+    E = np.array([[1.0, 0, 0], [-0.30, 0.80, 0.52], [-0.45, -0.55, 0.70]])
+    E /= np.linalg.norm(E, axis=1)[:, None]
+    return np.zeros(3), E, np.array([1.10, 0.75, 0.40]), np.full(3, 6.0)
+
+
+def _frame(e):
+    u = np.cross(e, [1.0, 0, 0] if abs(e[0]) < 0.9 else [0, 1.0, 0])
+    u /= np.linalg.norm(u)
+    return u, np.cross(e, u)
+
+
+def _rotation(e):
+    """Proper rotation with columns (u, v, e): maps the local z axis to e."""
+    u, v = _frame(e)
+    return np.column_stack((u, v, e))
+
+
+def cylinder(node, e, r, L, seg=64, start=0.0):
+    """Solid circular beam along e from start to L (flat ends), as a manifold."""
+    c = m3.Manifold.cylinder(float(L - start), float(r), float(r), seg)
+    return c.transform(np.column_stack((_rotation(e), node + start * e)).tolist())
+
+
+def trim_radius(dirs, radii, L, dt=0.002, nphi=180):
+    """Smallest sphere radius about the node outside which no beam enters another: the largest distance from the
+    node of any point that lies on the surface of one beam and inside another (beams as solid cylinders from the
+    node along their axes). Geometric, no free parameter. Returns (R_s, per-pair values {(i, j): R_ij})."""
+    t = np.arange(0.0, L.max(), dt)
+    ph = np.linspace(0, 2 * np.pi, nphi, endpoint=False)
+    pair = {}
+    for i in range(len(dirs)):
+        u, v = _frame(dirs[i])
+        P = (t[:, None, None] * dirs[i] + radii[i] * (np.cos(ph)[None, :, None] * u + np.sin(ph)[None, :, None] * v))
+        P = P.reshape(-1, 3)
+        for j in range(len(dirs)):
+            if j == i:
+                continue
+            z = P @ dirs[j]
+            inside = (z > 0) & (z < L[j]) & (np.linalg.norm(P - np.outer(z, dirs[j]), axis=1) < radii[j])
+            if inside.any():
+                key = tuple(sorted((i, j)))
+                pair[key] = max(pair.get(key, 0.0), float(np.linalg.norm(P[inside], axis=1).max()))
+    return max(pair.values()), pair
+
+
+def to_trimesh(man):
+    m = man.to_mesh64()
+    return trimesh.Trimesh(np.asarray(m.vert_properties)[:, :3], np.asarray(m.tri_verts, np.int64), process=False)
+
+
+def trimmed_beams(node, dirs, radii, L, R_s, seg=64):
+    """The beams with everything inside the trim sphere removed: each ends on the sphere with its own section, and
+    no two touch (method B; the node region is left empty for the connection). One manifold of 3 disjoint parts."""
+    ball = m3.Manifold.sphere(float(R_s), 4 * seg).translate(tuple(map(float, node)))
+    parts = [cylinder(node, e, r, l, seg) - ball for e, r, l in zip(dirs, radii, L)]
+    return m3.Manifold.batch_boolean(parts, m3.OpType.Add)
+
+
+def ring_offsets(dirs, radii, R_s, margin=0.02, iters=50, core=False):
+    """Distance from the node of each beam's node ring: outside the trim sphere (sqrt(R_s^2 - r_i^2)), and far enough
+    that no other ring reaches beyond its plane, t_i >= t_j cos(theta_ij) + r_j sin(theta_ij) + margin * r_i, so
+    every ring is a face of the hull of all rings (else the hull wraps over a beam, e.g. a thick beam whose radius is
+    close to R_s leaves the sphere almost at its equator). Geometric: no free parameter (margin = 2 % of r_i)."""
+    t = np.sqrt(np.maximum(R_s ** 2 - radii ** 2, 0.0))
+    c = np.clip(dirs @ dirs.T, -1, 1)
+    sn = np.sqrt(1 - c * c)
+    for _ in range(iters):
+        need = (t[None, :] * c + radii[None, :] * sn)                 # [i, j]: ring j's reach along e_i
+        if core:                                                      # core ring j at the node reaches r_j sin
+            need = np.maximum(need, radii[None, :] * sn)
+        np.fill_diagonal(need, -np.inf)
+        t_new = np.maximum(t, need.max(1) + margin * radii)
+        if np.allclose(t_new, t):
+            break
+        t = t_new
+    return t
+
+
+def ring_count(r, r_min, n_min=16):
+    """Vertices on a beam ring: proportional to the radius (similar edge lengths on every beam), >= n_min."""
+    return max(n_min, int(round(n_min * r / r_min)))
+
+
+def _tube_faces(a, b, n):
+    """Quad strip (as triangles) between ring index blocks a and b of n vertices, outward for rings ordered
+    counter-clockwise about the tube axis and b further along the axis."""
+    i = np.arange(n)
+    j = (i + 1) % n
+    return np.vstack((np.column_stack((a + i, b + i, a + j)), np.column_stack((a + j, b + i, b + j))))
+
+
+def loop_shrink(n, spacing_ratio=1.0, levels=3):
+    """Radius factor by which Loop subdivision shrinks a long regular n-gon tube (rings `spacing_ratio` edge lengths
+    apart): measured numerically on a test tube, so that control rings can be enlarged by 1 / factor."""
+    t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    dz = spacing_ratio * 2 * np.sin(np.pi / n)
+    rings = [np.column_stack((np.cos(t), np.sin(t), np.full(n, k * dz))) for k in range(40)]
+    V = np.vstack(rings)
+    F = np.vstack([_tube_faces(k * n, (k + 1) * n, n) for k in range(39)])
+    V2, F2 = trimesh.remesh.subdivide_loop(V, F, iterations=levels)
+    z = V2[:, 2]
+    mid = np.abs(z - z.mean()) < 3 * dz
+    return float(np.linalg.norm(V2[mid, :2], axis=1).mean())
+
+
+def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.0, core=False):
+    """Method C1: organic node by subdivision of a hull control mesh (notes/12).
+    Control mesh = convex hull of one ring per beam (at ring_offsets: outside the trim sphere and each ring a face of
+    the hull), with the ring caps removed,
+    plus a control tube per beam (rings one edge length apart, past the far end, capped). Loop subdivision gives a
+    smooth (C2 away from extraordinary vertices) surface whose tubes converge to the beams (control rings enlarged
+    by the measured Loop shrink); the far ends are then trimmed flat. Returns the watertight manifold."""
+    from scipy.spatial import ConvexHull
+    r_min = radii.min()
+    toff = ring_offsets(dirs, radii * np.array([1 / loop_shrink(ring_count(r, r_min, n_min), levels=levels)
+                                                 for r in radii]), R_s, core=core)
+    V, F, ring0 = [], [], []
+    nv = 0
+    for e, r, l in zip(dirs, radii, L):
+        n = ring_count(r, r_min, n_min)
+        rc = r / loop_shrink(n, levels=levels)
+        u, v = _frame(e)
+        t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        circ = rc * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v))
+        dz = 2 * r * np.sin(np.pi / n)
+        ti = toff[len(ring0)]
+        # control rings: the first two gaps `lead` * r long (a longer blend from the hull into the beam), then one
+        # edge length apart
+        z0 = [ti] + ([ti + lead * r, ti + 2 * lead * r] if lead > 0 else [])
+        zs = np.concatenate((z0, np.arange(z0[-1] + dz, l + 3 * dz, dz)))
+        start = nv
+        for z in zs:
+            V.append(node + z * e + circ)
+            nv += n
+        ring0.append((start, n))
+        for k in range(len(zs) - 1):
+            F.append(_tube_faces(start + k * n, start + (k + 1) * n, n))
+        V.append((node + (zs[-1] + 0.5 * dz) * e)[None])          # far cap (trimmed away later)
+        last = start + (len(zs) - 1) * n
+        i = np.arange(n)
+        F.append(np.column_stack((last + i, np.full(n, nv), last + (i + 1) % n)))
+        nv += 1
+    cores = []
+    if core:     # each beam's own section at the node: the hull then contains every beam up to the node point
+        for e, r in zip(dirs, radii):
+            n = ring_count(r, r_min, n_min)
+            u, v = _frame(e)
+            t = np.linspace(0, 2 * np.pi, n, endpoint=False) + np.pi / n
+            V.append(node + r * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v)))
+            cores.append(np.arange(nv, nv + n))
+            nv += n
+    V = np.vstack(V)
+    # node: hull of the first ring of every beam (+ the core rings), without the ring caps
+    idx = np.concatenate([np.arange(s, s + n) for s, n in ring0] + cores)
+    H = ConvexHull(V[idx])
+    S = idx[H.simplices]
+    ring_of = np.full(len(V), -1)
+    for q, (s, n) in enumerate(ring0):
+        ring_of[s:s + n] = q
+    rs = ring_of[S]
+    S = S[~((rs[:, 0] >= 0) & (rs[:, 0] == rs[:, 1]) & (rs[:, 1] == rs[:, 2]))]   # rim caps (core rings: -1)
+    c = V[idx].mean(0)                                             # outward orientation
+    nrm = np.cross(V[S[:, 1]] - V[S[:, 0]], V[S[:, 2]] - V[S[:, 0]])
+    flip = (nrm * (V[S].mean(1) - c)).sum(1) < 0
+    S[flip] = S[flip][:, ::-1]
+    F = np.vstack(F + [S])
+    ctrl = trimesh.Trimesh(V, F, process=False)
+    ctrl.remove_unreferenced_vertices()                             # core points inside the hull
+    if not ctrl.is_winding_consistent:
+        trimesh.repair.fix_winding(ctrl)
+    if ctrl.volume < 0:
+        ctrl.invert()
+    V2, F2 = trimesh.remesh.subdivide_loop(ctrl.vertices, ctrl.faces, iterations=levels)
+    sm = m3.Manifold(m3.Mesh(np.ascontiguousarray(V2, np.float32), np.ascontiguousarray(F2, np.uint32)))
+    if sm.status() != m3.Error.NoError:
+        raise RuntimeError(f'subdivided node is not a manifold: {sm.status()}')
+    for e, l in zip(dirs, L):                                     # flat far ends
+        sm = sm.trim_by_plane(tuple(map(float, -e)), float(-(node @ e) - l))
+    return sm, ctrl
+
+
+def cotan_laplacian(V, F):
+    """Cotangent Laplacian M^-1 C (C: cotangent weights, M: lumped area), the geometric discrete Laplace-Beltrami."""
+    import scipy.sparse as sp
+    C = sp.csr_matrix((len(V), len(V)))
+    rows, cols, vals = [], [], []
+    for a, b, c in ((0, 1, 2), (1, 2, 0), (2, 0, 1)):            # angle at c is opposite edge a-b
+        u = V[F[:, a]] - V[F[:, c]]
+        w = V[F[:, b]] - V[F[:, c]]
+        cot = (u * w).sum(1) / np.maximum(np.linalg.norm(np.cross(u, w), axis=1), 1e-16)
+        rows += [F[:, a], F[:, b]]
+        cols += [F[:, b], F[:, a]]
+        vals += [0.5 * cot, 0.5 * cot]
+    W = sp.coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(len(V),) * 2).tocsr()
+    Cm = sp.diags(np.asarray(W.sum(1)).ravel()) - W
+    area = 0.5 * np.linalg.norm(np.cross(V[F[:, 1]] - V[F[:, 0]], V[F[:, 2]] - V[F[:, 0]]), axis=1)
+    M = np.bincount(F.ravel(), weights=np.repeat(area / 3, 3), minlength=len(V))
+    return sp.diags(1.0 / M) @ Cm
+
+
+def fair_node(mesh, node, dirs, radii, t_ring, free_len=1.5, cotan=True, core=True):
+    """Method C3: variational fairing of the node. The vertices of the node region (everything that is not beam
+    beyond t_ring_i + free_len * r_i) are moved to the thin-plate (minimal bending) surface: bi-Laplacian
+    L^2 x = 0 with the beam vertices fixed (two rings of fixed beam give a tangent-continuous join). One sparse
+    solve; spreads the curvature of the crevices instead of concentrating it at the beam rings. core: the node keeps
+    every beam's own cylinder up to the node point (vertices that the fairing pulls into a core are projected onto it
+    and fixed, then the rest is solved again), so no beam necks on its way into the node.
+    Returns (mesh, fixed mask)."""
+    import scipy.sparse as sp
+    import scipy.sparse.linalg as spl
+    V = np.asarray(mesh.vertices, float)
+    F = np.asarray(mesh.faces)
+    fixed = np.zeros(len(V), bool)
+    for e, r, t in zip(dirs, radii, t_ring):
+        w = (V - node) @ e
+        rad = np.linalg.norm((V - node) - np.outer(w, e), axis=1)
+        fixed |= (w > t + free_len * r) & (np.abs(rad - r) < 0.05 * r)
+    E = np.vstack((F[:, [0, 1]], F[:, [1, 2]], F[:, [2, 0]]))
+    A = sp.coo_matrix((np.ones(len(E)), (E[:, 0], E[:, 1])), shape=(len(V),) * 2).tocsr()
+    A = ((A + A.T) > 0).astype(float)
+    deg = np.asarray(A.sum(1)).ravel()
+    Lap = cotan_laplacian(V, F) if cotan else sp.eye(len(V)) - sp.diags(1.0 / deg) @ A
+    L2 = (Lap @ Lap).tocsr()
+    Vn = V.copy()
+    for it in range(30):                     # active set: the node may not cut into any beam's core cylinder
+        fr = np.where(~fixed)[0]
+        fx = np.where(fixed)[0]
+        rhs = -L2[fr][:, fx] @ Vn[fx]
+        solve = spl.factorized(L2[fr][:, fr].tocsc())
+        for k in range(3):
+            Vn[fr, k] = solve(rhs[:, k])
+        if not core:
+            break
+        hit = np.zeros(len(V), bool)
+        for e, r, t in zip(dirs, radii, t_ring):
+            w = (Vn - node) @ e
+            q = (Vn - node) - np.outer(w, e)
+            rad = np.linalg.norm(q, axis=1)
+            inside = (~fixed) & (w > 0) & (w < t + free_len * r) & (rad < r)
+            Vn[inside] = node + np.outer(w[inside], e) + q[inside] * (r / np.maximum(rad[inside], 1e-12))[:, None]
+            hit |= inside
+        if not hit.any():
+            break
+        fixed |= hit
+    return trimesh.Trimesh(Vn, F, process=False), fixed
