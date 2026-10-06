@@ -126,12 +126,12 @@ def method_hull_subdivision():
 
 
 def method_fair():
-    """C3: C1 + variational (cotangent bi-Laplacian) fairing of the node region, free 0.5 r beyond each ring."""
+    """FHS (Faired Hull-Subdivision): C1 + variational (cotangent bi-Laplacian) fairing of the node region, free 0.5 r beyond each ring."""
     R_s, _ = nj.trim_radius(DIRS, RADII, LEN)
     sm, _ = nj.hull_subdivision_node(NODE, DIRS, RADII, LEN, R_s, lead=1.0, core=True)
     fm, _ = nj.fair_node(nj.to_trimesh(sm), NODE, DIRS, RADII, nj.ring_offsets(DIRS, RADII, R_s, core=True),
                          free_len=0.5, core=False)
-    return export(fm, 'C3_subdivision_faired')
+    return export(fm, 'FHS_node')
 
 
 def method_sdf():
@@ -157,7 +157,7 @@ def method_sdf():
 
 METHODS = {'A_hull_ext200': method_hull_ext200, 'R_cylsphere': method_cylsphere, 'B_sphere_trim': method_sphere_trim,
            'C1_hull_subdivision': method_hull_subdivision, 'C2_sdf_hull_rolling_ball': method_sdf,
-           'C3_subdivision_faired': method_fair}
+           'FHS_node': method_fair}
 
 
 def main(only):

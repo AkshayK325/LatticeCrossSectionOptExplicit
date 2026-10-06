@@ -1,4 +1,4 @@
-"""C3 node joints (notes/13_C3_NodeAlgorithm.md): watertight, crease-free, no necking."""
+"""FHS (Faired Hull-Subdivision) node joints (notes/13_FHS_NodeAlgorithm.md): watertight, crease-free, no necking."""
 import numpy as np
 import trimesh
 
@@ -14,7 +14,7 @@ def _dihedral_max(m, H=None):
     return ang.max()
 
 
-def test_three_beam_c3_no_neck(tmp_path):
+def test_three_beam_fhs_no_neck(tmp_path):
     """Big / medium / small beam in 3D: watertight, smooth, and each beam keeps its section (the core rings and the
     flank anchors stop the thin-plate fairing from necking it)."""
     node, E, r, L = nj.three_beam_case()
@@ -40,14 +40,15 @@ def test_three_beam_c3_no_neck(tmp_path):
             assert own and np.sqrt(own[0].area() / np.pi) > 0.98 * rr
 
 
-def test_lattice_c3_watertight_smooth(tmp_path):
+def test_lattice_fhs_watertight_smooth(tmp_path):
     lat = example3(elemSize=1.0, nx=1, ny=1, name='C4')
     X, C = lat['X'], np.asarray(lat['conn'])
     H = X[:, 2].max()
-    man, _ = nj.lattice_c3(X, C, 0.8, z_range=(0.0, H))
+    man, _ = nj.lattice_fhs(X, C, 0.8, z_range=(0.0, H))
     f = str(tmp_path / 'c.stl')
     nj.to_stl_mesh(man).export(f)
     m = trimesh.load(f, process=True)
     assert m.is_watertight and m.is_volume
     assert _dihedral_max(m, H) < 20
-    assert abs(m.volume - 284.2) < 0.01 * 284.2
+    assert abs(m.volume - 283.4) < 0.01 * 283.4
+    assert len(m.faces) < 150_000                                # 2 levels + limit + coarse middles (was 558k)

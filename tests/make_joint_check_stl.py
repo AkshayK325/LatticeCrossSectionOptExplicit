@@ -3,8 +3,8 @@
 Per cell, three joints:
   <cell>_hull_ext025.stl        convex hull of the strut end caps, extension -0.025 (the published optBeam setting)
   <cell>_abaqus_cylsphere.stl   cylinders + max-radius node spheres (the validated Abaqus solid models)
-  <cell>_c3.stl                 C3 node joints (nodeJoint.lattice_c3: hull + core rings, Loop subdivision, anchored
-                                fairing; notes/13_C3_NodeAlgorithm.md)
+  <cell>_fhs.stl / .3mf         FHS node joints (Faired Hull-Subdivision, nodeJoint.lattice_fhs: hull + core rings, Loop subdivision, anchored
+                                fairing; notes/13_FHS_NodeAlgorithm.md)
 Run: PYTHONPATH=src:abaqus python tests/make_joint_check_stl.py [cell ...]
 """
 import contextlib
@@ -110,9 +110,9 @@ def main(only):
         cylsphere(X, C, rs, H).export(f'{OUT}/{tag}_abaqus_cylsphere.stl')
         builds['abaqus_cylsphere'] = time.time() - t
         t = time.time()
-        man, _ = nj.lattice_c3(X, C, rs, z_range=(0.0, H))
-        nj.to_stl_mesh(man).export(f'{OUT}/{tag}_c3.stl')
-        builds['c3'] = time.time() - t
+        man, _ = nj.lattice_fhs(X, C, rs, z_range=(0.0, H))
+        nj.export(nj.to_stl_mesh(man), f'{OUT}/{tag}_fhs')            # .stl + .3mf
+        builds['fhs'] = time.time() - t
         for meth, dt in builds.items():
             m = trimesh.load(f'{OUT}/{tag}_{meth}.stl', process=True)
             mx, q = max_dihedral(m, H)

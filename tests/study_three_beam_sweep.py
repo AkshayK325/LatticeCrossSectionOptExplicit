@@ -1,4 +1,4 @@
-"""C3 (hull + core rings + Loop subdivision + bi-Laplacian fairing) on three-beam nodes with different angles and
+"""FHS, Faired Hull-Subdivision node (hull + core rings + Loop subdivision + bi-Laplacian fairing) on three-beam nodes with different angles and
 radii (notes/12_ThreeBeamJointStudy.md). STLs: STL/three_beam/sweep/. Run: PYTHONPATH=src python tests/study_three_beam_sweep.py
 """
 import os
@@ -47,10 +47,10 @@ RADII = {
 }
 
 
-FREE, LIMIT, TAG, ANCHOR = 0.5, False, 'C3', 10.0
+FREE, LIMIT, TAG, ANCHOR = 0.5, False, 'FHS0', 10.0
 
 
-def c3(node, dirs, radii):
+def fhs(node, dirs, radii):
     R_s, _ = nj.trim_radius(dirs, radii, L)
     sm, _ = nj.hull_subdivision_node(node, dirs, radii, L, R_s, lead=1.0, core=True)
     t_ring = nj.ring_offsets(dirs, radii, R_s, core=True)
@@ -74,7 +74,7 @@ def main():
             st.DIRS, st.RADII, st.LEN, st.NODE = dirs, radii, L, node      # metric helpers use these
             t = time.time()
             try:
-                fm, R_s = c3(node, dirs, radii)
+                fm, R_s = fhs(node, dirs, radii)
                 f = f'{OUT}/{TAG}_{an}_{rn}.stl'
                 fm.export(f)
                 m = trimesh.load(f, process=True)
@@ -88,7 +88,7 @@ def main():
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) > 1:                         # e.g. 1.0 anchor C3A 10
+    if len(sys.argv) > 1:                         # e.g. 1.0 anchor FHS 10 (FHS0 = first, unanchored version)
         FREE, LIMIT, TAG = float(sys.argv[1]), sys.argv[2], sys.argv[3]
         ANCHOR = float(sys.argv[4]) if len(sys.argv) > 4 else ANCHOR
     main()

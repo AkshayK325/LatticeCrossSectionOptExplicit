@@ -61,6 +61,13 @@ def to_stl_mesh(man):
     return _float32_weld(man)
 
 
+def export(mesh, path_stem, threemf=True):
+    """Write <path_stem>.stl (binary) and, optionally, <path_stem>.3mf (indexed + zip: ~3x smaller, same mesh)."""
+    mesh.export(f'{path_stem}.stl')
+    if threemf:
+        mesh.export(f'{path_stem}.3mf')
+
+
 def to_trimesh(man):
     m = man.to_mesh64()
     return trimesh.Trimesh(np.asarray(m.vert_properties)[:, :3], np.asarray(m.tri_verts, np.int64), process=False)
@@ -107,7 +114,21 @@ def _tube_faces(a, b, n):
     return np.vstack((np.column_stack((a + i, b + i, a + j)), np.column_stack((a + j, b + i, b + j))))
 
 
-def loop_shrink(n, spacing_ratio=1.0, levels=3):
+def loop_limit(V, F):
+    """Loop subdivision limit positions (closed mesh): v_lim = (1 - n chi) v + chi * sum(neighbours), with
+    chi = 1 / (3 / (8 beta) + n) and beta the Loop weight of valence n. After any number of levels this puts every
+    vertex exactly on the smooth limit surface, so a coarser level loses only the chord between vertices."""
+    import scipy.sparse as sp
+    E = np.vstack((F[:, [0, 1]], F[:, [1, 2]], F[:, [2, 0]]))
+    A = sp.coo_matrix((np.ones(len(E)), (E[:, 0], E[:, 1])), shape=(len(V),) * 2).tocsr()
+    A = ((A + A.T) > 0).astype(float)
+    n = np.asarray(A.sum(1)).ravel()
+    beta = (5.0 / 8.0 - (3.0 / 8.0 + 0.25 * np.cos(2 * np.pi / n)) ** 2) / n
+    chi = 1.0 / (3.0 / (8.0 * beta) + n)
+    return (1 - n * chi)[:, None] * V + chi[:, None] * (A @ V)
+
+
+def loop_shrink(n, spacing_ratio=1.0, levels=3, limit=False):
     """Radius factor by which Loop subdivision shrinks a long regular n-gon tube (rings `spacing_ratio` edge lengths
     apart): measured numerically on a test tube, so that control rings can be enlarged by 1 / factor."""
     t = np.linspace(0, 2 * np.pi, n, endpoint=False)
@@ -116,6 +137,8 @@ def loop_shrink(n, spacing_ratio=1.0, levels=3):
     V = np.vstack(rings)
     F = np.vstack([_tube_faces(k * n, (k + 1) * n, n) for k in range(39)])
     V2, F2 = trimesh.remesh.subdivide_loop(V, F, iterations=levels)
+    if limit:
+        V2 = loop_limit(V2, F2)
     z = V2[:, 2]
     mid = np.abs(z - z.mean()) < 3 * dz
     return float(np.linalg.norm(V2[mid, :2], axis=1).mean())
@@ -249,7 +272,7 @@ def flank_weights(V, node, dirs, radii, reach):
 
 
 def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.0):
-    """Method C3 (anchored): least-squares fairing, min x^T K x + sum_v w_v |x_v - x0_v|^2, with the thin-plate
+    """FHS fairing (Faired Hull-Subdivision node, anchored): least-squares fairing, min x^T K x + sum_v w_v |x_v - x0_v|^2, with the thin-plate
     energy K = C^T M^-1 C (cotangent C, lumped area M), the beams fixed beyond t_ring_i + free_len * r_i, and soft
     anchors w = anchor * area / r_min^4 * flank_weights on the beams' flanks, so the crevices fair freely but no beam
     necks. One linear solve (no clamping, no folds). Returns (mesh, fixed mask)."""
@@ -280,7 +303,7 @@ def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.
 
 
 def fair_node(mesh, node, dirs, radii, t_ring, free_len=1.5, cotan=True, core=True, limit=False):
-    """Method C3: variational fairing of the node. The vertices of the node region (everything that is not beam
+    """Unanchored FHS fairing (first version; necks thick beams, kept for the study): variational fairing of the node. The vertices of the node region (everything that is not beam
     beyond t_ring_i + free_len * r_i) are moved to the thin-plate (minimal bending) surface: bi-Laplacian
     L^2 x = 0 with the beam vertices fixed (two rings of fixed beam give a tangent-continuous join). One sparse
     solve; spreads the curvature of the crevices instead of concentrating it at the beam rings. core: the node keeps
@@ -340,33 +363,60 @@ def fair_node(mesh, node, dirs, radii, t_ring, free_len=1.5, cotan=True, core=Tr
     return trimesh.Trimesh(Vn, F, process=False), fixed
 
 
-# ---------------------------------------------------------------- C3 on a whole lattice
-def _strut_rings(z_lo, z_hi, r, dz, lead):
+# ---------------------------------------------------------------- FHS on a whole lattice
+def _strut_rings(z_lo, z_hi, r, dz, lead, mid=1.0):
     """Axial positions of a strut's control rings between its two node rings: the first / last two gaps lead * r
     long, one edge length apart in between."""
     a = [z_lo] + ([z_lo + lead * r, z_lo + 2 * lead * r] if lead > 0 else [])
     b = ([z_hi - 2 * lead * r, z_hi - lead * r] if lead > 0 else []) + [z_hi]
     if a[-1] >= b[0] - 0.5 * dz:
         return np.linspace(z_lo, z_hi, max(int(np.ceil((z_hi - z_lo) / dz)), 1) + 1)
-    n = max(int(np.ceil((b[0] - a[-1]) / dz)), 1)
+    n = max(int(np.ceil((b[0] - a[-1]) / (mid * dz))), 1)          # middle rings `mid` edge lengths apart
     return np.concatenate((a, np.linspace(a[-1], b[0], n + 1)[1:-1], b))
 
 
-def lattice_c3(X, conn, radii, z_range=None, levels=3, lead=1.0, free_len=1.0, anchor=10.0, n_min=16):
-    """C3 for a whole lattice (algorithm: notes/13_C3_NodeAlgorithm.md). Every node of degree >= 2 gets a node
+def merge_straight_chains(X, conn, radii, cos_tol=1e-6, r_tol=1e-9):
+    """Merge struts that continue straight through a degree-2 node with the same radius (element subdivisions, not
+    joints): such a node would otherwise get a node patch and its dense blend rings for nothing. Returns
+    (conn, radii) of the merged struts (node indices unchanged)."""
+    conn = [tuple(c) for c in np.asarray(conn, int)]
+    radii = list(np.broadcast_to(np.asarray(radii, float), (len(conn),)))
+    while True:
+        deg = {}
+        for k, (a, b) in enumerate(conn):
+            deg.setdefault(a, []).append(k)
+            deg.setdefault(b, []).append(k)
+        for n, ks in deg.items():
+            if len(ks) != 2 or abs(radii[ks[0]] - radii[ks[1]]) > r_tol:
+                continue
+            ends = [conn[k][1] if conn[k][0] == n else conn[k][0] for k in ks]
+            u, v = X[ends[0]] - X[n], X[ends[1]] - X[n]
+            if u @ v / (np.linalg.norm(u) * np.linalg.norm(v)) < -1 + cos_tol:
+                keep, drop = sorted(ks)
+                conn[keep] = (ends[0], ends[1])
+                del conn[drop], radii[drop]
+                break
+        else:
+            return np.array(conn), np.array(radii)
+
+
+def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, anchor=10.0, n_min=16,
+                limit=True, mid=3.0):
+    """FHS (Faired Hull-Subdivision) node joints for a whole lattice (algorithm: notes/13_FHS_NodeAlgorithm.md). Every node of degree >= 2 gets a node
     patch (convex hull of its node rings + core rings, ring caps removed); every strut a control tube between the
     node rings at its two ends; the whole control mesh is Loop-subdivided, the node regions are faired in one
     anchored least-squares solve, and the result is trimmed to the plate planes z_range.
-    Returns (watertight manifold, info dict)."""
+    Mesh size (notes/14): 2 Loop levels with the vertices moved onto the exact limit surface (limit), and the
+    strut-middle control rings mid edge lengths apart: ~5x fewer faces than 3 plain levels, 99 % of the surface
+    within ~10 um of it. Returns (watertight manifold, info dict)."""
     import scipy.sparse as sp
     import scipy.sparse.linalg as spl
     from scipy.spatial import ConvexHull, cKDTree
     X = np.asarray(X, float)
-    conn = np.asarray(conn, int)
-    radii = np.broadcast_to(np.asarray(radii, float), (len(conn),)).copy()
+    conn, radii = merge_straight_chains(X, conn, radii)                 # element splits are not joints
     r_min = radii.min()
     nring = np.array([ring_count(r, r_min, n_min) for r in radii])
-    shrink = {n: loop_shrink(n, levels=levels) for n in set(nring.tolist())}
+    shrink = {n: loop_shrink(n, spacing_ratio=mid, levels=levels, limit=limit) for n in set(nring.tolist())}
     rc = np.array([r / shrink[n] for r, n in zip(radii, nring)])
     length = np.linalg.norm(X[conn[:, 1]] - X[conn[:, 0]], axis=1)
     E = (X[conn[:, 1]] - X[conn[:, 0]]) / length[:, None]
@@ -402,7 +452,7 @@ def lattice_c3(X, conn, radii, z_range=None, levels=3, lead=1.0, free_len=1.0, a
         u, v = _frame(e)
         t = np.linspace(0, 2 * np.pi, n, endpoint=False)
         circ = rc[i] * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v))
-        zs = _strut_rings(toff[i, 0], length[i] - toff[i, 1], r, 2 * r * np.sin(np.pi / n), lead)
+        zs = _strut_rings(toff[i, 0], length[i] - toff[i, 1], r, 2 * r * np.sin(np.pi / n), lead, mid)
         start = nv
         for z in zs:
             V.append(X[a] + z * e + circ)
@@ -458,6 +508,8 @@ def lattice_c3(X, conn, radii, z_range=None, levels=3, lead=1.0, free_len=1.0, a
         ctrl.invert()
     # 5. Loop subdivision
     V2, F2 = trimesh.remesh.subdivide_loop(ctrl.vertices, ctrl.faces, iterations=levels)
+    if limit:                                                      # vertices onto the limit surface
+        V2 = loop_limit(V2, F2)
     # 6. anchored fairing of all node regions in one solve
     fixed = np.zeros(len(V2), bool)
     for i, (a, b) in enumerate(conn):
@@ -495,3 +547,79 @@ def lattice_c3(X, conn, radii, z_range=None, levels=3, lead=1.0, free_len=1.0, a
     if z_range is not None:                                        # 7. plate planes
         man = man.trim_by_plane((0.0, 0.0, 1.0), float(z_range[0])).trim_by_plane((0.0, 0.0, -1.0), -float(z_range[1]))
     return man, dict(control_faces=len(ctrl.faces), free_vertices=len(fr), ring_offsets=toff)
+
+
+# ---------------------------------------------------------------- mesh size: deviation between two surfaces
+def _point_triangle_dist(P, A, B, C):
+    """Distance from points P (n,3) to triangles (A, B, C) (n,3 each), vectorised (Ericson, closest point on
+    triangle)."""
+    ab, ac, ap = B - A, C - A, P - A
+    d1, d2 = (ab * ap).sum(-1), (ac * ap).sum(-1)
+    bp = P - B
+    d3, d4 = (ab * bp).sum(-1), (ac * bp).sum(-1)
+    cp = P - C
+    d5, d6 = (ab * cp).sum(-1), (ac * cp).sum(-1)
+    va = d3 * d6 - d5 * d4
+    vb = d5 * d2 - d1 * d6
+    vc = d1 * d4 - d3 * d2
+    den = np.where(np.abs(va + vb + vc) > 1e-30, va + vb + vc, 1e-30)
+    v = vb / den
+    w = vc / den
+    Q = A + v[..., None] * ab + w[..., None] * ac                       # interior
+    with np.errstate(divide='ignore', invalid='ignore'):
+        tab = np.clip(d1 / np.where(d1 - d3 != 0, d1 - d3, 1e-30), 0, 1)
+        tac = np.clip(d2 / np.where(d2 - d6 != 0, d2 - d6, 1e-30), 0, 1)
+        tbc = np.clip((d4 - d3) / np.where((d4 - d3) + (d5 - d6) != 0, (d4 - d3) + (d5 - d6), 1e-30), 0, 1)
+    E1 = A + tab[..., None] * ab
+    E2 = A + tac[..., None] * ac
+    E3 = B + tbc[..., None] * (C - B)
+    inside = (va >= 0) & (vb >= 0) & (vc >= 0)
+    dist = np.where(inside, np.linalg.norm(P - Q, axis=-1), np.inf)
+    for E in (E1, E2, E3):
+        dist = np.minimum(dist, np.where(inside, np.inf, np.linalg.norm(P - E, axis=-1)))
+    return np.where(inside, np.linalg.norm(P - Q, axis=-1), dist)
+
+
+def surface_distance(P, mesh, ring=2):
+    """Distance from points P to the surface of `mesh` (smooth, fine): exact point-triangle distances to the faces
+    around the mesh's nearest vertices (`ring` nearest vertices' one-rings). Returns (n,)."""
+    from scipy.spatial import cKDTree
+    V, F = np.asarray(mesh.vertices), np.asarray(mesh.faces)
+    vf = mesh.vertex_faces                                               # (nv, max valence), -1 padded
+    _, nn = cKDTree(V).query(P, k=ring)
+    nn = np.atleast_2d(nn.T).T if ring > 1 else nn[:, None]
+    best = np.full(len(P), np.inf)
+    for j in range(nn.shape[1]):
+        fl = vf[nn[:, j]]
+        for c in range(fl.shape[1]):
+            f = fl[:, c]
+            ok = f >= 0
+            if not ok.any():
+                continue
+            T = F[f[ok]]
+            d = _point_triangle_dist(P[ok], V[T[:, 0]], V[T[:, 1]], V[T[:, 2]])
+            best[ok] = np.minimum(best[ok], d)
+    return best
+
+
+def deviation(dense, coarse, n_samples=None, seed=0, planes_z=()):
+    """Two-sided max distance between the dense and the coarse surface: dense vertices to the coarse surface, and
+    samples on the coarse faces (several per face) to the dense surface. Points on the plate planes planes_z
+    (identical flat faces in both, but large triangles the vertex-ring search cannot cover) are left out."""
+    def off(P):
+        keep = np.ones(len(P), bool)
+        for z in planes_z:
+            keep &= np.abs(P[:, 2] - z) > 1e-4
+        return keep
+    Pd = np.asarray(dense.vertices)
+    d1 = surface_distance(Pd[off(Pd)], coarse)
+    rng = np.random.default_rng(seed)
+    n = n_samples or 4 * len(coarse.faces)
+    fi = rng.integers(0, len(coarse.faces), n)
+    u, v = rng.random(n), rng.random(n)
+    flip = u + v > 1
+    u[flip], v[flip] = 1 - u[flip], 1 - v[flip]
+    T = coarse.vertices[coarse.faces[fi]]
+    P = T[:, 0] + u[:, None] * (T[:, 1] - T[:, 0]) + v[:, None] * (T[:, 2] - T[:, 0])
+    d2 = surface_distance(P[off(P)], dense)
+    return float(max(d1.max(), d2.max()))
