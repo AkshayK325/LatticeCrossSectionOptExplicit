@@ -66,10 +66,10 @@ def test_trim_to_plates_and_volume_vs_exact(tmp_path):
     assert m.volume == pytest.approx(286.1, rel=0.01)                 # OCC cylinders + spheres, trimmed: 286.11
 
 
-@pytest.mark.parametrize('ext,smooth', [(-0.1, False), (-0.2, False), (-0.1, True), (-0.2, True)])
+@pytest.mark.parametrize('ext,smooth', [(-0.1, False), (-0.2, False), (-0.1, 'hull'), (-0.2, 'hull')])
 def test_shortened_struts_and_rounded_joints(tmp_path, ext, smooth):
     """The print settings of optBeam (extension -0.1 / -0.2: struts shortened at the joints, hull spans the gap),
-    with and without rounded joints, on C4 and BCC: still a closed 2-manifold when re-read."""
+    with and without the rounded hulls (smooth_joints='hull'), on C4 and BCC: still a closed 2-manifold when re-read."""
     import trimesh
     for cell in ('C4', 'B'):
         lat = example3(elemSize=1.0, nx=1, ny=1, name=cell)
@@ -80,3 +80,66 @@ def test_shortened_struts_and_rounded_joints(tmp_path, ext, smooth):
                                            smooth_joints=smooth, z_range=(0.0, X[:, 2].max()))
         m = trimesh.load(f, process=True)
         assert m.is_watertight and m.is_volume, (cell, ext, smooth)
+
+
+def _interior_dihedral(m, H):
+    """Dihedral angles (deg) between adjacent faces, excluding edges on the plate planes z = 0, H."""
+    ang = np.degrees(m.face_adjacency_angles)
+    z = m.vertices[m.face_adjacency_edges][:, :, 2]
+    return ang[np.minimum(np.abs(z), np.abs(z - H)).min(1) > 1e-3]
+
+
+@pytest.mark.parametrize('cell', ['C4', 'B'])
+def test_filleted_joints_smooth_and_watertight(tmp_path, cell):
+    """smooth_joints=True (smoothJoint: round-union fillets, fine mesh at the joints, stitched tubes): closed when
+    re-read, no crease anywhere (the cylinder + sphere / hull joints have 90-150 deg edges), and the volume is the
+    struts plus a few percent of fillet material."""
+    import trimesh
+    lat = example3(elemSize=1.0, nx=1, ny=1, name=cell)
+    X, C = lat['X'], lat['conn']
+    H = X[:, 2].max()
+    f = str(tmp_path / 's.stl')
+    BeamStructureSTL().build_structure(X, C, [_circle(0.8)] * len(C), [np.array([0.0, 0.0, 1.0])] * len(C),
+                                       [[200, 200, 200, 255]] * len(C), stl_filename=f, smooth_joints=True,
+                                       z_range=(0.0, H))
+    m = trimesh.load(f, process=True)
+    assert m.is_watertight and m.is_volume
+    assert _interior_dihedral(m, H).max() < 35.0
+    assert m.bounds[0][2] == pytest.approx(0.0, abs=1e-6) and m.bounds[1][2] == pytest.approx(H, abs=1e-6)
+    if cell == 'C4':
+        assert m.volume == pytest.approx(300.0, rel=0.005)  # same-area circle of the 32-gon (r 0.797); cyl+sph 286.1
+
+
+def test_filleted_joints_mixed_radii_and_polygons(tmp_path):
+    """Random radii 0.4-1.1 (thin struts into thick ones: the fillet is sized to the thinner strut, no step) and
+    polygon sections of every kind (ellipse, rectangle, non-convex star, clockwise, duplicate points)."""
+    import trimesh
+    lat = example3(elemSize=1.0, nx=1, ny=1)
+    X, C = lat['X'], lat['conn']
+    H = X[:, 2].max()
+    nb = len(C)
+    v = [np.array([0.0, 0.0, 1.0])] * nb
+    col = [[200, 200, 200, 255]] * nb
+    f = str(tmp_path / 's.stl')
+    radii = np.random.default_rng(0).uniform(0.4, 1.1, nb)
+    BeamStructureSTL().build_structure(X, C, [_circle(r) for r in radii], v, col, stl_filename=f, smooth_joints=True,
+                                       z_range=(0.0, H))
+    m = trimesh.load(f, process=True)
+    assert m.is_watertight and m.is_volume
+    assert _interior_dihedral(m, H).max() < 35.0
+    shapes = _shapes()
+    BeamStructureSTL().build_structure(X, C, [shapes[i % len(shapes)] for i in range(nb)], v, col, stl_filename=f,
+                                       smooth_joints=True, z_range=(0.0, H))
+    m2 = trimesh.load(f, process=True)
+    assert m2.is_watertight and m2.is_volume
+
+
+def test_smooth_adaptive_matches_uniform():
+    """The adaptive build (joint patches + stitched tubes) is the same surface as one uniform marching-cubes grid."""
+    from smoothJoint import build_smooth_stl
+    lat = example3(elemSize=1.0, nx=1, ny=1)
+    X, C = lat['X'], lat['conn']
+    a = build_smooth_stl(X, C, 0.8, adaptive=True)
+    u = build_smooth_stl(X, C, 0.8, adaptive=False)
+    assert a.is_watertight and u.is_watertight
+    assert a.volume == pytest.approx(u.volume, rel=2e-3)

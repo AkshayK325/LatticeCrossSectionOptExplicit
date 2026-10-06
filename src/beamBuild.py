@@ -269,10 +269,25 @@ class BeamStructureSTL:
         previous trimesh union fell back to concatenating overlapping meshes when a boolean failed, which gave
         non-watertight STLs). z_range=(z_lo, z_hi): optional trim to the plate planes (flat faces at the plates,
         as in the validated solid models). extension: strut end shift at joints as a fraction of the strut length
-        (negative = shorten, e.g. -0.1: the joint hull then spans the gap). smooth_joints: rounded hulls
+        (negative = shorten, e.g. -0.1: the joint hull then spans the gap). smooth_joints: True = filleted joints
+        (smoothJoint: struts fused by a smooth minimum, fillet sized to the thinner strut, fine mesh at the joints;
+        circular sections become exact circles; extension does not apply), 'hull' = the earlier rounded hulls
         (_round_hull). Returns (combined trimesh, coloured concatenation for viewing)."""
         import manifold3d as m3
         nodes = np.asarray(nodes, dtype=float)
+        if smooth_joints is True:
+            from smoothJoint import build_smooth_stl
+            secs = []
+            for sec in sections:
+                S = self._clean_section(sec)
+                rho = np.linalg.norm(S - S.mean(0), axis=1)
+                circle = len(S) >= 16 and np.linalg.norm(S.mean(0)) < 1e-6 * rho.max() and np.ptp(rho) < 1e-6 * rho.max()
+                secs.append(float(np.sqrt(abs(self._area(S)) / np.pi)) if circle else S)       # same-area circle
+            if extension:
+                print("smooth_joints: extension ignored (struts run node to node, the fillets form the joints)")
+            combined = build_smooth_stl(nodes, np.asarray(beams), secs, None, z_range=z_range,
+                                        orientations=orientations)
+            return self._export(combined, stl_filename, f"{len(beams)} beams, filleted joints", visualize), combined
         joint_nodes = self.find_joints(beams)
         parts, caps, coloured = [], {}, []
         for i, (a, b) in enumerate(beams):
@@ -289,7 +304,7 @@ class BeamStructureSTL:
             pts = np.vstack(caps[node])
             if len(caps[node]) > 1 and len(pts) >= 4:
                 hull = m3.Manifold.hull_points(pts.tolist())
-                if smooth_joints and not hull.is_empty():
+                if smooth_joints == 'hull' and not hull.is_empty():
                     rh = self._round_hull(self._to_trimesh(hull))
                     if not rh.is_volume:
                         trimesh.repair.fix_normals(rh)
@@ -308,19 +323,23 @@ class BeamStructureSTL:
         if solid.status() != m3.Error.NoError or solid.is_empty():
             raise RuntimeError(f"manifold union failed: {solid.status()}")
         combined = self._to_trimesh(solid)
+        if self.verbose:
+            print(f"Final mesh: {len(combined.vertices)} vertices, {len(combined.faces)} faces, genus {solid.genus()}")
+        return self._export(combined, stl_filename, f"{len(beams)} beams, {n_joint} joints", visualize), \
+            trimesh.util.concatenate(coloured)
+
+    def _export(self, combined, stl_filename, what, visualize):
         combined.export(stl_filename)
         # check what a slicer sees: the STL re-read (vertices merged by position) must still be a closed 2-manifold
         back = trimesh.load(stl_filename, process=True)
         ok = bool(back.is_watertight and back.is_winding_consistent and back.is_volume)
         print(f"STL saved as: {stl_filename} (re-read: watertight {back.is_watertight}, volume {back.volume:.6g}; "
-              f"{len(beams)} beams, {n_joint} joints)")
+              f"{what})")
         if not ok:
             print("  WARNING: the re-read STL is not a closed 2-manifold (check for zero-thickness contacts)")
-        if self.verbose:
-            print(f"Final mesh: {len(combined.vertices)} vertices, {len(combined.faces)} faces, genus {solid.genus()}")
         if visualize:
             self.load_and_view_stl(stl_filename)
-        return combined, trimesh.util.concatenate(coloured)
+        return combined
 
     # ----------- Load and view STL file -----------
     def load_and_view_stl(self, stl_filename):
