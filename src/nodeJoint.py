@@ -54,6 +54,13 @@ def trim_radius(dirs, radii, L, dt=0.002, nphi=180):
     return max(pair.values()), pair
 
 
+def to_stl_mesh(man):
+    """The manifold as an STL stores it: float32 vertices welded, collapsed triangles dropped, re-validated
+    (smoothJoint._float32_weld), so the written STL is exactly a closed 2-manifold."""
+    from smoothJoint import _float32_weld
+    return _float32_weld(man)
+
+
 def to_trimesh(man):
     m = man.to_mesh64()
     return trimesh.Trimesh(np.asarray(m.vert_properties)[:, :3], np.asarray(m.tri_verts, np.int64), process=False)
@@ -241,7 +248,7 @@ def flank_weights(V, node, dirs, radii, reach):
     return np.exp(-(np.maximum(D[0], 0.0) / a) ** 2) * (1.0 - np.exp(-((D[1] - D[0]) / b) ** 2))
 
 
-def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=1.0):
+def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.0):
     """Method C3 (anchored): least-squares fairing, min x^T K x + sum_v w_v |x_v - x0_v|^2, with the thin-plate
     energy K = C^T M^-1 C (cotangent C, lumped area M), the beams fixed beyond t_ring_i + free_len * r_i, and soft
     anchors w = anchor * area / r_min^4 * flank_weights on the beams' flanks, so the crevices fair freely but no beam
@@ -331,3 +338,160 @@ def fair_node(mesh, node, dirs, radii, t_ring, free_len=1.5, cotan=True, core=Tr
         dn[fixed] = 0.0
         Vn = V + dn[:, None] * nrm
     return trimesh.Trimesh(Vn, F, process=False), fixed
+
+
+# ---------------------------------------------------------------- C3 on a whole lattice
+def _strut_rings(z_lo, z_hi, r, dz, lead):
+    """Axial positions of a strut's control rings between its two node rings: the first / last two gaps lead * r
+    long, one edge length apart in between."""
+    a = [z_lo] + ([z_lo + lead * r, z_lo + 2 * lead * r] if lead > 0 else [])
+    b = ([z_hi - 2 * lead * r, z_hi - lead * r] if lead > 0 else []) + [z_hi]
+    if a[-1] >= b[0] - 0.5 * dz:
+        return np.linspace(z_lo, z_hi, max(int(np.ceil((z_hi - z_lo) / dz)), 1) + 1)
+    n = max(int(np.ceil((b[0] - a[-1]) / dz)), 1)
+    return np.concatenate((a, np.linspace(a[-1], b[0], n + 1)[1:-1], b))
+
+
+def lattice_c3(X, conn, radii, z_range=None, levels=3, lead=1.0, free_len=1.0, anchor=10.0, n_min=16):
+    """C3 for a whole lattice (algorithm: notes/13_C3_NodeAlgorithm.md). Every node of degree >= 2 gets a node
+    patch (convex hull of its node rings + core rings, ring caps removed); every strut a control tube between the
+    node rings at its two ends; the whole control mesh is Loop-subdivided, the node regions are faired in one
+    anchored least-squares solve, and the result is trimmed to the plate planes z_range.
+    Returns (watertight manifold, info dict)."""
+    import scipy.sparse as sp
+    import scipy.sparse.linalg as spl
+    from scipy.spatial import ConvexHull, cKDTree
+    X = np.asarray(X, float)
+    conn = np.asarray(conn, int)
+    radii = np.broadcast_to(np.asarray(radii, float), (len(conn),)).copy()
+    r_min = radii.min()
+    nring = np.array([ring_count(r, r_min, n_min) for r in radii])
+    shrink = {n: loop_shrink(n, levels=levels) for n in set(nring.tolist())}
+    rc = np.array([r / shrink[n] for r, n in zip(radii, nring)])
+    length = np.linalg.norm(X[conn[:, 1]] - X[conn[:, 0]], axis=1)
+    E = (X[conn[:, 1]] - X[conn[:, 0]]) / length[:, None]
+    inc = [[] for _ in X]
+    for i, (a, b) in enumerate(conn):
+        inc[a].append((i, 0))
+        inc[b].append((i, 1))
+    # 1-2. trim sphere and node-ring offsets per node
+    toff = {}
+    for n, ends in enumerate(inc):
+        if len(ends) < 2:
+            for i, k in ends:
+                toff[i, k] = 0.0
+            continue
+        dirs = np.array([E[i] if k == 0 else -E[i] for i, k in ends])
+        rr = np.array([radii[i] for i, _ in ends])
+        try:
+            R_s, _ = trim_radius(dirs, rr, np.array([length[i] for i, _ in ends]))
+        except ValueError:                                         # no overlap at all (e.g. collinear struts)
+            R_s = 1.5 * rr.max()
+        t = ring_offsets(dirs, np.array([rc[i] for i, _ in ends]), R_s, core=True)
+        for (i, k), ti in zip(ends, t):
+            toff[i, k] = float(ti)
+    for i in range(len(conn)):
+        if toff[i, 0] + toff[i, 1] > 0.95 * length[i]:
+            raise ValueError(f'strut {i}: node rings overlap ({toff[i, 0]:.2f} + {toff[i, 1]:.2f} > '
+                             f'0.95 * {length[i]:.2f})')
+    # 3. control tubes
+    V, F, nv = [], [], 0
+    ring_at = {}                                                   # (strut, end) -> (first vertex index, n)
+    for i, (a, b) in enumerate(conn):
+        n, e, r = nring[i], E[i], radii[i]
+        u, v = _frame(e)
+        t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        circ = rc[i] * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v))
+        zs = _strut_rings(toff[i, 0], length[i] - toff[i, 1], r, 2 * r * np.sin(np.pi / n), lead)
+        start = nv
+        for z in zs:
+            V.append(X[a] + z * e + circ)
+            nv += n
+        for q in range(len(zs) - 1):
+            F.append(_tube_faces(start + q * n, start + (q + 1) * n, n))
+        ring_at[i, 0] = (start, n)
+        ring_at[i, 1] = (start + (len(zs) - 1) * n, n)
+    # 4. node patches
+    for nd, ends in enumerate(inc):
+        if len(ends) == 1:                                         # free end: flat cap fan
+            i, k = ends[0]
+            s0, n = ring_at[i, k]
+            V.append(X[nd][None])
+            j = np.arange(n)
+            fan = np.column_stack((s0 + j, np.full(n, nv), s0 + (j + 1) % n))
+            F.append(fan if k == 1 else fan[:, ::-1])
+            nv += 1
+            continue
+        idx, ring_of, cores = [], [], []
+        for q, (i, k) in enumerate(ends):
+            s0, n = ring_at[i, k]
+            idx.append(np.arange(s0, s0 + n))
+            ring_of.append(np.full(n, q))
+        for i, k in ends:                                          # core rings at the node point
+            e = E[i] if k == 0 else -E[i]
+            u, v = _frame(e)
+            n = nring[i]
+            t = np.linspace(0, 2 * np.pi, n, endpoint=False) + np.pi / n
+            V.append(X[nd] + rc[i] * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v)))
+            idx.append(np.arange(nv, nv + n))
+            ring_of.append(np.full(n, -1))
+            nv += n
+        Vall = np.vstack(V)
+        idx = np.concatenate(idx)
+        ring_of = np.concatenate(ring_of)
+        H = ConvexHull(Vall[idx])
+        S = H.simplices
+        ro = ring_of[S]
+        S = idx[S[~((ro[:, 0] >= 0) & (ro[:, 0] == ro[:, 1]) & (ro[:, 1] == ro[:, 2]))]]
+        c = Vall[idx].mean(0)
+        nrm = np.cross(Vall[S[:, 1]] - Vall[S[:, 0]], Vall[S[:, 2]] - Vall[S[:, 0]])
+        flip = (nrm * (Vall[S].mean(1) - c)).sum(1) < 0
+        S[flip] = S[flip][:, ::-1]
+        F.append(S)
+        V = [Vall]
+    ctrl = trimesh.Trimesh(np.vstack(V), np.vstack(F), process=False)
+    ctrl.remove_unreferenced_vertices()
+    if not ctrl.is_watertight:
+        raise RuntimeError('lattice control mesh is not closed')
+    trimesh.repair.fix_winding(ctrl)
+    if ctrl.volume < 0:
+        ctrl.invert()
+    # 5. Loop subdivision
+    V2, F2 = trimesh.remesh.subdivide_loop(ctrl.vertices, ctrl.faces, iterations=levels)
+    # 6. anchored fairing of all node regions in one solve
+    fixed = np.zeros(len(V2), bool)
+    for i, (a, b) in enumerate(conn):
+        w = (V2 - X[a]) @ E[i]
+        rad = np.linalg.norm((V2 - X[a]) - np.outer(w, E[i]), axis=1)
+        fixed |= ((w > toff[i, 0] + free_len * radii[i]) & (w < length[i] - toff[i, 1] - free_len * radii[i])
+                  & (np.abs(rad - radii[i]) < 0.05 * radii[i]))
+    for nd, ends in enumerate(inc):                                # free ends stay as subdivided
+        if len(ends) == 1:
+            fixed |= np.linalg.norm(V2 - X[nd], axis=1) < 3 * radii[ends[0][0]]
+    flank = np.zeros(len(V2))
+    owner = cKDTree(X).query(V2)[1]
+    for nd, ends in enumerate(inc):
+        sel = np.where(owner == nd)[0]
+        if len(ends) < 2 or len(sel) == 0:
+            continue
+        dirs = np.array([E[i] if k == 0 else -E[i] for i, k in ends])
+        rr = np.array([radii[i] for i, _ in ends])
+        reach = np.array([toff[i, k] for i, k in ends]) + free_len * rr + 2 * rr
+        flank[sel] = flank_weights(V2[sel], X[nd], dirs, rr, reach)
+    Lc = cotan_laplacian(V2, F2)
+    area = 0.5 * np.linalg.norm(np.cross(V2[F2[:, 1]] - V2[F2[:, 0]], V2[F2[:, 2]] - V2[F2[:, 0]]), axis=1)
+    M = sp.diags(np.bincount(F2.ravel(), weights=np.repeat(area / 3, 3), minlength=len(V2)))
+    K = (Lc.T @ M @ Lc).tocsr()
+    wv = anchor * M.diagonal() / r_min ** 4 * flank
+    A = (K + sp.diags(wv)).tocsr()
+    fr, fx = np.where(~fixed)[0], np.where(fixed)[0]
+    solve = spl.factorized(A[fr][:, fr].tocsc())
+    Vn = V2.copy()
+    for k in range(3):
+        Vn[fr, k] = solve(wv[fr] * V2[fr, k] - A[fr][:, fx] @ V2[fx, k])
+    man = m3.Manifold(m3.Mesh(np.ascontiguousarray(Vn, np.float32), np.ascontiguousarray(F2, np.uint32)))
+    if man.status() != m3.Error.NoError:
+        raise RuntimeError(f'faired lattice is not a manifold: {man.status()}')
+    if z_range is not None:                                        # 7. plate planes
+        man = man.trim_by_plane((0.0, 0.0, 1.0), float(z_range[0])).trim_by_plane((0.0, 0.0, -1.0), -float(z_range[1]))
+    return man, dict(control_faces=len(ctrl.faces), free_vertices=len(fr), ring_offsets=toff)

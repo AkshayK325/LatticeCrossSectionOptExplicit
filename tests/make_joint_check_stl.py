@@ -3,7 +3,8 @@
 Per cell, three joints:
   <cell>_hull_ext025.stl        convex hull of the strut end caps, extension -0.025 (the published optBeam setting)
   <cell>_abaqus_cylsphere.stl   cylinders + max-radius node spheres (the validated Abaqus solid models)
-  <cell>_smooth.stl             smoothJoint: tapered flares + rolling-ball fillets (smooth_joints=True)
+  <cell>_c3.stl                 C3 node joints (nodeJoint.lattice_c3: hull + core rings, Loop subdivision, anchored
+                                fairing; notes/13_C3_NodeAlgorithm.md)
 Run: PYTHONPATH=src:abaqus python tests/make_joint_check_stl.py [cell ...]
 """
 import contextlib
@@ -17,7 +18,7 @@ import numpy as np
 import trimesh
 
 import cases
-import smoothJoint as sj
+import nodeJoint as nj
 from beamBuild import BeamStructureSTL
 from latticeSetup import example3
 
@@ -72,10 +73,25 @@ def max_dihedral(m, H):
     return a.max(), np.quantile(a, 0.999)
 
 
+def concave_radius(m, H):
+    """Tightest concave radius of curvature (edge-based normal curvature at the vertices), away from the plates."""
+    n = m.vertex_normals
+    E = m.edges_unique
+    d = m.vertices[E[:, 1]] - m.vertices[E[:, 0]]
+    L2 = (d * d).sum(1)
+    kmin = np.full(len(m.vertices), np.inf)
+    np.minimum.at(kmin, E[:, 0], -2 * (n[E[:, 0]] * d).sum(1) / L2)
+    np.minimum.at(kmin, E[:, 1], 2 * (n[E[:, 1]] * d).sum(1) / L2)
+    z = m.vertices[:, 2]
+    keep = np.minimum(np.abs(z), np.abs(z - H)) > 0.1
+    c = -kmin[keep]
+    return 1.0 / c.max() if (c > 0).any() else np.inf
+
+
 def main(only):
     os.makedirs(OUT, exist_ok=True)
-    print('| cell | joint | faces | volume mm3 | max dihedral | 99.9 % | watertight | time s |')
-    print('|---|---|---|---|---|---|---|---|')
+    print('| cell | joint | faces | volume mm3 | max dihedral | 99.9 % | tightest concave radius mm | watertight | time s |')
+    print('|---|---|---|---|---|---|---|---|---|')
     for tag, (cell, es, spec, nx) in CELLS.items():
         if only and tag not in only:
             continue
@@ -94,12 +110,14 @@ def main(only):
         cylsphere(X, C, rs, H).export(f'{OUT}/{tag}_abaqus_cylsphere.stl')
         builds['abaqus_cylsphere'] = time.time() - t
         t = time.time()
-        sj.build_smooth_stl(X, C, rs, f'{OUT}/{tag}_smooth.stl', z_range=(0.0, H))
-        builds['smooth'] = time.time() - t
+        man, _ = nj.lattice_c3(X, C, rs, z_range=(0.0, H))
+        nj.to_stl_mesh(man).export(f'{OUT}/{tag}_c3.stl')
+        builds['c3'] = time.time() - t
         for meth, dt in builds.items():
             m = trimesh.load(f'{OUT}/{tag}_{meth}.stl', process=True)
             mx, q = max_dihedral(m, H)
-            print(f'| {tag} | {meth} | {len(m.faces) / 1e3:.1f}k | {m.volume:.2f} | {mx:.0f} | {q:.0f} | {m.is_watertight} | {dt:.0f} |',
+            print(f'| {tag} | {meth} | {len(m.faces) / 1e3:.1f}k | {m.volume:.2f} | {mx:.0f} | {q:.0f} | '
+                  f'{concave_radius(m, H):.3f} | {m.is_watertight} | {dt:.0f} |',
                   flush=True)
 
 
