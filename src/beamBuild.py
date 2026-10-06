@@ -5,6 +5,10 @@ import triangle as tr
 
 class BeamStructureSTL:
     """Class for building and visualizing beam structures as 3D meshes."""
+    # anti-coincidence perturbations for the manifold union (relative to the section size; << print resolution)
+    ROT = 2e-3      # section turned by ~ROT rad per strut (breaks coplanar facets of collinear / parallel struts)
+    OVL = 1e-2      # strut overlap into the joint
+    SHR = 1e-2      # joint-hull end caps shrunk about the strut axis
     
     def __init__(self):
         self.verbose = False
@@ -164,103 +168,127 @@ class BeamStructureSTL:
             print(f"Error creating convex hull: {e}")
             return None
 
+    # ----------- Robust solid parts (manifold3d) -----------
+    @staticmethod
+    def _clean_section(section):
+        """(n, 2) polygon from a flattened section: consecutive and closing duplicates removed."""
+        S = np.asarray(section, dtype=float).reshape(-1, 2)
+        keep = np.ones(len(S), dtype=bool)
+        keep[1:] = np.linalg.norm(np.diff(S, axis=0), axis=1) > 1e-12
+        S = S[keep]
+        if len(S) > 2 and np.linalg.norm(S[0] - S[-1]) <= 1e-12:
+            S = S[:-1]
+        if len(S) < 3:
+            raise ValueError("cross-section needs at least 3 distinct points")
+        return S
+
+    @staticmethod
+    def _jitter(i, scale):
+        """Deterministic per-part factor in [1, 2): makes exact coincidences between different parts impossible."""
+        return scale * (1.0 + ((i * 0.6180339887498949) % 1.0))
+
+    def _beam_part(self, P0, P1, v, section, extension=0.0, joint_nodes=None, start_idx=None, end_idx=None, k=0):
+        """One strut as a valid closed manifold: the section extruded along the beam (any simple polygon, convex or
+        not, either winding). Returns (manifold, end-cap points at P0, end-cap points at P1)."""
+        import manifold3d as m3
+        d = P1 - P0
+        L = np.linalg.norm(d)
+        if L == 0:
+            raise ValueError("Zero-length beam detected")
+        u = d / L
+        if joint_nodes is not None:
+            if start_idx in joint_nodes:
+                P0 = P0 - L * extension * u
+            if end_idx in joint_nodes:
+                P1 = P1 + L * extension * u
+            L = np.linalg.norm(P1 - P0)
+        ex, ey, ez = self.local_frame(P0, P1, v)
+        S = self._clean_section(section)
+        # anti-coincidence perturbations (all << print resolution), different for every strut k:
+        #  - section turned by ~1e-4 rad: collinear / parallel struts (e.g. BCC diagonals through the centre node)
+        #    would otherwise have exactly coplanar side facets where they overlap
+        #  - overlap into the joint ~1e-3 of the section size, and hull caps shrunk ~2e-3 (below)
+        a = self._jitter(k, self.ROT)
+        S = S @ np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]])
+        # end caps for the joint hulls, shrunk by 0.2% about the strut axis: a hull face can then never be coplanar
+        # with (or share vertices of) a strut face, which would leave zero-thickness slivers / pinch points
+        cap0 = P0 + (1.0 - self._jitter(k + 7, self.SHR)) * S @ np.vstack((ex, ey))
+        cap1 = cap0 + (P1 - P0)
+        # tiny overlap into the joints so that strut and hull never share vertices / coplanar faces exactly (exact
+        # coincidences are resolved symbolically by manifold3d but leave pinch points once an STL is re-merged)
+        eps = self._jitter(k + 3, self.OVL) * float(np.max(np.abs(S)))
+        q0 = P0 - eps * u if (joint_nodes is not None and start_idx in joint_nodes) else P0
+        q1 = P1 + eps * u if (joint_nodes is not None and end_idx in joint_nodes) else P1
+        cs = m3.CrossSection([S.tolist()], m3.FillRule.NonZero)          # either winding
+        part = cs.extrude(float(np.linalg.norm(q1 - q0))).transform(np.column_stack((ex, ey, ez, q0)).tolist())
+        return part, cap0, cap1
+
+    @staticmethod
+    def _area(S):
+        x, y = S[:, 0], S[:, 1]
+        return 0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(np.roll(x, -1), y))
+
+    @staticmethod
+    def _to_trimesh(m):
+        mesh = m.to_mesh64() if hasattr(m, 'to_mesh64') else m.to_mesh()
+        return trimesh.Trimesh(vertices=np.asarray(mesh.vert_properties)[:, :3].astype(float),
+                               faces=np.asarray(mesh.tri_verts).astype(np.int64), process=False)
+
     # ----------- Build full structure -----------
     def build_structure(self, nodes, beams, sections, orientations, sections_color,
-        extension=0.00, stl_filename="structure.stl", visualize=False):
-        """Build complete beam structure and save as STL."""
-        joint_nodes = self.find_joints(beams)
-        meshes = []
+        extension=0.00, stl_filename="structure.stl", visualize=False, z_range=None):
+        """Build the beam structure and save a WATERTIGHT STL.
 
+        Struts: each cross-section (any simple polygon, any radius / shape per strut) extruded along its beam with
+        manifold3d. Joints: convex hull of the strut end caps at every node shared by several beams (as before).
+        All parts are fused with manifold3d's exact boolean union, which always returns a closed 2-manifold (the
+        previous trimesh union fell back to concatenating overlapping meshes when a boolean failed, which gave
+        non-watertight STLs). z_range=(z_lo, z_hi): optional trim to the plate planes (flat faces at the plates,
+        as in the validated solid models). Returns (combined trimesh, coloured concatenation for viewing)."""
+        import manifold3d as m3
+        nodes = np.asarray(nodes, dtype=float)
+        joint_nodes = self.find_joints(beams)
+        parts, caps, coloured = [], {}, []
         for i, (a, b) in enumerate(beams):
-            P0 = np.array(nodes[a])
-            P1 = np.array(nodes[b])
-            v = np.array(orientations[i])
-            if self.verbose:
-                print(f"Building beam {i} from node {a} to {b}")
-            mesh = self.sweep_beam(P0, P1, v, sections[i],
-                              extension=extension,
-                              joint_nodes=joint_nodes,
-                              start_idx=a,
-                              end_idx=b)
-            mesh.visual.face_colors = sections_color[i] # type: ignore
-            meshes.append(mesh)
-        
-        joint_method = 'hull'
-        # Add joint connectors
-        if joint_method and joint_method != 'none':
-            joint_beam_map = {node: [] for node in joint_nodes}
-            for i, (a, b) in enumerate(beams):
-                if a in joint_nodes:
-                    joint_beam_map[a].append(i)
-                if b in joint_nodes:
-                    joint_beam_map[b].append(i)
-            
-            for joint_idx in joint_nodes:
-                joint_pos = nodes[joint_idx]
-                connected_beams = joint_beam_map[joint_idx]
-                
-                if len(connected_beams) > 1:
-                    joint_connector = self.create_joint_connector_from_faces(
-                        joint_pos, connected_beams, meshes, beams, nodes 
-                    )
-                    if joint_connector is not None:
-                        meshes.append(joint_connector)
-                        if self.verbose:
-                            print(f"Added joint connector at joint {joint_idx}, volume={joint_connector.volume:.6f}")
-        if self.verbose:
-            # Check mesh diagnostics
-            for i, tri_mesh in enumerate(meshes):
-                print(f"Mesh {i}: Watertight={tri_mesh.is_watertight}, Volume={tri_mesh.is_volume}, "
-                      f"Actual_volume={tri_mesh.volume:.6f}")
-                print(f"  - Euler number: {tri_mesh.euler_number}")
-                print(f"  - Number of faces: {len(tri_mesh.faces)}")
-                print(f"  - Number of vertices: {len(tri_mesh.vertices)}")
-        
-        # Combine meshes using boolean union
-        if self.verbose:
-            print("Attempting boolean union...")
-        combined = meshes[0].copy()
-        combined_colored = meshes[0].copy()
-        
-        for i, mesh in enumerate(meshes[1:], 1):
-            try:
-                if self.verbose:
-                    print(f"Unioning mesh {i}...")
-                result = trimesh.boolean.union([combined, mesh])
-                combined_colored = trimesh.util.concatenate([combined_colored, mesh])
-                if result is not None:
-                    if isinstance(result, list):
-                        combined = result[0]
-                    else:
-                        combined = result
-                    if self.verbose:
-                        print(f"  Success: {len(combined.vertices)} vertices, {len(combined.faces)} faces")
-                else:
-                    print(f"  Boolean failed, using concatenation fallback")
-                    combined = trimesh.util.concatenate([combined, mesh])
-                    
-            except Exception as e:
-                print(f"  Boolean union failed: {e}")
-                print(f"  Using concatenation fallback for mesh {i}")
-                combined = trimesh.util.concatenate([combined, mesh])
-        
-        # Final cleanup
-        combined.merge_vertices()
-        combined.update_faces(combined.nondegenerate_faces())
-        
-        # Save as STL
+            part, c0, c1 = self._beam_part(nodes[a], nodes[b], np.asarray(orientations[i], dtype=float), sections[i],
+                                           extension=extension, joint_nodes=joint_nodes, start_idx=a, end_idx=b, k=i)
+            parts.append(part)
+            caps.setdefault(a, []).append(c0)
+            caps.setdefault(b, []).append(c1)
+            tm = self._to_trimesh(part)
+            tm.visual.face_colors = sections_color[i]  # type: ignore
+            coloured.append(tm)
+        n_joint = 0
+        for node in joint_nodes:
+            pts = np.vstack(caps[node])
+            if len(caps[node]) > 1 and len(pts) >= 4:
+                hull = m3.Manifold.hull_points(pts.tolist())
+                if not hull.is_empty():
+                    parts.append(hull)
+                    coloured.append(self._to_trimesh(hull))
+                    n_joint += 1
+        solid = m3.Manifold.batch_boolean(parts, m3.OpType.Add)
+        if z_range is not None:
+            lo, hi = solid.bounding_box()[:3], solid.bounding_box()[3:]
+            pad = 1.0 + float(np.max(np.subtract(hi, lo)))
+            slab = m3.Manifold.cube((2 * pad + hi[0] - lo[0], 2 * pad + hi[1] - lo[1], z_range[1] - z_range[0]))
+            solid = solid ^ slab.translate((lo[0] - pad, lo[1] - pad, z_range[0]))
+        if solid.status() != m3.Error.NoError or solid.is_empty():
+            raise RuntimeError(f"manifold union failed: {solid.status()}")
+        combined = self._to_trimesh(solid)
         combined.export(stl_filename)
-        print(f"STL saved as: {stl_filename}")
-        
+        # check what a slicer sees: the STL re-read (vertices merged by position) must still be a closed 2-manifold
+        back = trimesh.load(stl_filename, process=True)
+        ok = bool(back.is_watertight and back.is_winding_consistent and back.is_volume)
+        print(f"STL saved as: {stl_filename} (re-read: watertight {back.is_watertight}, volume {back.volume:.6g}; "
+              f"{len(beams)} beams, {n_joint} joints)")
+        if not ok:
+            print("  WARNING: the re-read STL is not a closed 2-manifold (check for zero-thickness contacts)")
         if self.verbose:
-            # Check final mesh
-            print(f"Final combined mesh: Watertight={combined.is_watertight}, "
-                  f"Volume={combined.is_volume}, Actual_volume={combined.volume:.6f}")
-        
+            print(f"Final mesh: {len(combined.vertices)} vertices, {len(combined.faces)} faces, genus {solid.genus()}")
         if visualize:
             self.load_and_view_stl(stl_filename)
-        
-        return combined, combined_colored
+        return combined, trimesh.util.concatenate(coloured)
 
     # ----------- Load and view STL file -----------
     def load_and_view_stl(self, stl_filename):
