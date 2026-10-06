@@ -64,3 +64,19 @@ def test_trim_to_plates_and_volume_vs_exact(tmp_path):
     assert m.is_watertight
     assert m.bounds[0][2] == pytest.approx(0.0, abs=1e-6) and m.bounds[1][2] == pytest.approx(H, abs=1e-6)
     assert m.volume == pytest.approx(286.1, rel=0.01)                 # OCC cylinders + spheres, trimmed: 286.11
+
+
+@pytest.mark.parametrize('ext,smooth', [(-0.1, False), (-0.2, False), (-0.1, True), (-0.2, True)])
+def test_shortened_struts_and_rounded_joints(tmp_path, ext, smooth):
+    """The print settings of optBeam (extension -0.1 / -0.2: struts shortened at the joints, hull spans the gap),
+    with and without rounded joints, on C4 and BCC: still a closed 2-manifold when re-read."""
+    import trimesh
+    for cell in ('C4', 'B'):
+        lat = example3(elemSize=1.0, nx=1, ny=1, name=cell)
+        X, C = lat['X'], lat['conn']
+        f = str(tmp_path / 's.stl')
+        BeamStructureSTL().build_structure(X, C, [_circle(0.6)] * len(C), [np.array([0.0, 0.0, 1.0])] * len(C),
+                                           [[200, 200, 200, 255]] * len(C), stl_filename=f, extension=ext,
+                                           smooth_joints=smooth, z_range=(0.0, X[:, 2].max()))
+        m = trimesh.load(f, process=True)
+        assert m.is_watertight and m.is_volume, (cell, ext, smooth)

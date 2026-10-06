@@ -100,7 +100,7 @@ def element_factors(lat, r_beam, which='mean', **kw):
     return se, prof
 
 
-def _slice_moments(Pn, e1, e2, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay=None, hulls=()):
+def _slice_moments(Pn, e1, e2, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay=None, hulls=(), own=True):
     """Connected fused section in the slice (frame e1 = element y, e2 = element z): ratios to the bare strut of
     (area, I about y = int z^2, I about z = int y^2) about the section centroid, each >= 1.
     decay: None (all fused material fully effective: plane sections through the whole union, an upper bound) or a
@@ -110,7 +110,7 @@ def _slice_moments(Pn, e1, e2, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay=Non
     u = np.linspace(-half, half, n_grid)
     Y, Z = np.meshgrid(u, u, indexing='ij')
     P = Pn[None, None, :] + Y[..., None] * e1 + Z[..., None] * e2
-    inside = Y * Y + Z * Z <= ra * ra
+    inside = (Y * Y + Z * Z <= ra * ra) if own else np.zeros(Y.shape, dtype=bool)
     for p0, tb, Lb, rb in cyl:
         d = P - p0
         tt = d @ tb
@@ -139,9 +139,11 @@ def _slice_moments(Pn, e1, e2, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay=Non
     return max(A / A0, 1.0), max(Iy / I0, 1.0), max(Iz / I0, 1.0)
 
 
-def _node_hulls(X, C, r_beam, n_seg=32):
+def _node_hulls(X, C, r_beam, n_seg=32, extension=0.0, rounded=False):
     """beamBuild.BeamStructureSTL joints: per node, the convex hull (Delaunay) of the circular end caps (own
-    radius each) of all struts meeting there, each cap centred on the node and normal to its strut."""
+    radius each) of all struts meeting there, each cap normal to its strut and placed at the strut end, which is
+    moved by extension * L along the strut (negative = shortened into the strut: the hull then spans the gap).
+    rounded: the hull bulged as beamBuild._round_hull (membership by the hull of the rounded vertices)."""
     from scipy.spatial import Delaunay
     th = np.linspace(0, 2 * np.pi, n_seg + 1)[:-1]
     hulls = {}
@@ -152,16 +154,24 @@ def _node_hulls(X, C, r_beam, n_seg=32):
         pts = []
         for b in inc:
             o = C[b, 1] if C[b, 0] == n else C[b, 0]
-            t = (X[o] - X[n]) / np.linalg.norm(X[o] - X[n])
+            L = np.linalg.norm(X[o] - X[n])
+            t = (X[o] - X[n]) / L
             a = np.array([1.0, 0, 0]) if abs(t[0]) < 0.9 else np.array([0, 1.0, 0])
             e1 = np.cross(t, a); e1 /= np.linalg.norm(e1)
             e2 = np.cross(t, e1)
-            pts.append(X[n] + r_beam[b] * (np.cos(th)[:, None] * e1 + np.sin(th)[:, None] * e2))
-        hulls[n] = Delaunay(np.vstack(pts))
+            c0 = X[n] - extension * L * t                      # extension < 0: cap moved into the strut
+            pts.append(c0 + r_beam[b] * (np.cos(th)[:, None] * e1 + np.sin(th)[:, None] * e2))
+        P = np.vstack(pts)
+        if rounded:
+            import trimesh
+            from beamBuild import BeamStructureSTL
+            P = BeamStructureSTL._round_hull(trimesh.convex.convex_hull(P)).vertices
+        hulls[n] = Delaunay(P)
     return hulls
 
 
-def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0, decay=None, joint_shape='sphere'):
+def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0, decay=None, joint_shape='sphere',
+                          extension=0.0, rounded=False):
     """joint_shape: 'sphere' (gmsh/Abaqus validation solids: sphere of the largest radius at each node) or 'hull'
     (beamBuild print STLs: convex hull of the strut end caps, which always lies inside that sphere)."""
     """Per-element (ne, 6) factors for the resultants [N, T, My1, Mz1, My2, Mz2]: series averages over each
@@ -173,7 +183,8 @@ def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0,
     for b, (i, j) in enumerate(C):
         rn[i], rn[j] = max(rn[i], r_beam[b]), max(rn[j], r_beam[b])
     prof = []
-    node_hulls = _node_hulls(X, C, r_beam) if joint_shape == 'hull' else {}
+    node_hulls = _node_hulls(X, C, r_beam, extension=extension, rounded=rounded) if joint_shape == 'hull' else {}
+    ext_l = -min(extension, 0.0) if joint_shape == 'hull' else 0.0      # print struts stop this fraction short
     for b, (i, j) in enumerate(C):
         p, q = X[i], X[j]
         L = np.linalg.norm(q - p)
@@ -183,17 +194,20 @@ def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0,
         z = np.cross(x, y)
         cyl = []
         for c in np.nonzero(np.isin(C[:, 0], (i, j)) | np.isin(C[:, 1], (i, j)))[0]:
-            if c == b:
-                continue
             p0, q0 = X[C[c, 0]], X[C[c, 1]]
             Lc = np.linalg.norm(q0 - p0)
-            cyl.append((p0, (q0 - p0) / Lc, Lc, r_beam[c]))
+            tc = (q0 - p0) / Lc
+            if c == b and ext_l == 0.0:
+                continue
+            # print geometry: each strut only between its shortened ends (the strut itself too, if shortened)
+            cyl.append((p0 + ext_l * Lc * tc, tc, (1 - 2 * ext_l) * Lc, r_beam[c]))
         sph = [(X[i], rn[i]), (X[j], rn[j])] if joint_shape == 'sphere' else []
         hl = [node_hulls[n] for n in (i, j) if n in node_hulls]
         ra = r_beam[b]
         half = half_factor * max(ra, rn[i], rn[j])
         sgrid = np.arange(0.0, L + 1e-12, ds_frac * ra)
-        R = np.array([_slice_moments(p + sv * x, y, z, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay, hl) for sv in sgrid])
+        R = np.array([_slice_moments(p + sv * x, y, z, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay, hl, own=ext_l == 0.0)
+                      for sv in sgrid])
         prof.append((sgrid, R))
     F = np.ones((len(connr), 6))
     for e, (a, b) in enumerate(connr):

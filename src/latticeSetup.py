@@ -203,7 +203,9 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
             rb[boe_np] = r_elem.detach().cpu().numpy()
             if joint.get('which', 'aniso') == 'aniso':
                 se, _ = jointSection.element_factors_aniso(lat, rb, decay=joint.get('decay'),
-                                                           joint_shape=joint.get('shape', 'sphere'))
+                                                           joint_shape=joint.get('shape', 'sphere'),
+                                                           extension=joint.get('extension', 0.0),
+                                                           rounded=joint.get('rounded', False))
             else:
                 se, _ = jointSection.element_factors(lat, rb, which=joint['which'])
             sj = torch.as_tensor(se, dtype=A.dtype)               # ponytail: not differentiable in r yet

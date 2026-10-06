@@ -50,6 +50,30 @@ class BeamStructureSTL:
         tri_output = tr.triangulate(tri_input, 'pQ')  
         return tri_output['triangles']
 
+    # ----------- Round a convex hull toward its circumsphere -----------
+    @staticmethod
+    def _round_hull(hull_mesh, bulge=0.7, subdivisions=2):
+        """Inflate a convex hull for rounded joints, lip-free at beam cross-sections (from the earlier version).
+
+        Each new midpoint vertex is blended toward a mean-radius sphere weighted by its distance from the nearest
+        original hull vertex (which lies on a beam cross-section ring). Weight 0 at the originals, so they never
+        move (no lip); weight ~1 deep inside a hull face, so full bulge there (smooth rounding). Mean radius (not
+        the circumsphere max) keeps the bulge contained."""
+        n_orig = len(hull_mesh.vertices)
+        v, f = hull_mesh.vertices.copy(), hull_mesh.faces.copy()
+        for _ in range(subdivisions):
+            v, f = trimesh.remesh.subdivide(v, f)
+        centroid = v[:n_orig].mean(axis=0)
+        r = np.linalg.norm(v[:n_orig] - centroid, axis=1).mean()
+        diffs = v[n_orig:, None] - v[:n_orig][None]
+        d_nearest = np.linalg.norm(diffs, axis=2).min(axis=1)
+        weights = d_nearest / max(d_nearest.max(), 1e-10)
+        dirs = v[n_orig:] - centroid
+        norms = np.linalg.norm(dirs, axis=1, keepdims=True).clip(1e-10)
+        v_sphere = centroid + dirs / norms * r
+        v[n_orig:] += weights[:, None] * bulge * (v_sphere - v[n_orig:])
+        return trimesh.Trimesh(vertices=v, faces=f, process=True)
+
     # ----------- Find joint nodes -----------
     def find_joints(self, beams):
         """Find nodes that connect to multiple beams (joints)."""
@@ -236,7 +260,7 @@ class BeamStructureSTL:
 
     # ----------- Build full structure -----------
     def build_structure(self, nodes, beams, sections, orientations, sections_color,
-        extension=0.00, stl_filename="structure.stl", visualize=False, z_range=None):
+        extension=0.00, stl_filename="structure.stl", visualize=False, z_range=None, smooth_joints=False):
         """Build the beam structure and save a WATERTIGHT STL.
 
         Struts: each cross-section (any simple polygon, any radius / shape per strut) extruded along its beam with
@@ -244,7 +268,9 @@ class BeamStructureSTL:
         All parts are fused with manifold3d's exact boolean union, which always returns a closed 2-manifold (the
         previous trimesh union fell back to concatenating overlapping meshes when a boolean failed, which gave
         non-watertight STLs). z_range=(z_lo, z_hi): optional trim to the plate planes (flat faces at the plates,
-        as in the validated solid models). Returns (combined trimesh, coloured concatenation for viewing)."""
+        as in the validated solid models). extension: strut end shift at joints as a fraction of the strut length
+        (negative = shorten, e.g. -0.1: the joint hull then spans the gap). smooth_joints: rounded hulls
+        (_round_hull). Returns (combined trimesh, coloured concatenation for viewing)."""
         import manifold3d as m3
         nodes = np.asarray(nodes, dtype=float)
         joint_nodes = self.find_joints(beams)
@@ -263,6 +289,12 @@ class BeamStructureSTL:
             pts = np.vstack(caps[node])
             if len(caps[node]) > 1 and len(pts) >= 4:
                 hull = m3.Manifold.hull_points(pts.tolist())
+                if smooth_joints and not hull.is_empty():
+                    rh = self._round_hull(self._to_trimesh(hull))
+                    if not rh.is_volume:
+                        trimesh.repair.fix_normals(rh)
+                    rounded = m3.Manifold(m3.Mesh(np.asarray(rh.vertices, np.float32), np.asarray(rh.faces, np.uint32)))
+                    hull = rounded if rounded.status() == m3.Error.NoError and not rounded.is_empty() else hull
                 if not hull.is_empty():
                     parts.append(hull)
                     coloured.append(self._to_trimesh(hull))
