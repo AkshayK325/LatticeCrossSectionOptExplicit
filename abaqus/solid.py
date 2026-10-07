@@ -149,3 +149,66 @@ def tet_quality(P, T):
     A = np.stack([np.linalg.norm(np.cross(b - a, c - a), axis=1), np.linalg.norm(np.cross(b - a, d - a), axis=1),
                   np.linalg.norm(np.cross(c - a, d - a), axis=1), np.linalg.norm(np.cross(c - b, d - b), axis=1)], 1)
     return V, 3 * V / (A.max(1) / 2)
+
+
+def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False, algo3d=10, extra_opt=(), algo2d=6,
+                  size_min=0.5):
+    """Solid tet mesh of a watertight STL (e.g. an FHS lattice, nodeJoint.lattice_fhs): gmsh splits the discrete
+    surface at sharp edges (> angle deg: the plate rims; the FHS fillets are smooth, < 20 deg), reparametrises the
+    patches, remeshes the surface at ~h (finer where curved: `curvature` elements per 2 pi) and fills it with linear
+    tets (HXT + Netgen optimisation), so the solid mesh is independent of the STL's fine triangulation.
+    Returns (P, T) 0-based."""
+    import gmsh
+    gmsh.initialize()
+    gmsh.option.setNumber('General.Terminal', 1 if verbose else 0)
+    gmsh.merge(str(stl))
+    gmsh.model.mesh.classifySurfaces(np.radians(angle), True, True, np.pi)
+    gmsh.model.mesh.createGeometry()
+    surfs = [s[1] for s in gmsh.model.getEntities(2)]
+    loop = gmsh.model.geo.addSurfaceLoop(surfs)
+    gmsh.model.geo.addVolume([loop])
+    gmsh.model.geo.synchronize()
+    gmsh.option.setNumber('Mesh.MeshSizeMin', size_min * h)
+    gmsh.option.setNumber('Mesh.MeshSizeMax', h)
+    gmsh.option.setNumber('Mesh.MeshSizeFromCurvature', curvature)
+    gmsh.option.setNumber('Mesh.Algorithm', algo2d)
+    gmsh.option.setNumber('Mesh.Algorithm3D', algo3d)
+    gmsh.option.setNumber('Mesh.Optimize', 1)
+    gmsh.option.setNumber('Mesh.OptimizeNetgen', 1 if optimize else 0)
+    gmsh.model.mesh.generate(3)
+    for method in extra_opt:                                       # e.g. 'Netgen', 'Relocate3D'
+        gmsh.model.mesh.optimize(method, niter=3)
+    tags, coords, _ = gmsh.model.mesh.getNodes()
+    P = coords.reshape(-1, 3)
+    idx = {int(t): i for i, t in enumerate(tags)}
+    etypes, _, enodes = gmsh.model.mesh.getElements(3)
+    T = np.array([idx[int(n)] for n in enodes[list(etypes).index(4)]]).reshape(-1, 4)
+    gmsh.finalize()
+    used = np.unique(T)
+    remap = -np.ones(len(P), int)
+    remap[used] = np.arange(len(used))
+    P, T = P[used], remap[T]
+    v = np.einsum('ij,ij->i', np.cross(P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]]), P[T[:, 3]] - P[T[:, 0]])
+    T[v < 0] = T[v < 0][:, [0, 2, 1, 3]]
+    return P, T
+
+
+def remove_boundary_slivers(P, T, min_alt, max_iter=20):
+    """Delete flat boundary tets (shortest altitude < min_alt with >= 2 faces on the boundary): they bridge two
+    surface triangles across a fold of a curved surface; removing one shaves a negligible wedge and leaves a valid
+    mesh (its other faces become boundary). Repeats until none is left or nothing changes. Returns (P, T, removed)."""
+    removed = 0
+    for _ in range(max_iter):
+        F = np.sort(np.vstack([T[:, [0, 1, 2]], T[:, [0, 1, 3]], T[:, [0, 2, 3]], T[:, [1, 2, 3]]]), 1)
+        _, inv, cnt = np.unique(F, axis=0, return_inverse=True, return_counts=True)
+        nbnd = (cnt[inv.ravel()] == 1).reshape(4, -1).sum(0)
+        _, alt = tet_quality(P, T)
+        kill = (alt < min_alt) & (nbnd >= 2)
+        if not kill.any():
+            break
+        T = T[~kill]
+        removed += int(kill.sum())
+    used = np.unique(T)
+    remap = -np.ones(len(P), int)
+    remap[used] = np.arange(len(used))
+    return P[used], remap[T], removed

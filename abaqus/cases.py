@@ -652,6 +652,21 @@ B2h = dict(_b2_topo('O', 1.5, 0.045, 'h'), **_SMALL)
 B2a_f = dict(B2a, name='B2a_unit_cell_solid_h027', h=0.27, title=B2a['title'].replace('B2a', 'B2a-fine').replace('h 0.4 mm', 'h 0.27 mm'))
 
 
+# ------------------------------------------------------------------------------------------------ F (FHS solids)
+# F = solids of the PRINT geometry: FHS (Faired Hull-Subdivision) node joints (src/nodeJoint.lattice_fhs,
+# notes/13_FHS_NodeAlgorithm.md) instead of the cylinder + joint-sphere joints of B2. Same rig, loading, material,
+# contact and output as the B2 twin, so F vs B2 isolates the joint shape. Pipeline: FHS STL -> gmsh surface
+# remesh + tets (solid.gmsh_from_stl, no curvature sizing: the discrete STL's facet noise would refine it) ->
+# boundary slivers removed -> C3D10M; the few remaining small tets get fixed mass scaling BELOW MIN to the
+# time increment of the B2 twin's smallest element (added mass reported in the header and by Abaqus in the .sta).
+F1a = dict(B2a, name='F1a_unit_cell_C4_FHS_solid_r080_h040', geometry='fhs', twin='B2a',
+           title='F1a: ONE C4 unit cell (12.7 mm cube, 36 struts, r 0.8) as a SOLID with FHS node joints (the print '
+                 'geometry: Faired Hull-Subdivision, src/nodeJoint.py) instead of cylinders + joint spheres; gmsh tets '
+                 'from the FHS STL, C3D10M, h 0.4 mm; otherwise identical to B2a: bottom face clamped, top face tied '
+                 'to a rigid plate carrying the impactor (0.75/9 J at 6 m/s); linear elastic E = 40 MPa, nu 0.49; '
+                 'frictionless general self-contact')
+
+
 _B2_cache = {}
 
 
@@ -660,17 +675,28 @@ def b2_mesh(c=B2a):
     import sys
     sys.path.insert(0, str(ROOT))
     import solid
-    key = (c.get('cell', 'C4'), c['nx'], c['ny'], c['h'], c['r'], tuple(c.get('rg', ())))
+    key = (c.get('cell', 'C4'), c['nx'], c['ny'], c['h'], c['r'], tuple(c.get('rg', ())), c.get('geometry', 'cylsphere'))
     if key not in _B2_cache:
         from latticeSetup import example3
         lat = example3(elemSize=c['elemSize'], nx=c['nx'], ny=c['ny'], name=c.get('cell', 'C4'))
         X, C = lat['X'], lat['conn']
         H = float(X[:, 2].max())
-        P, T = solid.gmsh_lattice(X, C, strut_radii(c, lat), 0.0, H, c['h'])
+        info = {}
+        if c.get('geometry') == 'fhs':
+            import nodeJoint as nj
+            stl = ROOT.parent / 'STL' / 'abaqus_fhs' / f"{c['name']}.stl"
+            stl.parent.mkdir(parents=True, exist_ok=True)
+            man, _ = nj.lattice_fhs(X, C, strut_radii(c, lat), z_range=(0.0, H))
+            nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
+            P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0)
+            P, T, info['slivers_removed'] = solid.remove_boundary_slivers(P, T, 0.25 * c['h'])
+            info['stl'] = str(stl.relative_to(ROOT.parent))
+        else:
+            P, T = solid.gmsh_lattice(X, C, strut_radii(c, lat), 0.0, H, c['h'])
         P10, T10 = solid.quadratic(P, T)
         bot = np.nonzero(np.isclose(P10[:, 2], 0.0, atol=1e-6))[0]
         top = np.nonzero(np.isclose(P10[:, 2], H, atol=1e-6))[0]
-        _B2_cache[key] = dict(P=P10, T=T10, bot=bot, top=top, H=H, nlin=len(P), center=X[:, :2].mean(0))
+        _B2_cache[key] = dict(P=P10, T=T10, bot=bot, top=top, H=H, nlin=len(P), center=X[:, :2].mean(0), **info)
     return _B2_cache[key]
 
 
@@ -685,14 +711,30 @@ def b2_inp(c=B2a):
     import solid as _solid
     m_face = _solid.lumped_masses_c3d10m(P, T, RHO)[g['top']].sum()
     Mref = 2 * c['energy_J'] * 1e3 / c['v0'] ** 2 - m_face
+    E = c.get('E', E0)
+    ms_line, ms_note = '', ''
+    if c.get('geometry') == 'fhs':
+        # Abaqus' C3D10M stable increment ~ 0.31 * shortest altitude / dilatational wave speed (calibrated on the
+        # B2a .sta: initial increment 3.36e-8 s at altitude 0.0878 mm, mean 9.07e-8 s). Target = the increment of
+        # the B2 twin's smallest element (altitude 0.22 h), so F runs at the B2 time step; smaller tets mass-scaled
+        cd = np.sqrt(E * (1 - NU) / ((1 + NU) * (1 - 2 * NU)) / RHO)
+        a_ref = 0.22 * c['h']
+        dt_ms = 0.308 * a_ref / cd
+        _, alt = _solid.tet_quality(P, T[:, :4])
+        vol, _ = _solid.tet_quality(P, T[:, :4])
+        small = alt < a_ref
+        added = (RHO * vol[small] * ((a_ref / alt[small]) ** 2 - 1)).sum() / (RHO * vol.sum())
+        ms_line = f"*FIXED MASS SCALING, DT={dt_ms:.6g}, TYPE=BELOW MIN\n"
+        ms_note = (f"\n** FHS geometry: {g['stl']} (+ .3mf); {g['slivers_removed']} boundary slivers removed. Fixed mass "
+                   f"scaling BELOW MIN to DT {dt_ms:.3g} s (altitude {a_ref:g} mm): {int(small.sum())} elements, est. added "
+                   f"mass {100 * added:.3g} % of the cell (Abaqus reports the actual value in the .sta).")
     nodes = _fmt_rows([(i + 1, *map(float, x)) for i, x in enumerate(P)] +
                       [(ref, float(g['center'][0]), float(g['center'][1]), g['H'] + 0.1)])
     elems = _fmt_rows([(e + 1, *map(int, t + 1)) for e, t in enumerate(T)])
-    E = c.get('E', E0)
     return f"""*HEADING
 {c['title']}
 ** Generated by abaqus/cases.py + abaqus/solid.py (gmsh {c['h']} mm: {len(T)} C3D10M, {len(P)} nodes, {g['nlin']} corner
-** nodes). Units: mm, N, s, tonne, MPa. Ref node {ref}: impactor + plate share ({Mref:.6e} t); top-face nodes tied to it.
+** nodes). Units: mm, N, s, tonne, MPa. Ref node {ref}: impactor + plate share ({Mref:.6e} t); top-face nodes tied to it.{ms_note}
 *NODE
 {nodes}
 *ELEMENT, TYPE=C3D10M, ELSET=CELL
@@ -724,7 +766,7 @@ MOVING, 3, {-c['v0']:.10g}
 *STEP, NAME=DROP, NLGEOM=YES
 *DYNAMIC, EXPLICIT
 , {c['T']:.10g}
-*CONTACT
+{ms_line}*CONTACT
 *CONTACT INCLUSIONS, ALL EXTERIOR
 *CONTACT PROPERTY ASSIGNMENT
 , , CELLINT
@@ -966,6 +1008,10 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
                     joint={'mode': 'section'})
             for k, v in (('B2e', B2e), ('B2f', B2f), ('B2g', B2g), ('B2h', B2h), ('B2i', B2i), ('B2j', B2j), ('B2k', B2k))},
          'B2af': dict(spec=B2a_f, inp=lambda: b2_inp(B2a_f), ours=lambda: a4_ours(B2a_f)),
+         # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape
+         # is added to the joint model (notes/15)
+         'F1a': dict(spec=F1a, inp=lambda: b2_inp(F1a), ours=lambda: a4_ours(dict(F1a, joint={'mode': 'section'})),
+                     joint={'mode': 'section'}),
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 
 

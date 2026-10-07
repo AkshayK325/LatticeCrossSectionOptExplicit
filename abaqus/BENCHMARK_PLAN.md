@@ -171,6 +171,22 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
 - Candidate topology-aware refinement (to test against B2a / B2c / B2d without new Abaqus runs, then confirm blind on a new topology, e.g. BCC 'B' or octet 'O'): derive the zone stiffening from the geometry of the fused section itself, i.e. the second moment of area of the union of the strut with the neighbouring material in slices along the zone, instead of one k.
 - Earlier note (still true): **validated on an independent case of the same topology, B2c (r = 0.6, L/r 4.4–11).** Blind prediction vs solid: stroke 0.46%, time 2.0%, loading history 0.34% (uncorrected beams: 17%). Next: B3 (full lattice) and a different topology, to test 'topology-free'.
 
+## Level F: solids of the print geometry (FHS joints), new 2026-10-06
+
+Plan and naming: `notes/15_FHS_SolidValidationPlan.md`.
+- Name pattern: `F<level><letter>_unit_cell_<cell>_FHS_solid_r<r x100>_h<h x100>`.
+- The letter mirrors the B2 twin: same rig, loading, material, contact, output and mesh size; only the joint is
+  different (FHS, src/nodeJoint.py, instead of cylinders + joint spheres).
+- Geometry STL: `STL/abaqus_fhs/<case>.stl`.
+
+| Case | Twin | Content | Status |
+|---|---|---|---|
+| F1a_unit_cell_C4_FHS_solid_r080_h040 | B2a | C4 r 0.8, 42.8k C3D10M (h 0.4, 289 boundary slivers removed), fixed mass scaling BELOW MIN to B2a's 3.37e-8 s (263 el, est. +0.06 % mass), 4 ms | 🟦 inp ready: **run first** |
+| F1c / F1d / F1e-h / F1i-k | B2c / B2d / B2e-h / B2i-k | the same cells with FHS joints | ⬜ written after F1a has run |
+
+Beam prediction for F1a: provisional, the fused-section joint model of the sphere joint (`joint_shape='fhs'` not
+yet implemented, plan step 2).
+
 ## Cost: 3D solid (Abaqus) vs our beam model (for future planning)
 | Model | Abaqus solid C3D10M | Abaqus beams B31 | Ours (beams) |
 |---|---|---|---|
