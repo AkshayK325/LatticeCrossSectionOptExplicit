@@ -152,7 +152,7 @@ def tet_quality(P, T):
 
 
 def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False, algo3d=10, extra_opt=(), algo2d=6,
-                  size_min=0.5, smooth2d=0, opt2d=()):
+                  size_min=0.5, smooth2d=0, opt2d=(), plate_refine=None):
     """Solid tet mesh of a watertight STL (e.g. an FHS lattice, nodeJoint.lattice_fhs): gmsh splits the discrete
     surface at sharp edges (> angle deg: the plate rims; the FHS fillets are smooth, < 20 deg), reparametrises the
     patches, remeshes the surface at ~h (finer where curved: `curvature` elements per 2 pi) and fills it with linear
@@ -170,6 +170,21 @@ def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False
     gmsh.model.geo.synchronize()
     gmsh.option.setNumber('Mesh.MeshSizeMin', size_min * h)
     gmsh.option.setNumber('Mesh.MeshSizeMax', h)
+    if plate_refine is not None:
+        # finer elements in a layer at each plate (z_lo, z_hi, h_plate, thickness): the strut roots there take the
+        # largest distortion (F1i / F1j failed there)
+        z_lo, z_hi, hp, th = plate_refine
+        gmsh.option.setNumber('Mesh.MeshSizeMin', min(size_min * h, size_min * hp))
+        fields = []
+        for z0, z1 in ((z_lo - 1, z_lo + th), (z_hi - th, z_hi + 1)):
+            f = gmsh.model.mesh.field.add('Box')
+            for k, v in (('VIn', hp), ('VOut', h), ('XMin', -1e3), ('XMax', 1e3), ('YMin', -1e3), ('YMax', 1e3),
+                         ('ZMin', z0), ('ZMax', z1), ('Thickness', th)):
+                gmsh.model.mesh.field.setNumber(f, k, v)
+            fields.append(f)
+        fm = gmsh.model.mesh.field.add('Min')
+        gmsh.model.mesh.field.setNumbers(fm, 'FieldsList', fields)
+        gmsh.model.mesh.field.setAsBackgroundMesh(fm)
     gmsh.option.setNumber('Mesh.MeshSizeFromCurvature', curvature)
     gmsh.option.setNumber('Mesh.Algorithm', algo2d)
     gmsh.option.setNumber('Mesh.Algorithm3D', algo3d)
@@ -185,7 +200,8 @@ def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False
         if algo3d == 1:
             raise
         gmsh.finalize()                                            # HXT can fail on a valid surface: classic Delaunay
-        return gmsh_from_stl(stl, h, angle, curvature, optimize, verbose, 1, extra_opt, algo2d, size_min, smooth2d, opt2d)
+        return gmsh_from_stl(stl, h, angle, curvature, optimize, verbose, 1, extra_opt, algo2d, size_min, smooth2d, opt2d,
+                             plate_refine)
     for method in extra_opt:                                       # e.g. 'Netgen', 'Relocate3D'
         gmsh.model.mesh.optimize(method, niter=3)
     tags, coords, _ = gmsh.model.mesh.getNodes()

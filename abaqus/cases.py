@@ -689,6 +689,14 @@ F1c = _f_twin('c', B2c)
 F1d = _f_twin('d', B2d)
 F1e, F1f, F1g, F1h = (_f_twin(t, b) for t, b in (('e', B2e), ('f', B2f), ('g', B2g), ('h', B2h)))
 F1i, F1j = _f_twin('i', B2i), _f_twin('j', B2j)
+# v2 of the graded twins (2026-10-08): F1i / F1j distorted at a thin-strut root on the clamped / tied plate at ~6.2 mm
+# stroke (75 % of the crush); h / 2 within 1 mm of the plates
+# F1i2 also needs symmetric plate joints (nodeJoint mirror=True): with the finer plate mesh, its thin bottom-strut
+# joints meet the plate almost tangentially and the gmsh remesh overlaps the plate facets
+F1i2 = dict(F1i, name=F1i['name'].replace('F1i_', 'F1i2_') + '_plateref_sym', plate_refine=0.5, mirror=True,
+            title=F1i['title'].replace('F1i:', 'F1i2 (h/2 within 1 mm of the plates; FHS plate joints symmetric about the plates):'))
+F1j2 = dict(F1j, name=F1j['name'].replace('F1j_', 'F1j2_') + '_plateref', plate_refine=0.5,
+            title=F1j['title'].replace('F1j:', 'F1j2 (h/2 within 1 mm of the plates):'))
 
 
 _B2_cache = {}
@@ -700,7 +708,7 @@ def b2_mesh(c=B2a):
     sys.path.insert(0, str(ROOT))
     import solid
     key = (c.get('cell', 'C4'), c['nx'], c['ny'], c['h'], c['r'], tuple(c.get('rg', ())), c.get('geometry', 'cylsphere'),
-           tuple(sorted(c.get('fmesh', {}).items())))
+           tuple(sorted(c.get('fmesh', {}).items())), c.get('plate_refine'), c.get('mirror', False))
     if key not in _B2_cache:
         from latticeSetup import example3
         lat = example3(elemSize=c['elemSize'], nx=c['nx'], ny=c['ny'], name=c.get('cell', 'C4'))
@@ -711,9 +719,10 @@ def b2_mesh(c=B2a):
             import nodeJoint as nj
             stl = ROOT.parent / 'STL' / 'abaqus_fhs' / f"{c['name']}.stl"
             stl.parent.mkdir(parents=True, exist_ok=True)
-            man, _ = nj.lattice_fhs(X, C, strut_radii(c, lat), z_range=(0.0, H))
+            man, _ = nj.lattice_fhs(X, C, strut_radii(c, lat), z_range=(0.0, H), mirror=c.get('mirror', False))
             nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
-            P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0, **c.get('fmesh', F_MESH))
+            pr = (0.0, H, c['h'] * c['plate_refine'], 1.0) if c.get('plate_refine') else None
+            P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0, plate_refine=pr, **c.get('fmesh', F_MESH))
             P, T, info['slivers_removed'] = solid.remove_boundary_slivers(P, T, 0.25 * c['h'])
             info['stl'] = str(stl.relative_to(ROOT.parent))
         else:
@@ -1013,6 +1022,9 @@ def a3s_ours(c=A3s):
 
 
 JOINT_SV = {'mode': 'section', 'decay': 1.0}     # fused-section joint model + Saint-Venant participation, lambda = r
+# the same model with the real FHS print joints sliced (2026-10-08, F1a-f): energy-stroke error at 50-75 % crush
+# 5.6 % mean vs 9.1 % with the sphere joint, max-stroke RMS 2.7 % for both; untuned (lambda = r)
+JOINT_FHS = dict(JOINT_SV, shape='fhs')
 
 CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'A2': dict(spec=A2, inp=a2_inp, ours=a2_ours),
@@ -1038,12 +1050,12 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'B2af': dict(spec=B2a_f, inp=lambda: b2_inp(B2a_f), ours=lambda: a4_ours(B2a_f)),
          # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape
          # is added to the joint model (notes/15)
-         'F1a': dict(spec=F1a, inp=lambda: b2_inp(F1a), ours=lambda: a4_ours(dict(F1a, joint=JOINT_SV)),
-                     joint=JOINT_SV),
-         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint=JOINT_SV))),
-                    joint=JOINT_SV)
+         'F1a': dict(spec=F1a, inp=lambda: b2_inp(F1a), ours=lambda: a4_ours(dict(F1a, joint=JOINT_FHS)),
+                     joint=JOINT_FHS),
+         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint=JOINT_FHS))),
+                    joint=JOINT_FHS)
             for k, v in (('F1c', F1c), ('F1d', F1d), ('F1e', F1e), ('F1f', F1f), ('F1g', F1g), ('F1h', F1h),
-                         ('F1i', F1i), ('F1j', F1j))},
+                         ('F1i', F1i), ('F1j', F1j), ('F1i2', F1i2), ('F1j2', F1j2))},
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 
 

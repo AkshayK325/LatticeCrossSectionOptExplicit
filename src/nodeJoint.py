@@ -575,9 +575,12 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
     for k in range(3):
         Vn[fr, k] = solve(wv[fr] * V2[fr, k] - A[fr][:, fx] @ V2[fx, k])
     if z_range is not None:
-        # keep vertices >= 5 um off the plate planes (pushed away on their own side): the trim then never cuts within
-        # 5 um of a vertex, so it leaves no micro-edges (they made gmsh's surface reparametrisation hang)
-        for z0 in z_range:
+        # cut planes: the plates, or (mirror) 2 PLATE_GAP inside the material, where the symmetric surface crosses
+        # cleanly instead of having vertices exactly on the symmetry plane
+        cuts = [z_range[0] + 2 * PLATE_GAP, z_range[1] - 2 * PLATE_GAP] if mirror else list(z_range)
+        # keep vertices >= PLATE_GAP off the cut planes (pushed away on their own side): the trim then never cuts
+        # within 5 um of a vertex, so it leaves no micro-edges (they made gmsh's surface reparametrisation hang)
+        for z0 in cuts:
             d = Vn[:, 2] - z0
             near = np.abs(d) < PLATE_GAP
             Vn[near, 2] = z0 + np.where(d[near] >= 0, PLATE_GAP, -PLATE_GAP)
@@ -585,7 +588,13 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
     if man.status() != m3.Error.NoError:
         raise RuntimeError(f'faired lattice is not a manifold: {man.status()}')
     if z_range is not None:                                        # 7. plate planes
-        man = man.trim_by_plane((0.0, 0.0, 1.0), float(z_range[0])).trim_by_plane((0.0, 0.0, -1.0), -float(z_range[1]))
+        man = man.trim_by_plane((0.0, 0.0, 1.0), float(cuts[0])).trim_by_plane((0.0, 0.0, -1.0), -float(cuts[1]))
+        if mirror:                                                 # flat caps back onto the plate planes
+            mesh = man.to_mesh64()
+            V = np.asarray(mesh.vert_properties)[:, :3].astype(np.float64)
+            for zc, z0 in zip(cuts, z_range):
+                V[np.abs(V[:, 2] - zc) < 1e-7, 2] = z0
+            man = m3.Manifold(m3.Mesh64(np.array(V, np.float64), np.array(mesh.tri_verts, np.uint64)))   # writable copies
     return man, dict(control_faces=len(ctrl.faces), free_vertices=len(fr), ring_offsets=toff)
 
 

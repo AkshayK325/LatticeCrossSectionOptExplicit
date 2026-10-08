@@ -120,6 +120,17 @@ def first_time(t, y, level):
 
 
 # ------------------------------------------------------------------------------------------------ per case
+def _rig_labels_from_inp(name):
+    """Reference node and BOT node set of a B2 / F rig, read from the .inp that was run (re-meshing need not give
+    the same labels once the mesh code has changed)."""
+    import re
+    txt = (cases.ROOT / 'inp' / f'{name}.inp').read_text()
+    ref = int(re.search(r'\*NSET, NSET=REF\n(\d+)', txt).group(1))
+    blk = re.search(r'\*NSET, NSET=BOT\n(.*?)\n\*', txt, re.S).group(1)
+    bot = [int(v) for v in re.split(r'[,\s]+', blk.strip()) if v]
+    return {'ref': ref, 'bot': bot}
+
+
 def labels(case):
     if case == 'A1':
         return {'tip': cases.A1['n_el'] + 1, 'root': 1}
@@ -133,8 +144,7 @@ def labels(case):
         g = cases.a3s_mesh(cases.CASES[case]['spec'])
         return {'amid': g['midA'], 'bmid': g['midB'], 'b': g['labelsB']}
     if case.startswith('B2') or case.startswith('F'):          # F = B2 rig with FHS joints
-        g = cases.b2_mesh(cases.CASES[case]['spec'])
-        return {'ref': len(g['P']) + 1, 'bot': [int(k) + 1 for k in g['bot']]}
+        return _rig_labels_from_inp(cases.CASES[case]['spec']['name'])
     if case in ('A4', 'A5a', 'A5b', 'A5as', 'A5aq', 'A5bs'):
         lat, rig = cases._a4_rig(cases.CASES[case]['spec'])
         return {'ref': len(lat['Xr']) + 1, 'bot': [int(k) + 1 for k in rig['bot']]}

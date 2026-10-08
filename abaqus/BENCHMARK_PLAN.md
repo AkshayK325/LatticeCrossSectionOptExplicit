@@ -182,18 +182,105 @@ Plan and naming: `notes/15_FHS_SolidValidationPlan.md`.
 | Case | Twin | Content | Status |
 |---|---|---|---|
 | F1a_unit_cell_C4_FHS_solid_r080_h040 | B2a | C4 r 0.8, 42.8k C3D10M (h 0.4, 289 boundary slivers removed), fixed mass scaling BELOW MIN to B2a's 3.37e-8 s (263 el, actual +0.0034 % mass), 4 ms | 🟨 ran to 3.958 of 4 ms (4.7 h); it then failed on element 5808, the 2nd-smallest tet (altitude 0.012 mm, a remaining one-face sliver at the clamped bottom plate), during the rebound. The loading branch and max stroke are valid. |
-| F1c_unit_cell_C4_FHS_solid_r060_h030 | B2c | C4 r 0.6, 62.4k C3D10M (h 0.30), 240 el. mass-scaled (+0.03 %), T 3 ms | 🟦 inp ready |
-| F1d_unit_cell_C12_FHS_solid_r050_h025 | B2d | C12 r 0.5, 103.8k C3D10M (h 0.25), 776 el. (+0.06 %), T 3 ms | 🟦 inp ready |
-| F1e_unit_cell_BCC_FHS_solid_r100_h050 | B2e | BCC r 1.0, 41.7k C3D10M (h 0.50), 214 el. (+0.03 %), T 0.5 ms | 🟦 inp ready |
-| F1f_unit_cell_BCC_FHS_solid_r150_h075 | B2f | BCC r 1.5, 27.3k C3D10M (h 0.75), 233 el. (+0.08 %), T 0.5 ms | 🟦 inp ready |
+| F1c_unit_cell_C4_FHS_solid_r060_h030 | B2c | C4 r 0.6, 62.4k C3D10M (h 0.30), 240 el. mass-scaled (+0.03 %), T 3 ms | ✅ completed (2.5 h) |
+| F1d_unit_cell_C12_FHS_solid_r050_h025 | B2d | C12 r 0.5, 103.8k C3D10M (h 0.25), 776 el. (+0.06 %), T 3 ms | ✅ completed (1.8 h) |
+| F1e_unit_cell_BCC_FHS_solid_r100_h050 | B2e | BCC r 1.0, 41.7k C3D10M (h 0.50), 214 el. (+0.03 %), T 0.5 ms | ✅ completed (3 min) |
+| F1f_unit_cell_BCC_FHS_solid_r150_h075 | B2f | BCC r 1.5, 27.3k C3D10M (h 0.75), 233 el. (+0.08 %), T 0.5 ms | ✅ completed (1.3 min) |
 | F1g / F1h (octet r 1.0 / 1.5) | B2g / B2h | octet | ⬜ blocked: at some plate nodes the FHS surface meets the plate almost tangentially, so the gmsh remesh overlaps the plate facets ("overlapping facets", PLC error). Fix pending (see below). |
-| F1i_unit_cell_C4_graded_top100_bot060_FHS | B2i | C4 graded 1.0 / 0.6, 98.2k C3D10M (h 0.30), 1194 el. (+0.20 %), T 3 ms | 🟦 inp ready |
-| F1j_unit_cell_C4_graded_top060_bot100_FHS | B2j | C4 graded 0.6 / 1.0, 96.0k C3D10M (h 0.30), 208 el. (+0.02 %), T 3 ms | 🟦 inp ready |
+| F1i_unit_cell_C4_graded_top100_bot060_FHS | B2i | C4 graded 1.0 / 0.6, 98.2k C3D10M (h 0.30), 1194 el. (+0.20 %), T 3 ms | ❌ failed at 1.455 ms (6.3 mm stroke, ~75 % of the crush): excessive distortion of an ordinary element (alt. 0.13 mm) at a thin-strut root on the clamped bottom plate; energy conserved until then. Rerun as F1i2 |
+| F1j_unit_cell_C4_graded_top060_bot100_FHS | B2j | C4 graded 0.6 / 1.0, 96.0k C3D10M (h 0.30), 208 el. (+0.02 %), T 3 ms | ❌ failed at 1.315 ms (6.1 mm): deformation speed > wave speed at a thin-strut root under the tied top plate. Rerun as F1j2 |
 
 All F1c-j: robust F mesh (Delaunay 2D + smoothing, safe sliver removal), `*SECTION CONTROLS, DISTORTION CONTROL=YES`,
 fixed mass scaling BELOW MIN to the B2 twin's time increment. FHS vertices are kept ≥ 5 µm off the plate planes
 before the trim (`nodeJoint.PLATE_GAP`): the trim otherwise left 0.006 µm edges that made gmsh's surface
 reparametrisation hang (F1c). F1a was made before that; its .inp stays the record.
+
+| F1i2_unit_cell_C4_graded_top100_bot060_FHS_plateref_sym | B2i | the graded twin again, h/2 within 1 mm of both plates (where F1i distorted), and FHS plate joints symmetric about the plates (needed: with the finer plate mesh the thin bottom-strut joints meet the plate tangentially and the remesh overlaps); 205.3k C3D10M, 6589 el. (+0.22 %), 31 MB, T 3 ms | 🟦 inp ready |
+| F1j2_unit_cell_C4_graded_top060_bot100_FHS_plateref | B2j | the graded twin again, h/2 within 1 mm of both plates (plain FHS joints); 211.9k C3D10M, 8286 el. (+0.26 %), 32 MB, T 3 ms | 🟦 inp ready |
+
+### Results 2026-10-08: F1c, F1d, F1e, F1f (F1i / F1j failed)
+
+**F vs B2 twin (Abaqus vs Abaqus).** Energy absorbed vs stroke, independent of the B2e/f impactor-energy shortfall:
+
+| pair | max stroke F / B2 | energy absorbed at 25 / 50 / 75 / 95 % of the B2 max stroke |
+|---|---|---|
+| F1a / B2a (C4 r 0.8) | 8.747 / 8.323 (+5.1 %) | -1.1 / +1.0 / -1.3 / -5.3 % |
+| F1c / B2c (C4 r 0.6) | 8.227 / 8.367 (-1.7 %) | +4.1 / +4.6 / +5.0 / +6.3 % |
+| F1d / B2d (C12) | 8.620 / 8.748 (-1.5 %) | +6.9 / +6.3 / +6.6 / +5.8 % |
+| F1e / B2e (BCC r 1.0) | 0.768 / 0.696 (B2e KE 15 % short) | +25 / +15 / +8.6 / +3.5 % |
+| F1f / B2f (BCC r 1.5) | 0.719 / 0.671 (B2f KE 16 % short) | +24 / +18 / +13 / +12 % |
+
+- **The FHS print joint is stiffer than cylinder + sphere on C4 r 0.6, C12 and above all BCC.** The webs at acute
+  pairs act at small strain.
+- **C4 r 0.8 (F1a) is the exception.** It is equal until ~75 % of the crush and then softer (late contact).
+- **This corrects step 1 (2026-10-08 morning).** There the FHS joint factors were judged "wrong sign" from F1a alone.
+
+**Joint-model tuning on F1a-f.** Beam models energy-matched to each solid.
+
+Max-stroke error, ours vs Abaqus:
+
+| joint model | F1a | F1c | F1d | F1e | F1f | RMS |
+|---|---|---|---|---|---|---|
+| sphere factors, λ = r (JOINT_SV) | -2.10 | +4.33 | -0.19 | +1.11 | +3.54 | 2.72 % |
+| **FHS slices, λ = r (JOINT_FHS)** | -4.75 | +1.67 | -2.82 | -1.60 | -1.05 | 2.72 % |
+| FHS slices, λ = 0.75 r | -3.32 | +2.72 | -1.68 | -0.43 | +0.97 | 2.11 % |
+| FHS slices, λ = 0.5 r | -0.51 | +4.80 | +0.28 | +1.41 | +4.14 | 2.92 % |
+
+Energy absorbed vs stroke at 50 / 75 % of the crush (where the joint stiffness acts):
+
+| joint model | F1a | F1c | F1d | F1e | F1f | mean abs |
+|---|---|---|---|---|---|---|
+| sphere, λ = r | -6.1 / -1.8 | -12.9 / -8.2 | -2.5 / +0.1 | -16.9 / -11.1 | -16.6 / -14.7 | 9.1 % |
+| **FHS, λ = r** | -0.9 / +2.4 | -9.6 / -4.3 | +0.8 / +5.7 | -12.1 / -5.4 | -8.3 / -6.8 | **5.6 %** |
+| FHS, λ = 0.75 r | -3.6 / +0.2 | -11.0 / -6.0 | -0.2 / +2.7 | -13.5 / -8.3 | -12.5 / -10.6 | 6.9 % |
+
+**Decision: JOINT_FHS** (the same untuned fused-section + Saint-Venant model, λ = r, with the actual FHS joint
+sliced) for FHS print geometry.
+- It gives a 40 % lower energy-curve error, with the same max-stroke accuracy.
+- No new fitted constant.
+- `cases.CASES` now uses it for all F cases.
+
+**Graded F1i / F1j, partial curves** (the solids ran to 6.3 / 6.1 mm). Energy ours vs Abaqus at 2 / 4 / 6 mm:
+
+| case | sphere joints | FHS joints |
+|---|---|---|
+| F1i | -33.6 / -11.5 / -6.5 % | -27.6 / -5.4 / -1.9 % |
+| F1j | -21.9 / -10.8 / -3.9 % | -17.4 / -6.0 / +0.1 % |
+
+JOINT_FHS is better again, on graded radii as well.
+
+**Reports with JOINT_FHS** (`compare.py`, ResultsFig/abaqus 29-33), max stroke:
+
+| case | error | |
+|---|---|---|
+| F1c | 1.70 % | ✔ |
+| F1d | 2.78 % | ✔ |
+| F1e | 1.35 % | ✔ |
+| F1f | 0.80 % | ✔ |
+| F1a | 4.73 % | ✘ (the late-crush contact effect) |
+
+The time of max stroke is early by 8-9 % on F1a / e / f: the early-impact issue below.
+
+**Next steps (2026-10-08 evening):**
+1. Run F1i2 and F1j2 (graded, plate-refined).
+2. **Early impact** (largest remaining error, shared by all joint models): energy deficit at 25 % crush, early time of
+   max stroke. Investigate first-contact coupling, beam lumped / rotary mass and wave transit, with the existing
+   B2 / F histories.
+3. **F1a late-crush gap** (-4.7 %, C4 r 0.8 only): beam-beam contact geometry at densification.
+4. **Octet F1g / h meshing:** both plain and symmetric FHS plate joints still fail the gmsh remesh. It needs a
+   dedicated plate-wedge treatment, e.g. a short straight extension of the struts into the plates before the trim.
+5. **JOINT_FHS in the optimiser:** the factors are not differentiable, and an FHS build costs 5-55 s. Precompute or
+   fit a surrogate in the radii at a joint.
+
+**New, model-form (not joint): early impact.** At 25 % of the crush, every beam model absorbs 10-35 % less energy
+than Abaqus, sphere or FHS alike (BCC -33 %, C4 r 0.6 -20 %, C4 r 0.8 -8-13 %, C12 -9 %). Together with the
+earlier "time of max stroke early" and "mid-crush force high", the beam model's early dynamic response differs.
+Candidates:
+- the rigid-plate / impactor coupling at first contact (the solid's tied top-face mass);
+- rotary / lumped mass of the beams;
+- the stress-wave transit of the solid.
+
+Check it with the B2a and F1a force and energy histories.
 
 **Octet (F1g / h), options:**
 1. A finer FE mesh only near the plates.
