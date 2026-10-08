@@ -179,7 +179,13 @@ def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False
     gmsh.model.mesh.generate(2)                                    # surface first: smooth / optimise it, then fill
     for method in opt2d:                                           # e.g. 'Laplace2D'
         gmsh.model.mesh.optimize(method, niter=5)
-    gmsh.model.mesh.generate(3)
+    try:
+        gmsh.model.mesh.generate(3)
+    except Exception:
+        if algo3d == 1:
+            raise
+        gmsh.finalize()                                            # HXT can fail on a valid surface: classic Delaunay
+        return gmsh_from_stl(stl, h, angle, curvature, optimize, verbose, 1, extra_opt, algo2d, size_min, smooth2d, opt2d)
     for method in extra_opt:                                       # e.g. 'Netgen', 'Relocate3D'
         gmsh.model.mesh.optimize(method, niter=3)
     tags, coords, _ = gmsh.model.mesh.getNodes()
@@ -199,9 +205,11 @@ def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False
 
 def boundary_defects(T):
     """Vertices where the tet mesh's boundary is not a closed 2-manifold: endpoints of boundary edges not shared by
-    exactly two boundary faces, and pinched vertices (the boundary faces around them do not form a single fan).
-    Also flags faces shared by > 2 tets. Returns a set of vertex indices (empty = clean)."""
-    import networkx as nx
+    exactly two boundary faces, pinched vertices (the boundary faces around them do not form a single fan), and
+    vertices of faces shared by > 2 tets. Vectorised: one sparse connected-components pass over all vertex links.
+    Returns a set of vertex indices (empty = clean)."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
     F = np.sort(np.vstack([T[:, [0, 1, 2]], T[:, [0, 1, 3]], T[:, [0, 2, 3]], T[:, [1, 2, 3]]]), 1)
     u, cnt = np.unique(F, axis=0, return_counts=True)
     bad = set(u[cnt > 2].ravel().tolist())
@@ -209,11 +217,20 @@ def boundary_defects(T):
     E = np.sort(np.vstack([B[:, [0, 1]], B[:, [1, 2]], B[:, [0, 2]]]), 1)
     ue, ec = np.unique(E, axis=0, return_counts=True)
     bad |= set(ue[ec != 2].ravel().tolist())
-    nb = {}
-    for f in B:
-        for k in range(3):
-            nb.setdefault(f[k], []).append((f[(k + 1) % 3], f[(k + 2) % 3]))
-    bad |= {v for v, links in nb.items() if nx.number_connected_components(nx.Graph(links)) != 1}
+    # link graph of every boundary vertex v: nodes (v, w) for its boundary neighbours w, an edge per boundary face
+    a, b, c = B[:, 0], B[:, 1], B[:, 2]
+    V0 = np.concatenate((a, b, c))
+    W1 = np.concatenate((b, c, a))
+    W2 = np.concatenate((c, a, b))
+    pairs = np.concatenate((np.column_stack((V0, W1)), np.column_stack((V0, W2))))
+    up, inv = np.unique(pairs, axis=0, return_inverse=True)
+    inv = inv.ravel()
+    n = len(V0)
+    g = coo_matrix((np.ones(n), (inv[:n], inv[n:])), shape=(len(up), len(up)))
+    _, comp = connected_components(g, directed=False)
+    vc = np.unique(np.column_stack((up[:, 0], comp)), axis=0)       # (vertex, component) pairs
+    vv, nc = np.unique(vc[:, 0], return_counts=True)
+    bad |= set(vv[nc > 1].tolist())
     return bad
 
 

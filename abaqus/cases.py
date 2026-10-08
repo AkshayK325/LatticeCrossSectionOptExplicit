@@ -669,6 +669,28 @@ F1a = dict(B2a, name='F1a_unit_cell_C4_FHS_solid_r080_h040', geometry='fhs', twi
                  'frictionless general self-contact')
 
 
+
+
+def _f_twin(tag, twin):
+    """F case = the B2 twin with FHS joints (same cell, radii, energy, plate mass, mesh size, output), the robust
+    F mesh and run settings; the 0.5 ms first-compression twins (BCC / octet) keep their short window."""
+    nm = twin['name'].split('_unit_cell_', 1)[1]
+    body = nm.replace('solid_', 'FHS_solid_') if 'solid_' in nm else nm + '_FHS'
+    if not body.startswith(('C4', 'C12', 'BCC', 'octet')):
+        body = 'C4_' + body
+    run = dict(F_RUN, T=twin['T']) if twin['T'] < F_RUN['T'] else F_RUN
+    return dict(twin, name=f'F1{tag}_unit_cell_{body}', geometry='fhs', twin=twin['name'], fmesh=F_MESH, **run,
+                title=f"F1{tag}: FHS-joint twin of {twin['name'].split('_')[0]} (the print geometry, src/nodeJoint.py, "
+                      f"instead of cylinders + joint spheres; gmsh tets from the FHS STL, C3D10M h {twin['h']:g} mm, "
+                      f"distortion control, T {run['T'] * 1e3:g} ms). " + twin['title'].split(': ', 1)[1])
+
+
+F1c = _f_twin('c', B2c)
+F1d = _f_twin('d', B2d)
+F1e, F1f, F1g, F1h = (_f_twin(t, b) for t, b in (('e', B2e), ('f', B2f), ('g', B2g), ('h', B2h)))
+F1i, F1j = _f_twin('i', B2i), _f_twin('j', B2j)
+
+
 _B2_cache = {}
 
 
@@ -1018,6 +1040,10 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          # is added to the joint model (notes/15)
          'F1a': dict(spec=F1a, inp=lambda: b2_inp(F1a), ours=lambda: a4_ours(dict(F1a, joint=JOINT_SV)),
                      joint=JOINT_SV),
+         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint=JOINT_SV))),
+                    joint=JOINT_SV)
+            for k, v in (('F1c', F1c), ('F1d', F1d), ('F1e', F1e), ('F1f', F1f), ('F1g', F1g), ('F1h', F1h),
+                         ('F1i', F1i), ('F1j', F1j))},
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 
 

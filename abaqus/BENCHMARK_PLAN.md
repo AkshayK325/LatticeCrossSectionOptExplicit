@@ -182,7 +182,24 @@ Plan and naming: `notes/15_FHS_SolidValidationPlan.md`.
 | Case | Twin | Content | Status |
 |---|---|---|---|
 | F1a_unit_cell_C4_FHS_solid_r080_h040 | B2a | C4 r 0.8, 42.8k C3D10M (h 0.4, 289 boundary slivers removed), fixed mass scaling BELOW MIN to B2a's 3.37e-8 s (263 el, actual +0.0034 % mass), 4 ms | 🟨 ran to 3.958 of 4 ms (4.7 h); it then failed on element 5808, the 2nd-smallest tet (altitude 0.012 mm, a remaining one-face sliver at the clamped bottom plate), during the rebound. The loading branch and max stroke are valid. |
-| F1c / F1d / F1e-h / F1i-k | B2c / B2d / B2e-h / B2i-k | the same cells with FHS joints | ⬜ written after F1a has run |
+| F1c_unit_cell_C4_FHS_solid_r060_h030 | B2c | C4 r 0.6, 62.4k C3D10M (h 0.30), 240 el. mass-scaled (+0.03 %), T 3 ms | 🟦 inp ready |
+| F1d_unit_cell_C12_FHS_solid_r050_h025 | B2d | C12 r 0.5, 103.8k C3D10M (h 0.25), 776 el. (+0.06 %), T 3 ms | 🟦 inp ready |
+| F1e_unit_cell_BCC_FHS_solid_r100_h050 | B2e | BCC r 1.0, 41.7k C3D10M (h 0.50), 214 el. (+0.03 %), T 0.5 ms | 🟦 inp ready |
+| F1f_unit_cell_BCC_FHS_solid_r150_h075 | B2f | BCC r 1.5, 27.3k C3D10M (h 0.75), 233 el. (+0.08 %), T 0.5 ms | 🟦 inp ready |
+| F1g / F1h (octet r 1.0 / 1.5) | B2g / B2h | octet | ⬜ blocked: at some plate nodes the FHS surface meets the plate almost tangentially, so the gmsh remesh overlaps the plate facets ("overlapping facets", PLC error). Fix pending (see below). |
+| F1i_unit_cell_C4_graded_top100_bot060_FHS | B2i | C4 graded 1.0 / 0.6, 98.2k C3D10M (h 0.30), 1194 el. (+0.20 %), T 3 ms | 🟦 inp ready |
+| F1j_unit_cell_C4_graded_top060_bot100_FHS | B2j | C4 graded 0.6 / 1.0, 96.0k C3D10M (h 0.30), 208 el. (+0.02 %), T 3 ms | 🟦 inp ready |
+
+All F1c-j: robust F mesh (Delaunay 2D + smoothing, safe sliver removal), `*SECTION CONTROLS, DISTORTION CONTROL=YES`,
+fixed mass scaling BELOW MIN to the B2 twin's time increment. FHS vertices are kept ≥ 5 µm off the plate planes
+before the trim (`nodeJoint.PLATE_GAP`): the trim otherwise left 0.006 µm edges that made gmsh's surface
+reparametrisation hang (F1c). F1a was made before that; its .inp stays the record.
+
+**Octet (F1g / h), options:**
+1. A finer FE mesh only near the plates.
+2. Symmetric plate joints (`lattice_fhs(mirror=True)`): implemented, but the exactly symmetric node leaves
+   coincident facets at the plate; the trim needs an offset.
+3. Run the octet pair after the others, as they are the least C4-like.
 
 Beam prediction for F1a: provisional, the fused-section joint model of the sphere joint (`joint_shape='fhs'` not
 yet implemented, plan step 2).

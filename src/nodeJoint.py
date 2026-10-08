@@ -400,12 +400,43 @@ def merge_straight_chains(X, conn, radii, cos_tol=1e-6, r_tol=1e-9):
             return np.array(conn), np.array(radii)
 
 
+PLATE_GAP = 0.005         # mm: no FHS vertex closer than this to a plate plane before the trim
+
+
+def mirror_at_plates(X, conn, radii, z_range, tol=1e-9):
+    """Struts at plate nodes mirrored across their plate plane (struts lying in the plane are already symmetric):
+    with the mirrored half added, the FHS node at a plate is symmetric about it, so the trimmed surface meets the
+    plate at 90 deg. Without it, a plate node's hull can meet the plate almost tangentially: a grazing wedge that
+    gives sliver tets and overlapping facets when the STL is remeshed for FE. It is also the joint of a stacked
+    lattice, where a plate node joins the mirrored cell. Returns (X, conn, radii) extended."""
+    X = np.asarray(X, float)
+    conn = np.asarray(conn, int)
+    radii = np.broadcast_to(np.asarray(radii, float), (len(conn),))
+    Xn, cn, rn = [X], [conn], [radii]
+    nv = len(X)
+    for z0 in z_range:
+        on = np.abs(X[:, 2] - z0) < 1e-6
+        for (a, b), r in zip(conn, radii):
+            for p, q in ((a, b), (b, a)):
+                if on[p] and abs(X[q, 2] - z0) > 1e-6:          # strut leaves the plate: add its mirror image
+                    m = X[q].copy()
+                    m[2] = 2 * z0 - m[2]
+                    Xn.append(m[None])
+                    cn.append(np.array([[p, nv]]))
+                    rn.append(np.array([r]))
+                    nv += 1
+    return np.vstack(Xn), np.vstack(cn), np.concatenate(rn)
+
+
 def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, anchor=10.0, n_min=16,
-                limit=True, mid=3.0):
+                limit=True, mid=3.0, mirror=False):
     """FHS (Faired Hull-Subdivision) node joints for a whole lattice (algorithm: notes/13_FHS_NodeAlgorithm.md). Every node of degree >= 2 gets a node
     patch (convex hull of its node rings + core rings, ring caps removed); every strut a control tube between the
     node rings at its two ends; the whole control mesh is Loop-subdivided, the node regions are faired in one
-    anchored least-squares solve, and the result is trimmed to the plate planes z_range.
+    anchored least-squares solve, and the result is trimmed to the plate planes z_range. mirror: the struts at
+    plate nodes are mirrored across the plate first (symmetric plate joints, meeting the plate at 90 deg; off by
+    default: the exactly symmetric node puts vertices on the plate plane and the trim then leaves coincident
+    facets that break the FE remesh, 2026-10-08).
     Mesh size (notes/14): 2 Loop levels with the vertices moved onto the exact limit surface (limit), and the
     strut-middle control rings mid edge lengths apart: ~5x fewer faces than 3 plain levels, 99 % of the surface
     within ~10 um of it. Returns (watertight manifold, info dict)."""
@@ -413,6 +444,8 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
     import scipy.sparse.linalg as spl
     from scipy.spatial import ConvexHull, cKDTree
     X = np.asarray(X, float)
+    if z_range is not None and mirror:                                 # symmetric joints at the plates
+        X, conn, radii = mirror_at_plates(X, conn, np.broadcast_to(np.asarray(radii, float), (len(conn),)), z_range)
     conn, radii = merge_straight_chains(X, conn, radii)                 # element splits are not joints
     r_min = radii.min()
     nring = np.array([ring_count(r, r_min, n_min) for r in radii])
@@ -541,6 +574,13 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
     Vn = V2.copy()
     for k in range(3):
         Vn[fr, k] = solve(wv[fr] * V2[fr, k] - A[fr][:, fx] @ V2[fx, k])
+    if z_range is not None:
+        # keep vertices >= 5 um off the plate planes (pushed away on their own side): the trim then never cuts within
+        # 5 um of a vertex, so it leaves no micro-edges (they made gmsh's surface reparametrisation hang)
+        for z0 in z_range:
+            d = Vn[:, 2] - z0
+            near = np.abs(d) < PLATE_GAP
+            Vn[near, 2] = z0 + np.where(d[near] >= 0, PLATE_GAP, -PLATE_GAP)
     man = m3.Manifold(m3.Mesh(np.ascontiguousarray(Vn, np.float32), np.ascontiguousarray(F2, np.uint32)))
     if man.status() != m3.Error.NoError:
         raise RuntimeError(f'faired lattice is not a manifold: {man.status()}')
