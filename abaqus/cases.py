@@ -987,6 +987,8 @@ def a3s_ours(c=A3s):
     return out
 
 
+JOINT_SV = {'mode': 'section', 'decay': 1.0}     # fused-section joint model + Saint-Venant participation, lambda = r
+
 CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'A2': dict(spec=A2, inp=a2_inp, ours=a2_ours),
          'A2a': dict(spec=A2a, inp=lambda: a2_inp(A2a), ours=lambda: a2_ours(A2a)),
@@ -1004,14 +1006,15 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
          'B2a': dict(spec=B2a, inp=lambda: b2_inp(B2a), ours=lambda: a4_ours(B2a)),
          'B2c': dict(spec=B2c, inp=lambda: b2_inp(B2c), ours=lambda: a4_ours(dict(B2c, joint={'k': 3.5}))),
          'B2d': dict(spec=B2d, inp=lambda: b2_inp(B2d), ours=lambda: a4_ours(dict(B2d, joint={'k': 3.5}))),
-         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint={'mode': 'section'}))),
-                    joint={'mode': 'section'})
+         # beam prediction: the kept joint model, fused section + Saint-Venant participation (decay length = r)
+         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint=JOINT_SV))),
+                    joint=JOINT_SV)
             for k, v in (('B2e', B2e), ('B2f', B2f), ('B2g', B2g), ('B2h', B2h), ('B2i', B2i), ('B2j', B2j), ('B2k', B2k))},
          'B2af': dict(spec=B2a_f, inp=lambda: b2_inp(B2a_f), ours=lambda: a4_ours(B2a_f)),
          # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape
          # is added to the joint model (notes/15)
-         'F1a': dict(spec=F1a, inp=lambda: b2_inp(F1a), ours=lambda: a4_ours(dict(F1a, joint={'mode': 'section'})),
-                     joint={'mode': 'section'}),
+         'F1a': dict(spec=F1a, inp=lambda: b2_inp(F1a), ours=lambda: a4_ours(dict(F1a, joint=JOINT_SV)),
+                     joint=JOINT_SV),
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 
 

@@ -80,8 +80,8 @@ Material: `*HYPERELASTIC, YEOH` C10, C20, C30 = 2.4, 0.15, 0.02 MPa; D₁ from �
 | B2g octet r 1.0, 16 N mm | ✔ ran | | | `inp/B2g_unit_cell_octet_solid_r100_h050.inp` (65 662 el., 0.070 mm) | **fused-section: 0.7485 mm @ 0.275 ms, peak 46.3 N**; bare 0.8866 mm @ 0.341 ms, 36.7 N; k 3.5: 0.7433 mm @ 0.278 ms, 61.8 N | — |
 | B2h octet r 1.5, 45 N mm | ✔ ran | | | `inp/B2h_unit_cell_octet_solid_r150_h075.inp` (50 085 el., 0.103 mm) | **fused-section: 0.7176 mm @ 0.236 ms, peak 153.0 N**; bare 1.0017 mm @ 0.338 ms, 97.8 N; k 3.5: 0.7324 mm @ 0.243 ms, 171.3 N | — |
 | **B2i–k** (graded Midplane designs on the C4 cell, written 2026-10-05): top / bottom radii differ, mid = their mean (3 design variables); solid h = r_min/2; impactor mass from the solid's top-face mass (fixed rule); E = 40 MPa | 🟦 | does the joint model hold when struts of different radii meet at a joint (joint sphere = largest radius at the node, as in the model)? | as A5 / B2 (stroke ≤ 3%, time ≤ 5%) | see below | blind predictions below (four joint models) | — |
-| B2i top 1.0, bottom 0.6, mid 0.8, 45 N mm | 🟦 | | | `inp/B2i_unit_cell_C4_graded_top100_bot060.inp` (71.6k el., min alt. 0.040 mm) | **fused+SV: 8.2312 mm @ 2.589 ms, peak 10.02 N**; fused 7.9766 mm @ 2.559 ms; k 3.5: 7.9422 mm @ 2.543 ms; bare 9.8966 mm @ 2.988 ms | — |
-| B2j top 0.6, bottom 1.0, mid 0.8, 42 N mm | 🟦 | | | `inp/B2j_unit_cell_C4_graded_top060_bot100.inp` (72.8k el., 0.035 mm) | **fused+SV: 8.0857 mm @ 2.489 ms, peak 15.76 N**; fused 7.8407 mm @ 2.412 ms; k 3.5: 7.7812 mm @ 2.353 ms; bare 9.7447 mm @ 2.908 ms | — |
+| B2i top 1.0, bottom 0.6, mid 0.8, 45 N mm | ✅ stroke (Abaqus stopped at 2.70 ms, one distorted element at the bottom plate, still moving at -512 mm/s: its 8.359 mm is a lower bound; est. true max 8.39-8.42) | | | `inp/B2i_unit_cell_C4_graded_top100_bot060.inp` (71.6k el., min alt. 0.040 mm) | **fused+SV: 8.2312 mm @ 2.589 ms, peak 10.02 N**; fused 7.9766 mm @ 2.559 ms; k 3.5: 7.9422 mm @ 2.543 ms; bare 9.8966 mm @ 2.988 ms | — |
+| B2j top 0.6, bottom 1.0, mid 0.8, 42 N mm | ✅ stroke (run stopped by the user at 3.17 ms after 14.5 h: the time increment collapsed 20x, 3.4e-8 to 1.8e-9 s, at an element by the top plate) | | | `inp/B2j_unit_cell_C4_graded_top060_bot100.inp` (72.8k el., 0.035 mm) | **fused+SV: 8.0857 mm @ 2.489 ms, peak 15.76 N**; fused 7.8407 mm @ 2.412 ms; k 3.5: 7.7812 mm @ 2.353 ms; bare 9.7447 mm @ 2.908 ms | — |
 | B2k top 0.7, bottom 0.9, mid 0.8 (= twin-recovery design), 70 N mm | 🟦 | | | `inp/B2k_unit_cell_C4_graded_top070_bot090.inp` (46.7k el., 0.032 mm) | **fused+SV: 8.5729 mm @ 2.533 ms, peak 17.81 N**; fused 8.2846 mm @ 2.451 ms; k 3.5: 8.2558 mm @ 2.390 ms; bare 10.3263 mm @ 2.920 ms | — |
 | (dropped) top 1.1 / bottom 0.5 | ✖ | | | gmsh slivers where a 0.5 mm strut leaves a 1.1 mm joint sphere (min alt. 0.0065–0.012 mm even at h 0.35): ~a day in Abaqus; replaced by B2k | — | — |
 | **B3** full 3×3×1 lattice, solid C3D10M, general contact μ = 0.5, rigid plates, merged impactor, 0.75 J | ⬜ | **paper validation figure** | F–δ, peak, stroke, dissipation; expect peak within 10–20% | |
@@ -181,11 +181,55 @@ Plan and naming: `notes/15_FHS_SolidValidationPlan.md`.
 
 | Case | Twin | Content | Status |
 |---|---|---|---|
-| F1a_unit_cell_C4_FHS_solid_r080_h040 | B2a | C4 r 0.8, 42.8k C3D10M (h 0.4, 289 boundary slivers removed), fixed mass scaling BELOW MIN to B2a's 3.37e-8 s (263 el, est. +0.06 % mass), 4 ms | 🟦 inp ready: **run first** |
+| F1a_unit_cell_C4_FHS_solid_r080_h040 | B2a | C4 r 0.8, 42.8k C3D10M (h 0.4, 289 boundary slivers removed), fixed mass scaling BELOW MIN to B2a's 3.37e-8 s (263 el, actual +0.0034 % mass), 4 ms | 🟨 ran to 3.958 of 4 ms (4.7 h); it then failed on element 5808, the 2nd-smallest tet (altitude 0.012 mm, a remaining one-face sliver at the clamped bottom plate), during the rebound. The loading branch and max stroke are valid. |
 | F1c / F1d / F1e-h / F1i-k | B2c / B2d / B2e-h / B2i-k | the same cells with FHS joints | ⬜ written after F1a has run |
 
 Beam prediction for F1a: provisional, the fused-section joint model of the sphere joint (`joint_shape='fhs'` not
 yet implemented, plan step 2).
+
+### Results 2026-10-08: B2i, B2j, F1a
+
+Ours = fused-section + Saint-Venant joint model (λ = r, `cases.JOINT_SV`): the same model as the blind
+predictions. `compare.py` now uses it for B2e-k and F1a; before, it used the plain fused model, which is 4.6 %
+stiff on B2i/j.
+
+| case | max stroke ours / Abaqus | time of max | mean crush force 30-90 % stroke ours / Abaqus |
+|---|---|---|---|
+| B2a (C4, sphere joints) | 8.565 / 8.323 mm (+2.9 %) | 2.42 ms (Abaqus) | 12.27 / 11.75 N (+4.4 %) |
+| B2i (graded 1.0 / 0.6) | 8.231 / ≥ 8.359 mm (-1.5 %, ≈ -2 % against the extrapolated max) | 2.59 / ≥ 2.69 ms | 6.13 / 5.71 N (+7.4 %) |
+| B2j (graded 0.6 / 1.0) | 8.086 / 8.216 mm (-1.6 %) | 2.49 / 2.69 ms (-7.5 %) | 6.34 / 5.89 N (+7.6 %) |
+| F1a (C4, FHS joints) | 8.565 / 8.747 mm (-2.1 %; ours still has the sphere joint) | 2.46 / 2.62 ms | 12.27 / 11.43 N (+7.4 %) |
+
+- **Blind graded predictions hold.** B2i and B2j were predicted before the runs within 1.5-2 % in stroke: the
+  joint model works when the radii differ at a joint. The time of max stroke is 4-7.5 % early (ours a little
+  stiff early). B2k was skipped (run time).
+- **Joint shape matters.** F1a vs B2a, Abaqus vs Abaqus: the FHS (print) joint is softer than cylinder + sphere.
+  Max stroke +5.1 % (8.747 vs 8.323 mm), mean crush force -2.7 %, peak bottom reaction -11 % (16.4 vs 18.4 N), with
+  1.4 % less material. That is larger than the model's ±3 % accuracy, so the beam joint model needs the FHS shape
+  (`joint_shape='fhs'`).
+- **New finding: mid-crush force.** The beam model's mean crush force is 4-8 % high on all four C4-based cells, and
+  its time of max stroke is early, while the max stroke is within 3 %. So the shape of the force-stroke curve
+  differs (ours stiffer mid-crush, softer near the end). Not graded before.
+- **Peak bottom reaction.** It is wave-dominated, with low correlation, in the solids. Mean crush force is the
+  better force metric.
+
+### Next steps (2026-10-08)
+
+1. **FHS joint shape in the beam joint model.**
+   - `jointSection.element_factors_aniso(joint_shape='fhs')`: slice membership from the FHS surface of each node.
+   - Target F1a: 8.747 mm, against 8.565 with the sphere joint. Then the blind F cases.
+2. **Robust F meshes (before writing more F inputs).**
+   - Repair the remaining one-face boundary slivers too: collapse onto the boundary, or a local remesh, to a minimum
+     altitude ≥ ~0.04 mm (as the B2i/j meshes).
+   - Test `*SECTION CONTROLS, DISTORTION CONTROL=YES` on C3D10M in a short run (check the .dat).
+3. **Shorter runs.** Every metric is on the loading branch, and the max stroke is at 2.4-2.7 ms. So use T = 3.0 ms
+   for all new C4-type runs (B2k, F1c, F1i-k). That saves 25 % of the run time and avoids the rebound failures.
+   B2j's 14.5 h came from the time step collapsing at a strut root by the top plate.
+4. **Batch next.**
+   - F1c (C4 r 0.6), F1d (C12), F1e-h (BCC / octet, 0.5 ms), F1i / F1j (graded FHS twins of B2i / j).
+   - Optionally B2k, if a third graded point is wanted.
+5. **Mid-crush force (+4-8 %).** Check against the large-strain measure (A2: engineering vs log strain above ~10 %)
+   and the joint bending at large rotation. Use the B2a / F1a force-stroke curves first; no new Abaqus runs needed.
 
 ## Cost: 3D solid (Abaqus) vs our beam model (for future planning)
 | Model | Abaqus solid C3D10M | Abaqus beams B31 | Ours (beams) |
