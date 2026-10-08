@@ -231,6 +231,51 @@ stiff on B2i/j.
 5. **Mid-crush force (+4-8 %).** Check against the large-strain measure (A2: engineering vs log strain above ~10 %)
    and the joint bending at large rotation. Use the B2a / F1a force-stroke curves first; no new Abaqus runs needed.
 
+### Steps 1-2 done (2026-10-08)
+
+**Step 1: FHS joint shape in the joint model.**
+- `jointSection.element_factors_aniso(joint_shape='fhs')` is implemented. Exact slices: the FHS solid is rotated
+  into each strut frame, cut with manifold3d and rasterised onto the slice grid; the Saint-Venant weights are
+  unchanged.
+- **Result: wrong sign.** The FHS factors are larger than the sphere factors (mean axial 1.094 vs 1.077,
+  bending ≤ 1.42 vs 1.37). The beam model gets stiffer: 8.333 mm, against 8.565 with sphere factors and 8.747 in
+  Abaqus F1a.
+- **Why: the FHS joint is not stiffer.** Abaqus energy absorbed vs stroke is equal for B2a and F1a up to 6 mm
+  (within ±2.7 %):
+
+  | stroke | 1 mm | 3 mm | 5 mm | 6 mm | 7 mm | 8 mm |
+  |---|---|---|---|---|---|---|
+  | F1a vs B2a | +2.6 % | -0.1 % | -0.7 % | -1.1 % | -2.7 % | -4.5 % |
+
+  - The FHS cell only falls behind in late crush (> 6 mm ≈ 50 % strain), i.e. densification / self-contact, where
+    the bulky joint spheres of B2a press together earlier.
+  - The 5.1 % extra stroke of F1a is that late-crush effect, not joint bending stiffness.
+- **Plates are not the cause.** The plate footprints are equal (41.0 vs 41.7 mm2).
+- **Decision.** Keep the sphere-joint factors (`JOINT_SV`) for FHS prints: Abaqus says the response is the same
+  where the joint model acts. Treat the late-crush difference as contact geometry: next step 5b, how the beam
+  model's densification (beam-beam contact) represents node bulk.
+- `shape='fhs'` stays available for study, but is not used.
+
+**Step 2: robust F meshes.**
+- **Safe sliver removal.** `solid.remove_boundary_slivers` now restores removed tets at any boundary defect
+  (`solid.boundary_defects`: non-manifold edge, pinched vertex), so the boundary is always a closed 2-manifold. The
+  F1a mesh, as run, had one non-manifold boundary edge.
+- **One-face slivers cannot be fixed inside the mesh.** Deleting them exposes equally thin neighbours. Interior
+  vertex relaxation (`solid.relax_small_tets`) finds nothing to move: they sit on poor surface triangles at the
+  plate rims (fold ≈ 58 deg) and at the mid-plane nodes.
+- **Surface first.** `gmsh_from_stl` now meshes and smooths the surface first:
+
+  | F mesh | bad surface triangles (< 10 deg) | tets < 0.088 mm |
+  |---|---|---|
+  | as F1a was run | 61 | 431 |
+  | `F_MESH` (Delaunay 2D, 10 smoothing passes) | 8 | 205 |
+
+  The minimum altitude stays ≈ 0.009 mm (a geometric feature). Mass scaling covers it in the time step (F1a:
+  +0.0034 %).
+- **New F runs (`F_RUN`).** T = 3.0 ms, and `*SECTION CONTROLS, DISTORTION CONTROL=YES` on the solid section.
+  **Check:** that Abaqus accepts distortion control for C3D10M (input processing / .dat, seconds).
+- **F1a.** Its committed .inp is the one that ran, and it stays the record; `F1a.fmesh` keeps its mesh settings.
+
 ## Cost: 3D solid (Abaqus) vs our beam model (for future planning)
 | Model | Abaqus solid C3D10M | Abaqus beams B31 | Ours (beams) |
 |---|---|---|---|

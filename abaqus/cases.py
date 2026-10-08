@@ -659,7 +659,9 @@ B2a_f = dict(B2a, name='B2a_unit_cell_solid_h027', h=0.27, title=B2a['title'].re
 # remesh + tets (solid.gmsh_from_stl, no curvature sizing: the discrete STL's facet noise would refine it) ->
 # boundary slivers removed -> C3D10M; the few remaining small tets get fixed mass scaling BELOW MIN to the
 # time increment of the B2 twin's smallest element (added mass reported in the header and by Abaqus in the .sta).
-F1a = dict(B2a, name='F1a_unit_cell_C4_FHS_solid_r080_h040', geometry='fhs', twin='B2a',
+F_MESH = dict(algo2d=5, smooth2d=10)        # robust F mesh (2026-10-08): Delaunay 2D + 10 smoothing passes
+F_RUN = dict(T=3e-3, distortion_control=True)  # loading branch only (max stroke at 2.4-2.7 ms); distortion control
+F1a = dict(B2a, name='F1a_unit_cell_C4_FHS_solid_r080_h040', geometry='fhs', twin='B2a', fmesh=dict(algo2d=6, smooth2d=0),
            title='F1a: ONE C4 unit cell (12.7 mm cube, 36 struts, r 0.8) as a SOLID with FHS node joints (the print '
                  'geometry: Faired Hull-Subdivision, src/nodeJoint.py) instead of cylinders + joint spheres; gmsh tets '
                  'from the FHS STL, C3D10M, h 0.4 mm; otherwise identical to B2a: bottom face clamped, top face tied '
@@ -675,7 +677,8 @@ def b2_mesh(c=B2a):
     import sys
     sys.path.insert(0, str(ROOT))
     import solid
-    key = (c.get('cell', 'C4'), c['nx'], c['ny'], c['h'], c['r'], tuple(c.get('rg', ())), c.get('geometry', 'cylsphere'))
+    key = (c.get('cell', 'C4'), c['nx'], c['ny'], c['h'], c['r'], tuple(c.get('rg', ())), c.get('geometry', 'cylsphere'),
+           tuple(sorted(c.get('fmesh', {}).items())))
     if key not in _B2_cache:
         from latticeSetup import example3
         lat = example3(elemSize=c['elemSize'], nx=c['nx'], ny=c['ny'], name=c.get('cell', 'C4'))
@@ -688,7 +691,7 @@ def b2_mesh(c=B2a):
             stl.parent.mkdir(parents=True, exist_ok=True)
             man, _ = nj.lattice_fhs(X, C, strut_radii(c, lat), z_range=(0.0, H))
             nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
-            P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0)
+            P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0, **c.get('fmesh', F_MESH))
             P, T, info['slivers_removed'] = solid.remove_boundary_slivers(P, T, 0.25 * c['h'])
             info['stl'] = str(stl.relative_to(ROOT.parent))
         else:
@@ -749,8 +752,8 @@ def b2_inp(c=B2a):
 {ref}
 *NSET, NSET=MOVING
 TOP, REF
-*SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN
-,
+*SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN{', CONTROLS=SCDIST' if c.get('distortion_control') else ''}
+,{chr(10) + '*SECTION CONTROLS, NAME=SCDIST, DISTORTION CONTROL=YES' if c.get('distortion_control') else ''}
 *MASS, ELSET=IMPMASS
 {Mref:.10g},
 {material_block(E)}

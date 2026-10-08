@@ -152,7 +152,7 @@ def tet_quality(P, T):
 
 
 def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False, algo3d=10, extra_opt=(), algo2d=6,
-                  size_min=0.5):
+                  size_min=0.5, smooth2d=0, opt2d=()):
     """Solid tet mesh of a watertight STL (e.g. an FHS lattice, nodeJoint.lattice_fhs): gmsh splits the discrete
     surface at sharp edges (> angle deg: the plate rims; the FHS fillets are smooth, < 20 deg), reparametrises the
     patches, remeshes the surface at ~h (finer where curved: `curvature` elements per 2 pi) and fills it with linear
@@ -175,6 +175,10 @@ def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False
     gmsh.option.setNumber('Mesh.Algorithm3D', algo3d)
     gmsh.option.setNumber('Mesh.Optimize', 1)
     gmsh.option.setNumber('Mesh.OptimizeNetgen', 1 if optimize else 0)
+    gmsh.option.setNumber('Mesh.Smoothing', smooth2d)
+    gmsh.model.mesh.generate(2)                                    # surface first: smooth / optimise it, then fill
+    for method in opt2d:                                           # e.g. 'Laplace2D'
+        gmsh.model.mesh.optimize(method, niter=5)
     gmsh.model.mesh.generate(3)
     for method in extra_opt:                                       # e.g. 'Netgen', 'Relocate3D'
         gmsh.model.mesh.optimize(method, niter=3)
@@ -193,22 +197,109 @@ def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False
     return P, T
 
 
-def remove_boundary_slivers(P, T, min_alt, max_iter=20):
-    """Delete flat boundary tets (shortest altitude < min_alt with >= 2 faces on the boundary): they bridge two
-    surface triangles across a fold of a curved surface; removing one shaves a negligible wedge and leaves a valid
-    mesh (its other faces become boundary). Repeats until none is left or nothing changes. Returns (P, T, removed)."""
-    removed = 0
+def boundary_defects(T):
+    """Vertices where the tet mesh's boundary is not a closed 2-manifold: endpoints of boundary edges not shared by
+    exactly two boundary faces, and pinched vertices (the boundary faces around them do not form a single fan).
+    Also flags faces shared by > 2 tets. Returns a set of vertex indices (empty = clean)."""
+    import networkx as nx
+    F = np.sort(np.vstack([T[:, [0, 1, 2]], T[:, [0, 1, 3]], T[:, [0, 2, 3]], T[:, [1, 2, 3]]]), 1)
+    u, cnt = np.unique(F, axis=0, return_counts=True)
+    bad = set(u[cnt > 2].ravel().tolist())
+    B = u[cnt == 1]
+    E = np.sort(np.vstack([B[:, [0, 1]], B[:, [1, 2]], B[:, [0, 2]]]), 1)
+    ue, ec = np.unique(E, axis=0, return_counts=True)
+    bad |= set(ue[ec != 2].ravel().tolist())
+    nb = {}
+    for f in B:
+        for k in range(3):
+            nb.setdefault(f[k], []).append((f[(k + 1) % 3], f[(k + 2) % 3]))
+    bad |= {v for v, links in nb.items() if nx.number_connected_components(nx.Graph(links)) != 1}
+    return bad
+
+
+def boundary_ok(T):
+    return not boundary_defects(T)
+
+
+def remove_boundary_slivers(P, T, min_alt, max_iter=50, one_face_alt=None):
+    """Delete flat boundary tets: shortest altitude < min_alt with >= 2 boundary faces (they bridge two surface
+    triangles across a fold of a curved surface: removing one shaves a negligible wedge), and, if one_face_alt is
+    given, tets with ONE boundary face below that altitude (removing one leaves a dent no deeper than its altitude).
+    Batch removal, then every removed tet touching a boundary defect (non-manifold edge, pinched vertex) is put
+    back, until the boundary is a closed 2-manifold. Returns (P, T, removed)."""
+    removed_total = 0
     for _ in range(max_iter):
         F = np.sort(np.vstack([T[:, [0, 1, 2]], T[:, [0, 1, 3]], T[:, [0, 2, 3]], T[:, [1, 2, 3]]]), 1)
         _, inv, cnt = np.unique(F, axis=0, return_inverse=True, return_counts=True)
         nbnd = (cnt[inv.ravel()] == 1).reshape(4, -1).sum(0)
         _, alt = tet_quality(P, T)
         kill = (alt < min_alt) & (nbnd >= 2)
+        if one_face_alt is not None:
+            kill |= (alt < one_face_alt) & (nbnd == 1)
         if not kill.any():
             break
-        T = T[~kill]
-        removed += int(kill.sum())
+        keep = ~kill
+        for _ in range(20):                                 # put back removed tets at boundary defects
+            bad = boundary_defects(T[keep])
+            if not bad:
+                break
+            back = (~keep) & np.isin(T, list(bad)).any(1)
+            if not back.any():
+                break
+            keep |= back
+        if boundary_defects(T[keep]) or keep.all():
+            break
+        removed_total += int((~keep).sum())
+        T = T[keep]
+    removed = removed_total
     used = np.unique(T)
     remap = -np.ones(len(P), int)
     remap[used] = np.arange(len(used))
     return P[used], remap[T], removed
+
+
+def relax_small_tets(P, T, min_alt, passes=10):
+    """Lift the interior vertices of tets thinner than min_alt: each such vertex is moved toward the centroid of its
+    edge neighbours (full step, then half, quarter), accepted only if every tet around it stays positive and the
+    worst altitude around it improves. Boundary vertices never move, so the surface is untouched. Returns P."""
+    P = P.copy()
+    F = np.sort(np.vstack([T[:, [0, 1, 2]], T[:, [0, 1, 3]], T[:, [0, 2, 3]], T[:, [1, 2, 3]]]), 1)
+    u, cnt = np.unique(F, axis=0, return_counts=True)
+    on_bnd = np.zeros(len(P), bool)
+    on_bnd[u[cnt == 1].ravel()] = True
+    vt = [[] for _ in range(len(P))]
+    for e, t in enumerate(T):
+        for v in t:
+            vt[v].append(e)
+
+    def worst(v, X):
+        tt = T[vt[v]]
+        a, b, c, d = (X[tt[:, k]] for k in range(4))
+        vol = np.einsum('ij,ij->i', np.cross(b - a, c - a), d - a) / 6
+        if (vol <= 0).any():
+            return -1.0
+        return tet_quality(X, tt)[1].min()
+    for _ in range(passes):
+        _, alt = tet_quality(P, T)
+        bad = np.where(alt < min_alt)[0]
+        if len(bad) == 0:
+            break
+        moved = 0
+        for e in bad:
+            for v in T[e]:
+                if on_bnd[v]:
+                    continue
+                nbr = np.unique(T[vt[v]].ravel())
+                nbr = nbr[nbr != v]
+                w0 = worst(v, P)
+                target = P[nbr].mean(0)
+                for step in (1.0, 0.5, 0.25):
+                    old = P[v].copy()
+                    P[v] = old + step * (target - old)
+                    if worst(v, P) > w0:
+                        moved += 1
+                        break
+                    P[v] = old
+        if moved == 0:
+            break
+    return P

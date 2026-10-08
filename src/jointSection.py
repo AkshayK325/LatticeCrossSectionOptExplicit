@@ -28,6 +28,12 @@ def _slice_beta(Pn, t, e1, e2, ra, cyl, sph, z_lo, z_hi, n_grid, half):
     for c, rs in sph:
         inside |= ((P - c) ** 2).sum(-1) <= rs * rs
     inside &= (P[..., 2] >= z_lo - 1e-9) & (P[..., 2] <= z_hi + 1e-9)
+    return _moments(inside, Y, Z, u, ra, n_grid, decay)
+
+
+def _moments(inside, Y, Z, u, ra, n_grid, decay):
+    """Area / second-moment ratios (to the bare strut) of the connected part of the slice mask that contains the
+    strut axis, with optional Saint-Venant weights exp(-d / (decay ra)) outside the strut circle."""
     lab, _ = ndimage.label(inside)
     c0 = lab[n_grid // 2, n_grid // 2]
     if c0 == 0:
@@ -121,6 +127,12 @@ def _slice_moments(Pn, e1, e2, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay=Non
     for hd in hulls:                                       # beamBuild joints: convex hull of the strut end caps
         inside |= (hd.find_simplex(P.reshape(-1, 3)) >= 0).reshape(inside.shape)
     inside &= (P[..., 2] >= z_lo - 1e-9) & (P[..., 2] <= z_hi + 1e-9)
+    return _moments(inside, Y, Z, u, ra, n_grid, decay)
+
+
+def _moments(inside, Y, Z, u, ra, n_grid, decay):
+    """Area / second-moment ratios (to the bare strut) of the connected part of the slice mask that contains the
+    strut axis, with optional Saint-Venant weights exp(-d / (decay ra)) outside the strut circle."""
     lab, _ = ndimage.label(inside)
     c0 = lab[n_grid // 2, n_grid // 2]
     if c0 == 0:
@@ -170,10 +182,35 @@ def _node_hulls(X, C, r_beam, n_seg=32, extension=0.0, rounded=False):
     return hulls
 
 
+def _fhs_slicer(lat, r_beam, z_lo, z_hi):
+    """FHS print solid of the lattice (nodeJoint.lattice_fhs, trimmed to the plates) and a function giving, for strut
+    b at axial position s, the exact slice mask on the (Y, Z) grid in the strut frame (x, y, z): the solid is rotated
+    so that the strut axis is the slicing direction, cut by manifold3d, and the polygons rasterised (even-odd)."""
+    import manifold3d as m3
+    from matplotlib.path import Path
+    from nodeJoint import lattice_fhs
+    X, C = lat['X'], lat['conn']
+    man, _ = lattice_fhs(X, C, r_beam, z_range=(z_lo, z_hi))
+    cache = {}
+
+    def mask(b, p, x, y, z, s, Y, Z):
+        if b not in cache:                                  # world -> (y, z, x) about p: axis along local z
+            R = np.vstack((y, z, x))
+            M = np.column_stack((R, -R @ p))
+            cache[b] = man.transform(M.tolist())
+        pts = np.column_stack((Y.ravel(), Z.ravel()))
+        inside = np.zeros(len(pts), bool)
+        for poly in cache[b].slice(float(s)).to_polygons():
+            inside ^= Path(np.asarray(poly)).contains_points(pts)
+        return inside.reshape(Y.shape)
+    return mask
+
+
 def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0, decay=None, joint_shape='sphere',
                           extension=0.0, rounded=False):
-    """joint_shape: 'sphere' (gmsh/Abaqus validation solids: sphere of the largest radius at each node) or 'hull'
-    (beamBuild print STLs: convex hull of the strut end caps, which always lies inside that sphere)."""
+    """joint_shape: 'sphere' (gmsh/Abaqus validation solids: sphere of the largest radius at each node), 'hull'
+    (beamBuild print STLs: convex hull of the strut end caps, which always lies inside that sphere) or 'fhs' (the
+    FHS print joints, nodeJoint.lattice_fhs: exact slices of the FHS solid)."""
     """Per-element (ne, 6) factors for the resultants [N, T, My1, Mz1, My2, Mz2]: series averages over each
     element of the fused-section ratios in the element's own local axes (explicitFE.Frame rule)."""
     X, C, Xr, connr = lat['X'], lat['conn'], lat['Xr'], lat['connr']
@@ -184,6 +221,7 @@ def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0,
         rn[i], rn[j] = max(rn[i], r_beam[b]), max(rn[j], r_beam[b])
     prof = []
     node_hulls = _node_hulls(X, C, r_beam, extension=extension, rounded=rounded) if joint_shape == 'hull' else {}
+    fhs = _fhs_slicer(lat, r_beam, z_lo, z_hi) if joint_shape == 'fhs' else None
     ext_l = -min(extension, 0.0) if joint_shape == 'hull' else 0.0      # print struts stop this fraction short
     for b, (i, j) in enumerate(C):
         p, q = X[i], X[j]
@@ -206,8 +244,14 @@ def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0,
         ra = r_beam[b]
         half = half_factor * max(ra, rn[i], rn[j])
         sgrid = np.arange(0.0, L + 1e-12, ds_frac * ra)
-        R = np.array([_slice_moments(p + sv * x, y, z, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay, hl, own=ext_l == 0.0)
-                      for sv in sgrid])
+        if fhs is not None:                                  # exact FHS slices (the strut itself is part of the solid)
+            u = np.linspace(-half, half, n_grid)
+            Y, Z = np.meshgrid(u, u, indexing='ij')
+            R = np.array([_moments(fhs(b, p, x, y, z, min(max(sv, 1e-6), L - 1e-6), Y, Z), Y, Z, u, ra, n_grid, decay)
+                          for sv in sgrid])
+        else:
+            R = np.array([_slice_moments(p + sv * x, y, z, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay, hl,
+                                         own=ext_l == 0.0) for sv in sgrid])
         prof.append((sgrid, R))
     F = np.ones((len(connr), 6))
     for e, (a, b) in enumerate(connr):
