@@ -1,0 +1,405 @@
+1
+
+   Abaqus 2024                                  Date 08-Oct-2026   Time 13:52:07
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+ ***WARNING: Line #2 has been truncated.
+
+ ***WARNING: Line #5 has been truncated.
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          F1i: FHS-joint twin of B2i (the print geometry, src/nodeJoint.py, instead of cylinders + joint spheres; gmsh tets from the FHS STL, C3D10M h 0.3 mm, distortion control, T 3 ms). ONE C4 unit cell, GRADED radii (Midplane: top 1.0, bottom 0.6, mid 0.8) as a SOLID (C3D10M, h 0.3 mm), bottom clamped, top tied to a rigid plate with the impactor (45 N mm at 6 m/s); linear elastic E = 40 MPa, nu 0.49; frictionless self-contact. Ours: beams (0.6 mm elements), fused-section joint model                                
+  *ELEMENT, TYPE=C3D10M, ELSET=CELL
+  *ELEMENT, TYPE=MASS, ELSET=IMPMASS
+  *MATERIAL, NAME=EPU45_LIN
+  *DENSITY
+  *ELASTIC
+  *MASS, ELSET=IMPMASS
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *SECTION CONTROLS, NAME=SCDIST, DISTORTION CONTROL=YES
+
+ ***WARNING: THE PARAMETER DISTORTION CONTROL ON THE *SECTION CONTROLS OPTION 
+             IS RELEVANT FOR SOLID ELEMENTS WHEREVER APPLICABLE. THIS WARNING 
+             CAN BE IGNORED IF THE FEATURE IS APPLIED TO SOLID ELEMENTS ONLY.
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *MASS, ELSET=IMPMASS
+  *RIGID BODY, REF NODE=162949, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162949, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162949, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162949, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162949, TIE NSET=TOP
+  *SURFACE INTERACTION, NAME=CELLINT
+  *FRICTION
+  *RIGID BODY, REF NODE=162949, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162949, TIE NSET=TOP
+  *BOUNDARY
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *RIGID BODY, REF NODE=162949, TIE NSET=TOP
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  *FRICTION
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  
+                               E L E M E N T   Q U A L I T Y  C H E C K S        
+  
+  
+ ***NOTES: DISTORTED ISOPARAMETRIC ELEMENTS: ANGLE BETWEEN ISOPARAMETRIC LINES 
+           IS LESS THAN 45 DEGREES OR GREATER THAN 135 DEGREES.
+  
+           TETRAHEDRAL QUALITY MEASURE: VOLUME OF TETRAHEDRON DIVIDED BY THE 
+           VOLUME OF EQUILATERAL TETRAHEDRON WITH SAME CIRCUMSPHERE RADIUS; 
+           0 FOR DEGENERATE TETRAHEDRON AND 1 FOR EQUILATERIAL TETRAHEDRON. IT 
+           IS RECOMMENDED THAT THE TETRAHEDRAL QUALITY MEASURE BE GREATER THAN 
+           0.02, THE MIN INTERIOR (DIHEDRAL) ANGLE BE GREATER THAN 10 DEGREES, 
+           AND THE MAX INTERIOR (DIHEDRAL) ANGLE BE LESS THAN 160 DEGREES. 
+  
+           MODIFIED TETRAHEDRAL QUALITY MEASURE: ANGLES BETWEEN THE TWO LINE 
+           SEGMENTS ON EACH EDGE; THE EDGES OF MODIFIED TETRAHEDRAL SHOULD BE 
+           AS STRAIGHT AS POSSIBLE. IT IS RECOMMENDED THAT THE ANGLE BETWEEN 
+           THE TWO LINE SEGMENTS ON EACH EDGE IS BETWEEN 160 AND 180 DEGREES. 
+  
+           TRIANGULAR QUALITY MEASURE: AREA OF TRIANGLE DIVIDED BY THE AREA OF 
+           EQUILATERAL TRIANGLE WITH SAME CIRCUMCIRCLE RADIUS; 0 FOR DEGENERATE 
+           TRIANGLE AND 1 FOR EQUILATERAL TRIANGLE. IT IS RECOMMENDED THAT THE
+           TRIANGULAR QUALITY MEASURE BE GREATER THAN 0.01, THE MIN INTERIOR 
+           ANGLE BE GREATER THAN 10 DEGREES, AND THE MAX INTERIOR ANGLE BE LESS 
+           THAN 160 DEGREES. 
+  
+           NODAL ADJUSTMENTS ARISING FROM CONTACT INTERACTIONS AND/OR TIE 
+           CONSTRAINTS CAN CAUSE SEVERE ELEMENT DISTORTION. IT MAY BE NECESSARY 
+           TO REMESH IN ORDER TO REDUCE THE AMOUNT OF ADJUSTMENT. 
+
+ ***WARNING: 192 elements are distorted. Either the isoparametric angles are 
+             out of the suggested limits or the triangular or tetrahedral 
+             quality measure is bad. The elements have been identified in 
+             element set WarnElemDistorted.
+
+ ***WARNING: The aspect ratio for 1 elements exceeds 100 to 1. The elements 
+             have been identified in element set WarnElemAspectRatio.
+  
+ --------------------------------------------------------------------------------
+ Distorted tetrahedral elements
+  
+  Element  Quality measure     Min angle        Max angle     Adjusted nodes 
+ --------- ---------------- ---------------- ---------------- -------------- 
+      1091         0.016526          27.9975          131.301       NO       
+      1323        0.0172648          42.2784          144.495       NO       
+      1501        0.0906589          5.77115          135.885       NO       
+      1919       5.6291E-07          2.26104          172.637       NO       
+      2667      1.88967E-09          24.0108          148.364       NO       
+      3693      5.34312E-05          8.86705          163.362       NO       
+      3790       0.00252691          10.8201          158.689       NO       
+      3856      3.47908E-09           25.971          129.073       NO       
+      3887       0.00865164          10.6711          133.731       NO       
+      3955      3.88186E-06          6.02467          171.681       NO       
+      3956       1.7323E-08          2.42024          176.576       NO       
+      3959          0.01353           12.889          148.596       NO       
+      4409      4.09395E-06          3.16585          175.088       NO       
+      4575      0.000786733          13.5764          152.822       NO       
+      4872        0.0321289          7.77468          143.296       NO       
+      5211       0.00572315          28.6546          113.098       NO       
+      5481      1.97346E-09          23.8429          121.281       NO       
+      7399        0.0578823          8.80758          131.917       NO       
+      8014       0.00880044          33.5856          148.587       NO       
+      8427        0.0161374          36.7018           131.76       NO       
+      8430       0.00854335          24.0533          135.953       NO       
+      8432        0.0138233          22.8359          149.315       NO       
+      8484        0.0387781          8.88537          145.378       NO       
+      8509        0.0547813          9.40549           132.98       NO       
+      9071        0.0180973          41.7316          133.436       NO       
+      9587        0.0472628          9.86533          131.451       NO       
+      9592        0.0152307          29.7821           131.16       NO       
+      9607        0.0176308          32.7743          133.338       NO       
+      9613       0.00881433          38.5195          128.645       NO       
+      9661       0.00628571          49.4946          139.107       NO       
+      9676        0.0150296          44.0967          124.229       NO       
+      9691       0.00998776           49.935          137.896       NO       
+      9694        0.0124852           28.739           145.51       NO       
+      9851       0.00681723          9.72905          162.068       NO       
+     11658       0.00754942          15.8755          156.014       NO       
+     11681         0.014077          24.3528           145.97       NO       
+     11699        0.0190897          27.5032          132.344       NO       
+     11713       0.00454346          13.1308          159.005       NO       
+     11724       0.00132404          25.1148          146.849       NO       
+     11727        0.0825734          9.26911          156.034       NO       
+     11730      6.31192E-07          1.77323          166.939       NO       
+     11734        0.0134912          13.1152          129.514       NO       
+     11741      0.000220233          6.48354          139.008       NO       
+     11752       0.00803816          20.9114          147.214       NO       
+     11770       0.00501086          13.2559          134.368       NO       
+     11786        0.0167466          27.3513          148.341       NO       
+     11818      3.15429E-05          14.8639          171.532       NO       
+     11829      0.000667806          26.3156          145.931       NO       
+     11863         0.010575          15.1486          153.992       NO       
+     11872       0.00819692          14.7563          148.739       NO       
+     11877      9.88919E-08         0.869144          171.745       NO       
+     11881       0.00132148          7.62221          147.385       NO       
+     11885        0.0138495          18.6554          155.377       NO       
+     11910      2.26849E-09          34.5897          169.672       NO       
+     11921        0.0114176          16.9179          151.391       NO       
+     11977      4.16084E-05          9.33338          159.873       NO       
+     12013        0.0103639          15.9874          152.964       NO       
+     12018      0.000856504          5.55019          141.176       NO       
+     12031        0.0108595          17.1044          153.089       NO       
+     12034       0.00653025          21.5136          159.199       NO       
+     12038      3.55613E-06          6.38873          172.486       NO       
+     12053      0.000693199          5.97356          159.061       NO       
+     12073      1.48014E-05          3.23352          173.168       NO       
+     12080       0.00848524          41.1043            141.7       NO       
+     12115      6.38155E-05          7.29675          173.226       NO       
+     12143       0.00749464          12.5181          156.855       NO       
+     12144      0.000264842          2.93533          168.012       NO       
+     12166        0.0888825          7.40241          110.834       NO       
+     12256       0.00423863          15.6566          152.631       NO       
+     12276        0.0152108          30.8551          124.053       NO       
+     12313       0.00157608          3.92812          124.788       NO       
+     12334      0.000197876          6.67738          158.008       NO       
+     12341      5.10839E-07          1.86036          161.273       NO       
+     12344       0.00415622          31.8846          118.756       NO       
+     12345      7.81326E-05          9.36077          171.646       NO       
+     12353       0.00015522          6.68215          166.655       NO       
+     12356        0.0012209          18.4822          162.276       NO       
+     12420       5.5071E-05          8.13118          167.611       NO       
+     12435       0.00785212          39.2811          130.712       NO       
+     12443      0.000405765          6.69252          161.502       NO       
+     12450      6.02557E-06          1.09063          158.983       NO       
+     12453       0.00951725          16.4215          141.109       NO       
+     12574         0.152627          8.97681          159.337       NO       
+     12891      2.94021E-05          4.80566          173.087       NO       
+     12892      0.000782406          6.67161          155.952       NO       
+     13091      6.13223E-08         0.883789          170.932       NO       
+     13116       0.00164288           25.683          162.745       NO       
+     13128      1.43604E-06          6.55045          159.504       NO       
+     13653      0.000236731          22.7919           158.91       NO       
+     14018       0.00939096          43.4953          147.611       NO       
+     15146      6.09085E-09          7.58628          126.398       NO       
+     18207         0.181564          9.73472          132.821       NO       
+     19683       0.00359366          17.6723          120.981       NO       
+     21788         0.015167          15.2389          152.419       NO       
+     22222        0.0199606          20.7059          150.044       NO       
+     22676       0.00297195          30.8179          152.793       NO       
+     26006        0.0175747          42.4072          139.203       NO       
+     28263      4.92091E-07          11.9621          145.924       NO       
+     38528       0.00953882          10.8721            154.1       NO       
+     38588      0.000517082          5.44039          170.449       NO       
+     44558         0.019909          40.9925          128.885       NO       
+     44975        0.0115869          16.5035          147.698       NO       
+     45252        0.0133855          36.5114           137.47       NO       
+     45272        0.0192074          30.9007          119.223       NO       
+     45295        0.0169643          38.5759          117.826       NO       
+     45474         0.008232           37.405          141.638       NO       
+     45477        0.0143776          14.3188           140.59       NO       
+     47717       0.00166719          10.2432          155.272       NO       
+     51549         0.013228          31.5747          149.733       NO       
+     52280       0.00422108          26.9897          146.038       NO       
+     52295        0.0126109          33.6326          119.438       NO       
+     52312        0.0162425          23.3941          145.198       NO       
+     52347        0.0125113          25.1095          140.544       NO       
+     52373       0.00409083           21.359          146.879       NO       
+     52434        0.0146759          22.4083          136.736       NO       
+     52438       0.00448505          25.7536          135.827       NO       
+     52458        0.0130642          36.7954          123.836       NO       
+     52536        0.0131971          32.5965          130.925       NO       
+     52552       0.00809471          38.1607          130.676       NO       
+     52607        0.0044894          25.8902          149.921       NO       
+     52634         0.007867          32.7731          134.058       NO       
+     52651        0.0153601          24.5928          143.231       NO       
+     52666       0.00745588          34.0674          121.398       NO       
+     52668        0.0471142           9.6596          123.239       NO       
+     52671        0.0110561          48.5717          135.941       NO       
+     52683        0.0173078          23.7003          133.081       NO       
+     52708        0.0121391          29.6227           136.65       NO       
+     52709        0.0163256          28.6369          134.728       NO       
+     52710       0.00951555           38.465          125.022       NO       
+     52716        0.0143607          40.5698          124.189       NO       
+     52729        0.0185576          37.9491          133.831       NO       
+     52731        0.0121212           31.355          135.781       NO       
+     52789        0.0110692          28.6806          142.319       NO       
+     52790        0.0107842          35.5299          138.286       NO       
+     52815        0.0145901          36.4242          124.013       NO       
+     52827        0.0119973          34.0187          121.824       NO       
+     52829        0.0180492          36.5455          129.134       NO       
+     52831        0.0130675          28.2004          133.848       NO       
+     52884        0.0169856          30.6969          135.093       NO       
+     52901       0.00670821          50.2703            135.5       NO       
+     52915       0.00123701          8.24687          166.648       NO       
+     53104         0.010463           43.911          139.121       NO       
+     53292       0.00233136          13.6003          130.254       NO       
+     53492       0.00808217          41.1504           141.48       NO       
+     53621        0.0133833          46.0895          136.115       NO       
+     53627        0.0132221          54.4712          138.924       NO       
+     53639        0.0175816          16.9924          144.391       NO       
+     53647        0.0123543          32.0406          136.184       NO       
+     53664       0.00794639          36.6513          129.722       NO       
+     53709        0.0161542          31.1334          138.455       NO       
+     53801       0.00497144          41.3302          115.879       NO       
+     53867        0.0102628          38.0422          130.133       NO       
+     53891        0.0185514          27.3722           142.28       NO       
+     53908         0.011821          56.9242          139.361       NO       
+     53934        0.0164132           32.822          128.081       NO       
+     53949       0.00802717          24.1297          141.951       NO       
+     53981        0.0129269          33.5146          114.342       NO       
+     53995         0.006929          32.1193          135.403       NO       
+     54054        0.0165638          37.4937          128.827       NO       
+     54055        0.0150444          40.4552           122.32       NO       
+     54110       0.00882341          46.7588          139.697       NO       
+     55497        0.0158206          13.8906          155.273       NO       
+     56295        0.0151975          16.7202          151.898       NO       
+     58659        0.0314281          9.58113            146.4       NO       
+     60338       0.00332308          10.2565          162.151       NO       
+     61054         0.196468           9.2575           99.717       NO       
+     62957        0.0119432          19.1178          154.507       NO       
+     63447         0.090754          7.87171          121.135       NO       
+     67877        0.0174517          33.9419          149.918       NO       
+     69026      2.46363E-06          2.70912          164.422       NO       
+     69027      9.75064E-06          9.38665          150.982       NO       
+     69244      8.72001E-08          8.53437          157.427       NO       
+     69250      2.43076E-09          17.2688          107.165       NO       
+     69560       0.00905036           31.631          129.905       NO       
+     69561        0.0182912          43.0384          129.163       NO       
+     72484         0.010614          9.36358          159.196       NO       
+     72504       0.00108773          6.10274          168.449       NO       
+     74945        0.0030341          11.1153          162.527       NO       
+     79461       0.00144843          8.90834            164.9       NO       
+     79984      6.95875E-05          8.13335          171.035       NO       
+     79989        0.0846545          6.45494          140.686       NO       
+     79990       8.8306E-05          4.00898           152.18       NO       
+     79991       0.00517101          27.8709          120.512       NO       
+     80018        0.0096932            24.91          130.773       NO       
+     85848        0.0140032          17.2786          135.869       NO       
+     88791        0.0190472          12.4922           154.47       NO       
+     89197       0.00282746          19.0345          145.637       NO       
+     89198       0.00929676          22.2687          147.654       NO       
+     89206        0.0138204          32.7484          149.001       NO       
+     89207       0.00701601          24.2416          148.159       NO       
+     89208       0.00682317          24.3545          142.909       NO       
+     92689        0.0131147          15.1953          150.358       NO       
+  
+ --------------------------------------------------------------------------------
+ Elements with large aspect ratio
+  
+  Element  Adjusted nodes 
+ --------- -------------- 
+      2667       NO       
+  
+  
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *OUTPUT, HISTORY, TIME INTERVAL=1e-05
+  *STEP, NAME=DROP, NLGEOM=YES
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *FIXED MASS SCALING, DT=2.52953e-08, TYPE=BELOW MIN
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=1e-05
+  *NODE OUTPUT, NSET=REF
+  *NODE OUTPUT, NSET=BOT
+  *ENERGY OUTPUT
+  *END STEP
+  *SURFACE INTERACTION, NAME=CELLINT
+  *FRICTION
+  *BOUNDARY
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *CONTACT
+  *CONTACT INCLUSIONS, ALL EXTERIOR
+  *CONTACT PROPERTY ASSIGNMENT
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                 98243
+          NUMBER OF NODES IS                                   261191
+          NUMBER OF NODES DEFINED BY THE USER                  162949
+          NUMBER OF INTERNAL NODES GENERATED BY THE PROGRAM     98242
+          TOTAL NUMBER OF VARIABLES IN THE MODEL               794913
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =      2.1    
+       SYSTEM TIME (SEC)    =     0.10    
+       TOTAL CPU TIME (SEC) =      2.2    
+       WALLCLOCK TIME (SEC) =            2
