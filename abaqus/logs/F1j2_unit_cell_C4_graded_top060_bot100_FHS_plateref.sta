@@ -1,0 +1,238 @@
+
+The double precision Abaqus/Package executable will be used in this analysis.
+
+Abaqus/Explicit 2024                             DATE 08-Oct-2026  TIME 22:11:02
+-------------------------------------------------------------------------------
+ PREPROCESSOR WARNING MESSAGES
+-------------------------------------------------------------------------------
+
+
+***WARNING: There are 4 warning messages in the data (.dat) file.  Please
+            check the data file for possible errors in the input file.
+
+
+
+***WARNING: TYPE=BELOW MIN mass scaling will be ignored for mass elements.
+
+-------------------------------------------------------------------------------
+           DOMAIN DECOMPOSITION INFORMATION
+-------------------------------------------------------------------------------
+
+
+     DOMAIN 1 HAS 26545 ELEMENTS AND 69006 NODES with WEIGHT 12.500
+
+     DOMAIN 2 HAS 26541 ELEMENTS AND 69002 NODES with WEIGHT 12.500
+
+     DOMAIN 3 HAS 26545 ELEMENTS AND 69053 NODES with WEIGHT 12.500
+
+     DOMAIN 4 HAS 26540 ELEMENTS AND 69044 NODES with WEIGHT 12.500
+
+     DOMAIN 5 HAS 26432 ELEMENTS AND 70986 NODES with WEIGHT 12.500
+
+     DOMAIN 6 HAS 26430 ELEMENTS AND 71071 NODES with WEIGHT 12.500
+
+     DOMAIN 7 HAS 26426 ELEMENTS AND 71087 NODES with WEIGHT 12.500
+
+     DOMAIN 8 HAS 26428 ELEMENTS AND 71101 NODES with WEIGHT 12.500
+
+
+-------------------------------------------------------------------------------
+ MODEL INFORMATION (IN GLOBAL X-Y COORDINATES)
+-------------------------------------------------------------------------------
+
+   Total mass (unscaled) in model = 2.65982E-06
+   Center of mass of model (based on unscaled mass) = ( 6.350253E+00, 6.350110E+00, 1.183330E+01)
+
+    Moments of Inertia :
+                 About Center of Mass              About Origin
+      I(XX)          2.811239E-05                  5.078131E-04
+      I(YY)          2.810988E-05                  5.078154E-04
+      I(ZZ)          1.328947E-05                  2.278030E-04
+      I(XY)          5.843661E-10                 -1.072562E-04
+      I(YZ)          1.762899E-09                 -1.998644E-04
+      I(ZX)          4.663426E-09                 -1.998660E-04
+
+-------------------------------------------------------------------------------
+ STABLE TIME INCREMENT INFORMATION
+-------------------------------------------------------------------------------
+
+
+  The stable time increment estimate for each element is based on
+  linearization about the initial state. The stable time increment estimates
+  do not account for mass scaling.
+
+
+   Initial time increment = 6.54552E-10
+
+   Statistics for all elements:
+      Mean = 4.65912E-08
+      Standard deviation = 1.65304E-08
+
+   Most critical elements:
+    Element number   Rank    Time increment   Increment ratio
+   ----------------------------------------------------------
+       81358          1       6.545523E-10      1.000000E+00
+       81349          2       7.093603E-10      9.227361E-01
+       89457          3       1.887884E-09      3.467121E-01
+       81345          4       2.401840E-09      2.725212E-01
+       81464          5       3.245078E-09      2.017062E-01
+       81321          6       3.386357E-09      1.932910E-01
+       81525          7       3.799711E-09      1.722637E-01
+       13952          8       4.332234E-09      1.510889E-01
+       81749          9       5.300177E-09      1.234963E-01
+       13871         10       5.561601E-09      1.176914E-01
+
+
+***WARNING: The number of history output requests (13599) in this step has
+            exceeded the maximum value of 10000 specified by the Abaqus
+            environment variable 'max_history_requests.' Reduce the number of
+            requests, increase the value of this variable, or deactivate this
+            test by setting 'max_history_requests=0' in the abaqus_v6.env
+            file. Performance problems may occur if these requests are
+            maintained. Consider requesting specific tensor components or
+            requesting field output from which history data may be extracted.
+
+
+***WARNING: The total number of history requests is the product of the number
+            of components, the number of integration points, and the number of
+            elements, summed over all requests in the analysis step. For
+            example, requesting history for the tensor variable S for a C3D10M
+            element will generate 24 requests: (6 comp)*(4 int pts). The
+            number of history requests may be reduced by requesting a specific
+            component of a tensor or by requesting field output from which
+            history data may be extracted in Abaqus/Viewer.
+
+-------------------------------------------------------------------------------
+
+  INFORMATION REGARDING INITIAL CONTACT OVERCLOSURES FOR NEWLY DEFINED GENERAL
+  CONTACT INTERACTIONS IN STEP 1
+
+-------------------------------------------------------------------------------
+
+  No initial node-face or edge-edge overclosures found.
+
+
+  No nodal position adjustments have been made.
+
+
+  No unresolved initial node-face or edge-edge overclosures found.
+
+
+***NOTE: You can view the deformed configuration due to the resolution of
+         initial overclosures.  In increment 0, draw the deformed shape or
+         draw a symbol plot of vector displacements.
+
+------------------------------------------------------------------------------
+
+Abaqus/Explicit 2024                             DATE 08-Oct-2026  TIME 22:11:28
+
+The double precision Abaqus/Explicit executable will be used in this analysis.
+
+The model has been decomposed into 8 domains.
+Domain level parallelization will be used with 8 processors each hosting an MPI rank.
+
+-------------------------------------------------------------------------------
+ SOLUTION PROGRESS
+-------------------------------------------------------------------------------
+
+ STEP 1  ORIGIN 0.0000
+
+  Total memory used for step 1 is approximately 2.9 gigabytes.
+  Element by element stable time estimation algorithm will be used.
+  Scaling factor:  1.0000
+              STEP     TOTAL      WALL      STABLE    CRITICAL    KINETIC      TOTAL    PERCENT
+INCREMENT     TIME      TIME      TIME   INCREMENT     ELEMENT     ENERGY     ENERGY  CHNG MASS
+        0  0.000E+00 0.000E+00  00:00:09 2.530E-08      115025  4.199E+01  4.199E+01  4.769E-02
+Output Field Frame Number     0, of     20, at step time 0.000E+00
+     1945  4.588E-05 4.588E-05  00:02:16 2.337E-08       97239  4.117E+01  4.199E+01  4.769E-02
+     3898  9.099E-05 9.099E-05  00:04:20 2.258E-08       97239  4.060E+01  4.199E+01  4.769E-02
+     5846  1.339E-04 1.339E-04  00:06:26 2.178E-08       97087  4.030E+01  4.199E+01  4.769E-02
+     6591  1.500E-04 1.500E-04  00:07:13 2.163E-08       97087  4.005E+01  4.199E+01  4.769E-02
+Output Field Frame Number     1, of     20, at step time 1.500E-04
+     8547  1.937E-04 1.937E-04  00:09:20 2.247E-08       80967  3.928E+01  4.199E+01  4.769E-02
+    10497  2.369E-04 2.369E-04  00:11:26 2.206E-08       97087  3.858E+01  4.199E+01  4.769E-02
+    12463  2.804E-04 2.804E-04  00:13:32 2.133E-08       97087  3.764E+01  4.199E+01  4.769E-02
+    13401  3.000E-04 3.000E-04  00:14:32 2.040E-08       97087  3.699E+01  4.199E+01  4.769E-02
+Output Field Frame Number     2, of     20, at step time 3.000E-04
+    15351  3.403E-04 3.403E-04  00:16:38 2.101E-08       97087  3.567E+01  4.199E+01  4.769E-02
+    17305  3.819E-04 3.819E-04  00:18:43 2.136E-08        6840  3.470E+01  4.199E+01  4.769E-02
+    19240  4.222E-04 4.222E-04  00:20:48 1.993E-08       97087  3.360E+01  4.199E+01  4.769E-02
+    20653  4.500E-04 4.500E-04  00:22:18 1.936E-08       97087  3.272E+01  4.199E+01  4.769E-02
+Output Field Frame Number     3, of     20, at step time 4.500E-04
+    22613  4.864E-04 4.864E-04  00:24:24 1.730E-08       97087  3.202E+01  4.199E+01  4.769E-02
+    24564  5.175E-04 5.175E-04  00:26:29 1.471E-08       97087  3.138E+01  4.199E+01  4.769E-02
+    26540  5.421E-04 5.421E-04  00:28:34 1.079E-08       97087  3.045E+01  4.199E+01  4.769E-02
+    28483  5.621E-04 5.621E-04  00:30:39 9.833E-09       97087  2.970E+01  4.199E+01  4.769E-02
+    30441  5.802E-04 5.802E-04  00:32:44 8.894E-09       97087  2.917E+01  4.199E+01  4.769E-02
+    32419  5.973E-04 5.973E-04  00:34:49 8.530E-09       97087  2.874E+01  4.199E+01  4.769E-02
+    32734  6.000E-04 6.000E-04  00:35:08 8.523E-09       97087  2.867E+01  4.199E+01  4.769E-02
+Output Field Frame Number     4, of     20, at step time 6.000E-04
+    34679  6.166E-04 6.166E-04  00:37:14 8.535E-09       97087  2.820E+01  4.199E+01  4.769E-02
+    36630  6.332E-04 6.332E-04  00:39:19 8.547E-09       97087  2.759E+01  4.199E+01  4.769E-02
+    38596  6.504E-04 6.504E-04  00:41:24 9.382E-09       97087  2.695E+01  4.199E+01  4.769E-02
+    40548  6.674E-04 6.674E-04  00:43:29 7.421E-09       97087  2.631E+01  4.199E+01  4.769E-02
+    42494  6.819E-04 6.819E-04  00:45:34 7.308E-09       97087  2.584E+01  4.200E+01  4.769E-02
+    44470  6.959E-04 6.959E-04  00:47:39 7.182E-09       97087  2.553E+01  4.200E+01  4.769E-02
+    46424  7.087E-04 7.087E-04  00:49:44 6.446E-09       81206  2.531E+01  4.200E+01  4.769E-02
+    48382  7.216E-04 7.216E-04  00:51:50 6.662E-09       81312  2.506E+01  4.200E+01  4.769E-02
+    50342  7.351E-04 7.351E-04  00:53:55 7.139E-09       97087  2.470E+01  4.201E+01  4.769E-02
+    52293  7.483E-04 7.483E-04  00:55:59 5.390E-09       81206  2.428E+01  4.209E+01  4.769E-02
+    52584  7.500E-04 7.500E-04  00:56:18 5.919E-09       81206  2.423E+01  4.209E+01  4.769E-02
+Output Field Frame Number     5, of     20, at step time 7.500E-04
+    54529  7.617E-04 7.617E-04  00:58:23 5.621E-09      175169  2.384E+01  4.209E+01  4.769E-02
+    56484  7.714E-04 7.714E-04  01:00:29 4.675E-09      175169  2.355E+01  4.209E+01  4.769E-02
+    58473  7.799E-04 7.799E-04  01:02:34 3.606E-09      125872  2.332E+01  4.211E+01  4.769E-02
+    60428  7.859E-04 7.859E-04  01:04:40 2.715E-09      125872  2.316E+01  4.220E+01  4.769E-02
+    62370  7.915E-04 7.915E-04  01:06:46 3.044E-09      175169  2.304E+01  4.220E+01  4.769E-02
+    64345  7.960E-04 7.960E-04  01:08:51 1.715E-09      175169  2.294E+01  4.223E+01  4.769E-02
+
+***WARNING: In element 125872 the ratio of deformation speed to wave speed is
+            0.30000 at increment 64606. See the message file for further
+            information.
+
+
+***ERROR: The ratio of deformation speed to wave speed exceeds 1.0000 in at
+          least one element. This usually indicates an error with the model
+          definition. Additional diagnostic information may be found in the
+          message file.
+
+
+The following checklist may be helpful in diagnosing the error:
+
+    1. Check contact definitions for problems such as excessive initial
+       overclosure or unrealistic tied definition between contact pairs.
+       A vector plot of velocities or accelerations will usually help to
+       identify contact problems.
+
+    2. Check stiffness (elastic modulus) and mass (density) definitions for
+       consistent units and verify that the combination is reasonable.
+
+    3. Check for poor mesh definition.
+
+    4. Check the boundary conditions for an excessive loading rate. The
+       *DIAGNOSTICS, DEFORMATION SPEED CHECK=DETAIL option may be used to obtain
+       detailed diagnostics information.
+
+    5. Check the current status of the structure to see if it has
+       totally failed.
+
+    6. A dashpot or a very stiff spring may cause the analysis to go unstable.
+       The *DYNAMIC, DIRECT option may be used to control the time increment
+       directly.
+
+
+***ERROR: The fatal error will generate a new field output in the last
+          increment. All variables applicable to the current procedure and
+          material type(s) will be written to the output database.
+
+    64640  7.965E-04 7.965E-04  01:09:11 1.000E-14      125872  3.107E+01  9.770E+02  4.769E-02
+A special Output Field Frame with all relevant variables was written at step time 7.965E-04 of 3.000E-03
+  EXPLICIT EXECUTABLE TIME SUMMARY
+       USER TIME (SEC)      =   3973.1
+       SYSTEM TIME (SEC)    =   125.00
+       WALLCLOCK TIME (SEC) =         4152
+              INIT (SEC) =         11
+              MAIN (SEC) =       4141
+
+  THE ANALYSIS HAS NOT BEEN COMPLETED
+

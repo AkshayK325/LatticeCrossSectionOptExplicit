@@ -1,0 +1,280 @@
+
+The double precision Abaqus/Package executable will be used in this analysis.
+
+Abaqus/Explicit 2024                             DATE 08-Oct-2026  TIME 19:47:12
+-------------------------------------------------------------------------------
+ PREPROCESSOR WARNING MESSAGES
+-------------------------------------------------------------------------------
+
+
+***WARNING: There are 4 warning messages in the data (.dat) file.  Please
+            check the data file for possible errors in the input file.
+
+
+
+***WARNING: TYPE=BELOW MIN mass scaling will be ignored for mass elements.
+
+-------------------------------------------------------------------------------
+           DOMAIN DECOMPOSITION INFORMATION
+-------------------------------------------------------------------------------
+
+
+     DOMAIN 1 HAS 25604 ELEMENTS AND 68978 NODES with WEIGHT 12.500
+
+     DOMAIN 2 HAS 25608 ELEMENTS AND 68789 NODES with WEIGHT 12.500
+
+     DOMAIN 3 HAS 25607 ELEMENTS AND 68916 NODES with WEIGHT 12.500
+
+     DOMAIN 4 HAS 25605 ELEMENTS AND 68895 NODES with WEIGHT 12.500
+
+     DOMAIN 5 HAS 25715 ELEMENTS AND 67002 NODES with WEIGHT 12.500
+
+     DOMAIN 6 HAS 25719 ELEMENTS AND 66890 NODES with WEIGHT 12.500
+
+     DOMAIN 7 HAS 25720 ELEMENTS AND 66992 NODES with WEIGHT 12.500
+
+     DOMAIN 8 HAS 25718 ELEMENTS AND 66991 NODES with WEIGHT 12.500
+
+
+-------------------------------------------------------------------------------
+ MODEL INFORMATION (IN GLOBAL X-Y COORDINATES)
+-------------------------------------------------------------------------------
+
+   Total mass (unscaled) in model = 2.82790E-06
+   Center of mass of model (based on unscaled mass) = ( 6.350296E+00, 6.350048E+00, 1.220925E+01)
+
+    Moments of Inertia :
+                 About Center of Mass              About Origin
+      I(XX)          1.801357E-05                  5.535861E-04
+      I(YY)          1.801226E-05                  5.535937E-04
+      I(ZZ)          1.339549E-05                  2.414636E-04
+      I(XY)          1.799416E-10                 -1.140339E-04
+      I(YZ)          2.597051E-10                 -2.192447E-04
+      I(ZX)          4.978922E-09                 -2.192486E-04
+
+-------------------------------------------------------------------------------
+ STABLE TIME INCREMENT INFORMATION
+-------------------------------------------------------------------------------
+
+
+  The stable time increment estimate for each element is based on
+  linearization about the initial state. The stable time increment estimates
+  do not account for mass scaling.
+
+
+   Initial time increment = 3.66980E-09
+
+   Statistics for all elements:
+      Mean = 4.73537E-08
+      Standard deviation = 1.66731E-08
+
+   Most critical elements:
+    Element number   Rank    Time increment   Increment ratio
+   ----------------------------------------------------------
+       23524          1       3.669805E-09      1.000000E+00
+       19233          2       3.779362E-09      9.710117E-01
+        8754          3       5.168341E-09      7.100547E-01
+      146474          4       5.381662E-09      6.819092E-01
+       23005          5       6.524556E-09      5.624605E-01
+       25736          6       6.894045E-09      5.323152E-01
+       99335          7       7.210448E-09      5.089565E-01
+       89801          8       7.969577E-09      4.604767E-01
+       41723          9       8.531091E-09      4.301683E-01
+       55965         10       8.985349E-09      4.084210E-01
+
+-------------------------------------------------------------------------------
+
+  INFORMATION REGARDING INITIAL CONTACT OVERCLOSURES FOR NEWLY DEFINED GENERAL
+  CONTACT INTERACTIONS IN STEP 1
+
+-------------------------------------------------------------------------------
+
+  No initial node-face or edge-edge overclosures found.
+
+
+  No nodal position adjustments have been made.
+
+
+  No unresolved initial node-face or edge-edge overclosures found.
+
+
+***NOTE: You can view the deformed configuration due to the resolution of
+         initial overclosures.  In increment 0, draw the deformed shape or
+         draw a symbol plot of vector displacements.
+
+------------------------------------------------------------------------------
+
+Abaqus/Explicit 2024                             DATE 08-Oct-2026  TIME 19:47:32
+
+The double precision Abaqus/Explicit executable will be used in this analysis.
+
+The model has been decomposed into 8 domains.
+Domain level parallelization will be used with 8 processors each hosting an MPI rank.
+
+-------------------------------------------------------------------------------
+ SOLUTION PROGRESS
+-------------------------------------------------------------------------------
+
+ STEP 1  ORIGIN 0.0000
+
+  Total memory used for step 1 is approximately 2.8 gigabytes.
+  Element by element stable time estimation algorithm will be used.
+  Scaling factor:  1.0000
+              STEP     TOTAL      WALL      STABLE    CRITICAL    KINETIC      TOTAL    PERCENT
+INCREMENT     TIME      TIME      TIME   INCREMENT     ELEMENT     ENERGY     ENERGY  CHNG MASS
+        0  0.000E+00 0.000E+00  00:00:06 2.530E-08        2853  4.499E+01  4.499E+01  3.775E-02
+Output Field Frame Number     0, of     20, at step time 0.000E+00
+     2020  4.694E-05 4.694E-05  00:02:15 2.299E-08      123881  4.211E+01  4.499E+01  3.775E-02
+     4020  9.256E-05 9.256E-05  00:04:22 2.278E-08      123881  4.248E+01  4.499E+01  3.775E-02
+     6022  1.388E-04 1.388E-04  00:06:27 2.418E-08      123881  4.171E+01  4.499E+01  3.775E-02
+     6480  1.500E-04 1.500E-04  00:06:56 2.442E-08       49085  4.122E+01  4.499E+01  3.775E-02
+Output Field Frame Number     1, of     20, at step time 1.500E-04
+     8486  1.985E-04 1.985E-04  00:09:02 2.359E-08      191622  4.101E+01  4.499E+01  3.775E-02
+    10482  2.445E-04 2.445E-04  00:11:08 2.209E-08      191622  3.958E+01  4.499E+01  3.775E-02
+    12489  2.882E-04 2.882E-04  00:13:13 2.087E-08      191622  3.882E+01  4.499E+01  3.775E-02
+    13069  3.000E-04 3.000E-04  00:13:51 2.010E-08      191622  3.894E+01  4.499E+01  3.775E-02
+Output Field Frame Number     2, of     20, at step time 3.000E-04
+    15063  3.392E-04 3.392E-04  00:15:56 1.942E-08       16920  3.721E+01  4.499E+01  3.775E-02
+    17046  3.775E-04 3.775E-04  00:18:02 1.921E-08       16920  3.586E+01  4.499E+01  3.775E-02
+    19048  4.157E-04 4.157E-04  00:20:08 1.909E-08       16920  3.581E+01  4.499E+01  3.775E-02
+    20804  4.500E-04 4.500E-04  00:21:57 1.995E-08       16920  3.463E+01  4.499E+01  3.775E-02
+Output Field Frame Number     3, of     20, at step time 4.500E-04
+    22818  4.912E-04 4.912E-04  00:24:04 2.067E-08      191622  3.346E+01  4.499E+01  3.775E-02
+    24817  5.314E-04 5.314E-04  00:26:09 1.997E-08      191622  3.267E+01  4.499E+01  3.775E-02
+    26832  5.721E-04 5.721E-04  00:28:15 2.046E-08      191622  3.008E+01  4.499E+01  3.775E-02
+    28200  6.000E-04 6.000E-04  00:29:43 2.033E-08      191622  2.953E+01  4.499E+01  3.775E-02
+Output Field Frame Number     4, of     20, at step time 6.000E-04
+    30200  6.401E-04 6.401E-04  00:31:50 1.989E-08      191622  2.896E+01  4.499E+01  3.775E-02
+    32216  6.801E-04 6.801E-04  00:33:56 1.955E-08       16920  2.682E+01  4.499E+01  3.775E-02
+    34216  7.176E-04 7.176E-04  00:36:02 1.815E-08       16920  2.639E+01  4.499E+01  3.775E-02
+    36206  7.498E-04 7.498E-04  00:38:08 1.459E-08        9421  2.624E+01  4.499E+01  3.775E-02
+    36217  7.500E-04 7.500E-04  00:38:09 1.460E-08        9421  2.624E+01  4.499E+01  3.775E-02
+Output Field Frame Number     5, of     20, at step time 7.500E-04
+    38233  7.797E-04 7.797E-04  00:40:14 1.470E-08        9421  2.462E+01  4.499E+01  3.775E-02
+    40250  8.092E-04 8.092E-04  00:42:21 1.446E-08        9421  2.357E+01  4.499E+01  3.775E-02
+    42242  8.378E-04 8.378E-04  00:44:27 1.422E-08        9421  2.323E+01  4.499E+01  3.775E-02
+    44252  8.655E-04 8.655E-04  00:46:32 1.308E-08        9421  2.218E+01  4.499E+01  3.775E-02
+    46252  8.916E-04 8.916E-04  00:48:38 1.293E-08        9421  2.102E+01  4.499E+01  3.775E-02
+    46913  9.000E-04 9.000E-04  00:49:19 1.275E-08        9421  2.067E+01  4.499E+01  3.775E-02
+Output Field Frame Number     6, of     20, at step time 9.000E-04
+    48907  9.262E-04 9.262E-04  00:51:25 1.318E-08        9421  2.026E+01  4.499E+01  3.775E-02
+    50894  9.515E-04 9.515E-04  00:53:31 1.213E-08      132032  2.002E+01  4.499E+01  3.775E-02
+    52908  9.765E-04 9.765E-04  00:55:36 1.178E-08      132032  1.922E+01  4.499E+01  3.775E-02
+    54919  9.986E-04 9.986E-04  00:57:42 1.024E-08      132032  1.816E+01  4.499E+01  3.775E-02
+    56910  1.016E-03 1.016E-03  00:59:48 9.022E-09      132032  1.763E+01  4.499E+01  3.775E-02
+    58943  1.034E-03 1.034E-03  01:01:54 8.890E-09      132032  1.755E+01  4.500E+01  3.775E-02
+    60722  1.050E-03 1.050E-03  01:03:46 8.673E-09      132032  1.758E+01  4.500E+01  3.775E-02
+Output Field Frame Number     7, of     20, at step time 1.050E-03
+    62728  1.067E-03 1.067E-03  01:05:52 8.387E-09      132032  1.748E+01  4.500E+01  3.775E-02
+    64744  1.084E-03 1.084E-03  01:07:57 8.274E-09      132032  1.682E+01  4.500E+01  3.775E-02
+    66754  1.101E-03 1.101E-03  01:10:03 8.321E-09      132032  1.595E+01  4.500E+01  3.775E-02
+    68770  1.117E-03 1.117E-03  01:12:09 8.410E-09      132032  1.548E+01  4.500E+01  3.775E-02
+    70777  1.134E-03 1.134E-03  01:14:16 8.474E-09      132032  1.523E+01  4.500E+01  3.775E-02
+
+ STEP 1  ORIGIN 0.0000
+
+              STEP     TOTAL      WALL      STABLE    CRITICAL    KINETIC      TOTAL    PERCENT
+INCREMENT     TIME      TIME      TIME   INCREMENT     ELEMENT     ENERGY     ENERGY  CHNG MASS
+    72803  1.151E-03 1.151E-03  01:16:21 8.501E-09      132032  1.508E+01  4.500E+01  3.775E-02
+    74815  1.169E-03 1.169E-03  01:18:28 8.569E-09      132032  1.456E+01  4.500E+01  3.775E-02
+    76831  1.186E-03 1.186E-03  01:20:33 8.271E-09      132032  1.400E+01  4.500E+01  3.775E-02
+    78570  1.200E-03 1.200E-03  01:22:21 8.290E-09      132032  1.357E+01  4.500E+01  3.775E-02
+Output Field Frame Number     8, of     20, at step time 1.200E-03
+    80567  1.217E-03 1.217E-03  01:24:27 8.411E-09      132032  1.306E+01  4.500E+01  3.775E-02
+    82576  1.234E-03 1.234E-03  01:26:32 8.475E-09      132032  1.255E+01  4.500E+01  3.775E-02
+    84597  1.251E-03 1.251E-03  01:28:38 8.467E-09      132032  1.225E+01  4.500E+01  3.775E-02
+    86609  1.268E-03 1.268E-03  01:30:44 8.432E-09      132032  1.206E+01  4.500E+01  3.775E-02
+    88614  1.285E-03 1.285E-03  01:32:50 8.411E-09      132032  1.209E+01  4.500E+01  3.775E-02
+    90627  1.301E-03 1.301E-03  01:34:55 8.291E-09      132032  1.186E+01  4.500E+01  3.775E-02
+    92632  1.318E-03 1.318E-03  01:37:01 8.315E-09      132032  1.120E+01  4.500E+01  3.775E-02
+    94634  1.335E-03 1.335E-03  01:39:06 8.301E-09      132032  1.067E+01  4.500E+01  3.775E-02
+    96479  1.350E-03 1.350E-03  01:41:00 8.460E-09      132032  1.039E+01  4.500E+01  3.775E-02
+Output Field Frame Number     9, of     20, at step time 1.350E-03
+    98486  1.367E-03 1.367E-03  01:43:07 8.660E-09      132032  1.036E+01  4.500E+01  3.775E-02
+   100497  1.384E-03 1.384E-03  01:45:13 8.096E-09      191622  1.054E+01  4.500E+01  3.775E-02
+   102510  1.400E-03 1.400E-03  01:47:19 7.149E-09       27139  1.036E+01  4.500E+01  3.775E-02
+   104506  1.413E-03 1.413E-03  01:49:25 5.200E-09       27139  1.006E+01  4.501E+01  3.775E-02
+   106525  1.423E-03 1.423E-03  01:51:31 4.682E-09       27139  9.750E+00  4.501E+01  3.775E-02
+   108540  1.432E-03 1.432E-03  01:53:37 4.673E-09       27139  9.342E+00  4.501E+01  3.775E-02
+   110525  1.441E-03 1.441E-03  01:55:44 4.412E-09       27139  8.865E+00  4.501E+01  3.775E-02
+   112537  1.449E-03 1.449E-03  01:57:49 3.971E-09       27139  8.500E+00  4.501E+01  3.775E-02
+   114537  1.457E-03 1.457E-03  01:59:55 3.877E-09       27139  8.339E+00  4.501E+01  3.775E-02
+   116538  1.465E-03 1.465E-03  02:02:00 3.751E-09       27139  8.337E+00  4.501E+01  3.775E-02
+   118540  1.472E-03 1.472E-03  02:04:06 3.673E-09       27139  8.396E+00  4.501E+01  3.775E-02
+   120545  1.480E-03 1.480E-03  02:06:12 4.234E-09       27139  8.483E+00  4.501E+01  3.775E-02
+   122564  1.489E-03 1.489E-03  02:08:17 4.897E-09      132032  8.607E+00  4.502E+01  3.775E-02
+   124566  1.499E-03 1.499E-03  02:10:24 4.929E-09      132032  8.718E+00  4.502E+01  3.775E-02
+   124683  1.500E-03 1.500E-03  02:10:31 4.921E-09      132032  8.720E+00  4.502E+01  3.775E-02
+Output Field Frame Number    10, of     20, at step time 1.500E-03
+   126672  1.510E-03 1.510E-03  02:12:36 4.772E-09      132032  8.699E+00  4.502E+01  3.775E-02
+   128673  1.519E-03 1.519E-03  02:14:41 4.487E-09      193685  8.413E+00  4.502E+01  3.775E-02
+   130673  1.528E-03 1.528E-03  02:16:47 4.233E-09      193685  7.897E+00  4.502E+01  3.775E-02
+   132667  1.536E-03 1.536E-03  02:18:53 4.085E-09      193685  7.283E+00  4.502E+01  3.775E-02
+
+***WARNING: In element 27139 the ratio of deformation speed to wave speed is
+            0.40000 at increment 134177. See the message file for further
+            information.
+
+
+***WARNING: Some nodes involved in general contact have penetrated their
+            tracked faces by more than 50.000 percent of the typical element
+            dimension in the general contact domain, 7.80703E-02. Please check
+            the node set "InfoNodeDeepPenetFirst". Please make sure that these
+            nodes and their contacting faces have sufficient mass to allow the
+            code to calculate realistic contact penalties for enforcing the
+            contact constraint.
+
+
+***ERROR: The ratio of deformation speed to wave speed exceeds 1.0000 in at
+          least one element. This usually indicates an error with the model
+          definition. Additional diagnostic information may be found in the
+          message file.
+
+
+The following checklist may be helpful in diagnosing the error:
+
+    1. Check contact definitions for problems such as excessive initial
+       overclosure or unrealistic tied definition between contact pairs.
+       A vector plot of velocities or accelerations will usually help to
+       identify contact problems.
+
+    2. Check stiffness (elastic modulus) and mass (density) definitions for
+       consistent units and verify that the combination is reasonable.
+
+    3. Check for poor mesh definition.
+
+    4. Check the boundary conditions for an excessive loading rate. The
+       *DIAGNOSTICS, DEFORMATION SPEED CHECK=DETAIL option may be used to obtain
+       detailed diagnostics information.
+
+    5. Check the current status of the structure to see if it has
+       totally failed.
+
+    6. A dashpot or a very stiff spring may cause the analysis to go unstable.
+       The *DYNAMIC, DIRECT option may be used to control the time increment
+       directly.
+
+
+***ERROR: The fatal error will generate a new field output in the last
+          increment. All variables applicable to the current procedure and
+          material type(s) will be written to the output database.
+
+   134186  1.542E-03 1.542E-03  02:20:30 1.000E-14      132070  5.610E+01  3.689E+02  3.775E-02
+
+***WARNING: All  nodes involved in general contact that have undergone deep
+            penetration of their tracked faces during this step have been
+            listed in node set "InfoNodeDeepPenetAll". Please make sure that
+            these nodes and their contacting faces have sufficient mass to
+            allow the code to calculate realistic contact penalties for
+            enforcing the contact constraint.
+
+A special Output Field Frame with all relevant variables was written at step time 1.542E-03 of 3.000E-03
+  EXPLICIT EXECUTABLE TIME SUMMARY
+       USER TIME (SEC)      =   8029.8
+       SYSTEM TIME (SEC)    =   217.30
+       WALLCLOCK TIME (SEC) =         8430
+              INIT (SEC) =          7
+              MAIN (SEC) =       8423
+
+  THE ANALYSIS HAS NOT BEEN COMPLETED
+
