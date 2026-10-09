@@ -162,12 +162,33 @@ def _section(elset, r, n1, scf=None, E=E0):
 {ks:.10g}, {ks:.10g}{extra}"""
 
 
-def material_block(E=E0):
+def material_block(E=E0, material=None):
+    if material == 'epu45':
+        return epu45_block()
     return f"""*MATERIAL, NAME=EPU45_LIN
 *DENSITY
 {RHO:.10g},
 *ELASTIC
 {E:.10g}, {NU:.10g}"""
+
+
+def epu45_block():
+    """EPU 45 visco-hyperelastic (config/materials.yaml, the beam's ViscoHyperLaw data): Yeoh long-term + 1-term
+    Prony on shear (k1 = 0). D1 = 2 / K with K from the INSTANTANEOUS E0 and nu 0.49, so the solid's impact-rate
+    response (E0, nu) and dilatational wave speed equal the beam model's and the linear E0 runs'."""
+    from material import epu45
+    m = epu45()
+    K = m['E0'] / (3 * (1 - 2 * m['nu']))
+    C10, C20, C30 = m['yeoh']
+    prony = '\n'.join(f"{g:.10g}, 0., {t:.10g}" for g, t in zip(m['prony_g'], m['prony_tau']))
+    return f"""*MATERIAL, NAME=EPU45
+** Yeoh long-term C10, C20, C30 [MPa]; D1 = 2/K, K = E0/(3(1-2nu)) = {K:.6g} MPa (E0 {m['E0']:.6g}, nu {m['nu']:g})
+*DENSITY
+{m['rho']:.10g},
+*HYPERELASTIC, YEOH, MODULI=LONG TERM
+{C10:.10g}, {C20:.10g}, {C30:.10g}, {2 / K:.10g}, 0., 0.
+*VISCOELASTIC, TIME=PRONY
+{prony}"""
 
 
 MATERIAL_BLOCK = material_block()
@@ -483,6 +504,9 @@ def _a4_rig(c=A4):
     lat = example3(elemSize=c['elemSize'], nx=c.get('nx', 3), ny=c.get('ny', 3), name=c.get('cell', 'C4'))
     E = c.get('E', E0)
     mat = dict(E=E, G=E / (2 * (1 + NU)), nu=NU, rho=RHO, E0=E)      # E0 key = contact stiffness modulus
+    if c.get('material') == 'epu45':                                  # visco-hyperelastic: ViscoHyperLaw in drop_rig
+        from material import epu45
+        mat = epu45()
     r_elem = torch.as_tensor(strut_radii(c, lat)[np.asarray(lat['beam_of_elem'])])
     rig = drop_rig(lat, r_elem, {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}, mat=mat,
                    energy_J=c['energy_J'], v0_ms=c['v0'] / 1e3, plate_mass=c['plate_mass'], gap0=0.1,
@@ -553,7 +577,7 @@ TOP, REF
 {sections}
 *MASS, ELSET=IMPMASS
 {Mref:.10g},
-{material_block(E)}
+{material_block(E, c.get('material'))}
 {interaction}*RIGID BODY, REF NODE={ref}, TIE NSET=TOP
 *BOUNDARY
 BOT, ENCASTRE
@@ -591,7 +615,8 @@ def a4_ours(c=A4):
     with torch.no_grad():
         h = run_drop(rig, T=c['T'])
     out = {'time': np.asarray(h['t']), 'U3ref': h['z_plate'], 'V3ref': h['v_imp'], 'RF3bot': h['F_bottom'],
-           'ALLKE': h['KE'], 'ALLSE': h['U'], 'PHIC': h['Phi_lat'], 'WFRIC': h['W_fric'], 'GSELF': h['g_self_min']}
+           'ALLKE': h['KE'], 'ALLSE': h['U'], 'PHIC': h['Phi_lat'], 'WFRIC': h['W_fric'], 'GSELF': h['g_self_min'],
+           'ALLIE': h['W_int'], 'ALLCD': h['E_diss_material']}
     out['dt'], out['n_steps'] = float(np.median(h['dt'])), len(h['dt'])
     return out
 
@@ -699,6 +724,36 @@ F1j2 = dict(F1j, name=F1j['name'].replace('F1j_', 'F1j2_') + '_plateref', plate_
             title=F1j['title'].replace('F1j:', 'F1j2 (h/2 within 1 mm of the plates):'))
 
 
+# ------------------------------------------------------------------------------------------------ H (EPU 45 solids)
+# H = the F case (FHS print geometry, same mesh settings) with the PROJECT material, EPU 45 visco-hyperelastic
+# (Yeoh long-term + 1-term Prony, config/materials.yaml) in both models: Abaqus *HYPERELASTIC, YEOH +
+# *VISCOELASTIC (epu45_block), ours ViscoHyperLaw (drop_rig, as in the optimiser). The linear E = 40 MPa F runs
+# distorted at 75 % crush in the graded cells; E0 = 342.9 MPa sets the time step (~2.9x the E = 40 increments).
+# Impact energy: F energy x scale, sized with our model (JOINT_FHS) for a max stroke of ~8 mm (63 % of the cell);
+# T = 4 ms (max stroke at 2.9-3.6 ms); BCC keep the 0.5 ms first-compression window (x4 energy: ~0.8-0.9 mm stroke).
+H_RUN = dict(T=4e-3)
+
+
+def _h_twin(tag, f, scale):
+    E = f['energy_J'] * scale
+    run = {} if f['T'] < 1e-3 else H_RUN
+    T = run.get('T', f['T'])
+    nm = f['name'].replace(f'F1{tag}_', f'H1{tag}_', 1)
+    nm = nm.replace('_FHS_solid_', '_FHS_EPU45_solid_') if '_FHS_solid_' in nm else nm + '_EPU45'
+    return dict(f, name=nm,
+                material='epu45', energy_J=E, ftwin=f['name'], **run,
+                title=f"H1{tag}: F1{tag} (FHS print geometry, same mesh settings) with EPU 45 VISCO-HYPERELASTIC (Yeoh "
+                      f"C10/C20/C30 2.4/0.15/0.02 MPa long-term, Prony g1 0.958, tau1 52 us, nu 0.49, both models); "
+                      f"impactor {E * 1e3:.3g} N mm at 6 m/s, T {T * 1e3:g} ms. F1{tag}: " + f['title'].split(': ', 1)[1])
+
+
+H1a = _h_twin('a', dict(F1a, fmesh=F_MESH, **F_RUN), 0.8)
+H1c = _h_twin('c', F1c, 0.75)
+H1d = _h_twin('d', F1d, 0.75)
+H1e, H1f = _h_twin('e', F1e, 4.0), _h_twin('f', F1f, 4.0)   # stiff at 0.5 ms (E0): x4 for the B2e-f stroke
+H1i, H1j = _h_twin('i', F1i, 1.0), _h_twin('j', F1j, 1.0)
+
+
 _B2_cache = {}
 
 
@@ -745,7 +800,7 @@ def b2_inp(c=B2a):
     import solid as _solid
     m_face = _solid.lumped_masses_c3d10m(P, T, RHO)[g['top']].sum()
     Mref = 2 * c['energy_J'] * 1e3 / c['v0'] ** 2 - m_face
-    E = c.get('E', E0)
+    E = c.get('E', E0) if c.get('material') != 'epu45' else E0     # E0: the hyperelastic run's instantaneous modulus
     ms_line, ms_note = '', ''
     if c.get('geometry') == 'fhs':
         # Abaqus' C3D10M stable increment ~ 0.31 * shortest altitude / dilatational wave speed (calibrated on the
@@ -783,11 +838,11 @@ def b2_inp(c=B2a):
 {ref}
 *NSET, NSET=MOVING
 TOP, REF
-*SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN{', CONTROLS=SCDIST' if c.get('distortion_control') else ''}
+*SOLID SECTION, ELSET=CELL, MATERIAL={'EPU45' if c.get('material') == 'epu45' else 'EPU45_LIN'}{', CONTROLS=SCDIST' if c.get('distortion_control') else ''}
 ,{chr(10) + '*SECTION CONTROLS, NAME=SCDIST, DISTORTION CONTROL=YES' if c.get('distortion_control') else ''}
 *MASS, ELSET=IMPMASS
 {Mref:.10g},
-{material_block(E)}
+{material_block(E, c.get('material'))}
 *SURFACE INTERACTION, NAME=CELLINT
 *FRICTION
 {c.get('mu', 0.0):.10g},
@@ -813,7 +868,7 @@ U1, U2, U3, V3
 *NODE OUTPUT, NSET=BOT
 RF3
 *ENERGY OUTPUT
-ALLKE, ALLIE, ALLSE, ALLWK, ETOTAL, ALLAE, ALLVD, ALLFD
+ALLKE, ALLIE, ALLSE, ALLWK, ETOTAL, ALLAE, ALLVD, ALLFD, ALLCD
 *END STEP
 """
 
@@ -1056,6 +1111,10 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
                     joint=JOINT_FHS)
             for k, v in (('F1c', F1c), ('F1d', F1d), ('F1e', F1e), ('F1f', F1f), ('F1g', F1g), ('F1h', F1h),
                          ('F1i', F1i), ('F1j', F1j), ('F1i2', F1i2), ('F1j2', F1j2))},
+         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint=JOINT_FHS))),
+                    joint=JOINT_FHS)
+            for k, v in (('H1a', H1a), ('H1c', H1c), ('H1d', H1d), ('H1e', H1e), ('H1f', H1f), ('H1i', H1i),
+                         ('H1j', H1j))},
          'A5aq': dict(spec=A5aq, inp=lambda: a4_inp(A5aq), ours=lambda: a4_ours(A5aq))}
 
 

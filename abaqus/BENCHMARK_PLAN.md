@@ -414,6 +414,102 @@ stiff on B2i/j.
   **Check:** that Abaqus accepts distortion control for C3D10M (input processing / .dat, seconds).
 - **F1a.** Its committed .inp is the one that ran, and it stays the record; `F1a.fmesh` keeps its mesh settings.
 
+## Level H: FHS solids with the project material, EPU 45 visco-hyperelastic (new 2026-10-09)
+
+Why:
+- The beam model used in the optimiser runs EPU 45 visco-hyperelastic (`explicitFE.ViscoHyperLaw`: Yeoh axial /
+  fibre law + 1-term quasi-linear Prony), but every A / B2 / F validation so far used linear elastic E = 40 MPa.
+- The graded F solids (F1i / j, F1i2 / j2) all distorted at 4-6 mm stroke at a thin-strut root on a plate; linear
+  elasticity at large local compression is the likely cause.
+- So the joint model (JOINT_FHS) and the beam material law must now be validated together on the real material.
+
+**Material (both codes, from `config/materials.yaml` EPU_45 via `src/material.epu45()`):**
+- Abaqus (`cases.epu45_block`):
+  - `*HYPERELASTIC, YEOH, MODULI=LONG TERM` with C10, C20, C30 = 2.4, 0.15, 0.02 MPa and D1 = 2/K = 3.5e-4 /MPa;
+  - `*VISCOELASTIC, TIME=PRONY` with g1 = 0.958, k1 = 0, τ1 = 5.2e-5 s;
+  - ρ = 1.06e-9 t/mm³.
+- K = E0 / (3 (1 - 2ν)) = 5714 MPa, from the instantaneous E0 = 342.9 MPa and ν = 0.49. Bulk does not relax
+  (k1 = 0), so the solid's impact-rate E0 and ν equal the beam's. The dilatational wave speed equals the linear E0
+  runs', so the mass-scaling DT calibration (0.308 · 0.22 h / c_d) is unchanged, with c_d from E0.
+- Ours: `cases._a4_rig` passes `material.epu45()` when `material='epu45'`, so `drop_rig` builds `ViscoHyperLaw`
+  (as in the optimiser). The joint model is JOINT_FHS.
+- New outputs:
+  - Abaqus `ALLCD` (viscous dissipation) in the energy output;
+  - ours `ALLIE` (internal work) and `ALLCD` (material dissipation);
+  - `compare.py` H cases add the viscous-dissipation signal.
+
+**Cases.** The name is `H1<letter>_..._FHS_EPU45...`, and the letter mirrors the F twin (H1a ↔ F1a ↔ B2a).
+- Same FHS geometry and mesh settings as F, distortion control on.
+- Impact energy = the F energy × a scale, sized with our EPU 45 beam model for ~8 mm max stroke (63 % of the cell),
+  as in F.
+- T = 4 ms, because max stroke now comes at 2.9-3.6 ms instead of 2.4-2.7.
+- BCC keeps the 0.5 ms first-compression window, with ×4 energy. At 0.5 ms the cell responds near E0, so the F
+  energy gave only 0.3 mm.
+
+| Case | Twin | Mesh | Energy | Ours (EPU 45, JOINT_FHS): max stroke, peak RF3, viscous loss / E | Est. Abaqus wall time |
+|---|---|---|---|---|---|
+| H1a_unit_cell_C4_FHS_EPU45_solid_r080_h040 | F1a | 45.0k C3D10M (robust F mesh), 188 el. scaled (+0.03 %), DT 1.15e-8 s | 66.7 N mm (×0.8) | 8.05 mm @ 2.95 ms, 16.2 N, 0.58 | ~14 h |
+| H1c_unit_cell_C4_FHS_EPU45_solid_r060_h030 | F1c | 62.4k, 242 el. (+0.03 %) | 19.8 N mm (×0.75) | 7.73 mm @ 2.91 ms, 5.4 N, 0.60 | ~10 h |
+| H1d_unit_cell_C12_FHS_EPU45_solid_r050_h025 | F1d | 103.8k, 776 el. (+0.06 %) | 12.8 N mm (×0.75) | 7.92 mm @ 2.98 ms, 3.9 N, 0.52 | ~7 h |
+| H1e_unit_cell_BCC_FHS_EPU45_solid_r100_h050 | F1e | 41.7k, 212 el. (+0.03 %) | 80 N mm (×4) | 0.88 mm @ 0.32 ms, 156 N, 0.87 | ~10 min |
+| H1f_unit_cell_BCC_FHS_EPU45_solid_r150_h075 | F1f | 27.3k, 233 el. (+0.08 %) | 180 N mm (×4) | 0.80 mm @ 0.29 ms, 351 N, 0.87 | ~5 min |
+| H1i_unit_cell_C4_graded_top100_bot060_FHS_EPU45 | F1i | 97.9k, 1160 el. (+0.20 %) | 45 N mm (×1) | 8.57 mm @ 3.56 ms, 12.4 N, 0.59 | 30-50 h |
+| H1j_unit_cell_C4_graded_top060_bot100_FHS_EPU45 | F1j | 96.0k, 207 el. (+0.02 %) | 42 N mm (×1) | 8.22 mm @ 3.22 ms, 13.2 N, 0.59 | 30-50 h |
+
+Wall times are estimates: the F wall time × 2.93 (smaller DT) × T ratio. The increment also shrinks during the
+crush.
+
+**Run order:**
+1. **H1e, H1f** (minutes): the first check that Abaqus accepts the material block, and a check of the
+   instantaneous / viscous response (the first compression is E0- and Prony-dominated).
+2. **H1a** (~14 h): the reference cell. It tests material + joint together at full crush, against F1a (linear)
+   and B2a.
+3. **H1j** (then H1i): does the hyperelastic law remove the thin-strut-root distortion of the graded cells?
+4. **H1c, H1d:** the rest of the joint-model tuning set on the real material.
+
+To halve the cost if needed: ν = 0.45 in both codes (≈ 2× larger DT). That changes the material, so decide
+before the first H run is used for tuning.
+
+### Plan around the material change (2026-10-09)
+
+Done so far: the FHS print geometry (notes/13), F solids (linear E = 40), and JOINT_FHS chosen (energy-curve error
+5.6 % vs 9.1 %). The open items:
+- graded cells failing at 4-6 mm;
+- the early-impact deficit (-10 to -35 % energy at 25 % crush in every cell and joint model);
+- F1a late crush;
+- octet unmeshable.
+
+1. **Material on the solids (this step, done):** EPU 45 in Abaqus and in our rig, the H inputs written.
+2. **Run H1e / f, then H1a (user).** On return, `compare.py H1a`:
+   - the energy-stroke curve, peak RF3, max stroke and its time;
+   - ALLCD vs our viscous loss;
+   - the Abaqus added mass, distortion-control energy (ALLDC is not requested; check that ALLAE stays small) and
+     hourglass.
+   - Decision gate:
+     - **if the ours-vs-H1a error ≈ ours-vs-F1a (±3 %)**, the material law is consistent and JOINT_FHS carries over;
+     - **if not**, the error is material-model form → step 3.
+3. **Material-only check (B1, only if step 2 fails the gate):** one straight strut, solid C3D10M vs our beam, axial
+   and bending at impact rates, EPU 45. This separates the beam QLV / fibre-Yeoh law from Abaqus' finite-strain
+   viscoelasticity (they differ by construction: QLV on resultants vs Prony on the deviatoric Kirchhoff stress).
+   Cheap (minutes).
+4. **Early-impact deficit (static check, parallel to 2):** small-strain static stiffness of the F1a / B2a solids
+   (scikit-fem P2 tets, same mesh) vs our beam cell.
+   - If the static stiffness matches, the deficit is dynamic: first-contact / tied-plate mass, rotary mass, or wave
+     transit.
+   - If not, it is the joint / plate stiffness at small strain.
+   - With EPU 45 the first ~0.1 ms is near-E0 and strongly damped (BCC: 87 % of the energy dissipated), so H1e / f
+     test the early response directly.
+5. **Graded cells (H1j / H1i):**
+   - If they reach max stroke, JOINT_FHS is validated on graded designs at full crush.
+   - If they still distort, refine locally at the thin-strut plate roots, or add plate fillets to the FHS plate
+     joints (the print has a base plate anyway).
+6. **JOINT_FHS for the optimiser:** the FHS joint factors as a function of the joint radii (precomputed table or
+   surrogate: FHS slicing costs 5-55 s per lattice, too slow inside the adjoint loop). Validate on H1a / H1i / H1j.
+7. **Octet (F1g / H1g):** extend the struts into the plates before the trim (no tangential FHS-plate meeting), then
+   mesh. Last, because it is the least C4-like.
+8. **B3 / B4, the full 3×3 lattice with EPU 45** (paper figure, B-level plan), with the joint model from 6. Use the
+   symmetry / ν options in the cost table to keep it to a few hours.
+
 ## Cost: 3D solid (Abaqus) vs our beam model (for future planning)
 | Model | Abaqus solid C3D10M | Abaqus beams B31 | Ours (beams) |
 |---|---|---|---|
@@ -442,6 +538,11 @@ Meshing:
 - The manifold3d/TetGen route left slivers (shortest altitude 0.001 mm).
 
 ## Log
+- 2026-10-09: **EPU 45 visco-hyperelastic on the solids (Level H).**
+  - `cases.material_block(material='epu45')` / `epu45_block` (Yeoh + Prony, D1 from E0 and ν 0.49);
+    `_a4_rig(material='epu45')` gives the beam ViscoHyperLaw; ALLCD output on both sides.
+  - H1a, c, d, e, f, i, j written (energies sized with our model for ~8 mm stroke; T 4 ms; BCC 0.5 ms ×4 energy).
+  - Plan steps 1-8 in "Plan around the material change".
 - 2026-10-05 (i): **Saint-Venant participation (λ = r, untuned) brings all seven solid cells within ±3.2%** (mean 1.5%; before 4.9%).
   - Graded designs B2i–k written with blind predictions from four joint models.
   - Prior art recorded: parametrized superelements 2022, junction beams 2023, rigid-zone factors.
