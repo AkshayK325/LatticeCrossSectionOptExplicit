@@ -195,6 +195,7 @@ fixed mass scaling BELOW MIN to the B2 twin's time increment. FHS vertices are k
 before the trim (`nodeJoint.PLATE_GAP`): the trim otherwise left 0.006 µm edges that made gmsh's surface
 reparametrisation hang (F1c). F1a was made before that; its .inp stays the record.
 
+| F1i2 / F1j2 results (2026-10-09) | | **both failed again**: F1i2 at 1.54 ms (6.2 mm), F1j2 at 0.80 ms (4.2 mm, earlier than F1j); deformation speed > wave speed at a thin-strut root on a plate (z = 0.23 / 12.6 mm); energy conserved until the last increment. Plate refinement does not prevent it. | ❌ partial |
 | F1i2_unit_cell_C4_graded_top100_bot060_FHS_plateref_sym | B2i | the graded twin again, h/2 within 1 mm of both plates (where F1i distorted), and FHS plate joints symmetric about the plates (needed: with the finer plate mesh the thin bottom-strut joints meet the plate tangentially and the remesh overlaps); 205.3k C3D10M, 6589 el. (+0.22 %), 31 MB, T 3 ms | 🟦 inp ready |
 | F1j2_unit_cell_C4_graded_top060_bot100_FHS_plateref | B2j | the graded twin again, h/2 within 1 mm of both plates (plain FHS joints); 211.9k C3D10M, 8286 el. (+0.26 %), 32 MB, T 3 ms | 🟦 inp ready |
 
@@ -271,6 +272,39 @@ The time of max stroke is early by 8-9 % on F1a / e / f: the early-impact issue 
    dedicated plate-wedge treatment, e.g. a short straight extension of the struts into the plates before the trim.
 5. **JOINT_FHS in the optimiser:** the factors are not differentiable, and an FHS build costs 5-55 s. Precompute or
    fit a surrogate in the radii at a joint.
+
+### Results 2026-10-09: F1i2 / F1j2 (partial) and conclusions
+
+Energy absorbed [N mm] at 1 / 2 / 3 / 4 / 5 / 6 mm stroke:
+
+| run | 1 | 2 | 3 | 4 | 5 | 6 mm |
+|---|---|---|---|---|---|---|
+| F1i (to 6.29 mm) | 3.85 | 8.45 | 13.28 | 19.17 | 25.30 | 31.05 |
+| F1i2 (to 6.22, plate-refined + symmetric plate joints) | 3.99 | 9.09 | 15.14 | 21.51 | 28.17 | 35.93 |
+| F1j (to 6.12) | 2.31 | 6.47 | 11.24 | 17.43 | 23.99 | 29.63 |
+| F1j2 (to 4.17, plate-refined) | 2.37 | 6.65 | 11.55 | 17.84 | - | - |
+| B2i (sphere joints) | 3.51 | 7.19 | 11.33 | 17.04 | 24.00 | 29.63 |
+| B2j (sphere joints) | 2.12 | 5.99 | 10.30 | 16.53 | 22.90 | 28.76 |
+
+- **Mesh sensitivity is small.** F1j2 vs F1j, the same geometry with a finer plate mesh: +2.3 to +2.7 %. The F
+  meshes are converged to ~3 %.
+- **The plate-joint geometry matters.** F1i2 vs F1i: +4 to +16 %. That is mostly the symmetric plate joints (more
+  joint material at the plates), not the mesh. So F1i2 is a different geometry, and it is left out of the tuning
+  set. The beam vs F1i2 error (-15 to -33 %) only shows the mismatch: the beam slices the plain FHS.
+- **The graded FHS joints are stiffer than sphere joints too.** F1i / F1j vs B2i / B2j: +5 to +17 % early, +3 to +5 %
+  at 6 mm. JOINT_FHS stays confirmed.
+- **The graded FHS solids cannot reach max stroke with the linear elastic material.**
+  - All four runs (F1i / j, F1i2 / j2) collapse an ordinary element at a thin-strut root on a plate at 4-6 mm.
+    Refinement made it earlier.
+  - Likely cause: linear elasticity at very large local compression lets elements invert.
+  - **Change:** for the F (and later B) solids, use a hyperelastic law with the same small-strain E, ν (neo-Hooke),
+    or the EPU 45 Yeoh law, the project's target material, in both codes. Until then, judge graded cells on the
+    energy curve up to ~4 mm only.
+- **The early-impact deficit is the largest remaining beam-model error.** It is seen in every cell and every joint
+  model: -16 to -33 % at 1-2 mm in the graded cells, -10 to -35 % at 25 % crush elsewhere. It is not the plate
+  struts: the beam rig bonds all plate-plane nodes, as the solid's tied face does.
+  - **Next:** a static small-strain stiffness check (solid via scikit-fem P2 tets on the same mesh vs our beam
+    model) separates static stiffness from the dynamics of first contact and wave transit.
 
 **New, model-form (not joint): early impact.** At 25 % of the crush, every beam model absorbs 10-35 % less energy
 than Abaqus, sphere or FHS alike (BCC -33 %, C4 r 0.6 -20 %, C4 r 0.8 -8-13 %, C12 -9 %). Together with the
