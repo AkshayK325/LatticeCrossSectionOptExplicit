@@ -9,6 +9,7 @@ import trimesh
 
 import nodeJoint as nj
 import soapFilm as sfm
+import subdivLattice as sl
 
 OUT = 'STL/soap_vs_fhs'
 
@@ -109,7 +110,7 @@ def step_s1s2():
         E = regular(n)
         r = np.ones(len(E))
         t = time.time()
-        sf = sfm.soap_film_node(np.zeros(3), E, r)
+        sf = sl.subdiv_lattice_node(np.zeros(3), E, r)
         dt = time.time() - t
         L = np.full(len(E), sf['d'].max() + 3.0)
         m = sfm.node_solid(sf, L)
@@ -179,7 +180,7 @@ def run_case(name, E, r, methods=('Boolean', 'Hull', 'SF', 'FHS'), save=True):
     E = E / np.linalg.norm(E, axis=1)[:, None]
     r = np.asarray(r, float)
     t = time.time()
-    sf = sfm.soap_film_node(np.zeros(3), E, r)
+    sf = sl.subdiv_lattice_node(np.zeros(3), E, r)
     t_sf = time.time() - t
     L = np.full(len(E), max(sf['d'].max(), 2.5 * r.max()) + 4 * r.max())
     out, meshes = {}, {}
@@ -273,7 +274,7 @@ def tetra():
 def build_all(E, r, L):
     """Node solids of every method for struts E, radii r, lengths L (STL-ready trimeshes) + SF cuts + FHS rings."""
     import manifold3d as m3
-    sf = sfm.soap_film_node(np.zeros(3), E, r)
+    sf = sl.subdiv_lattice_node(np.zeros(3), E, r)
     fm, R_s = fhs_node(E, r, L)
     parts = [nj.cylinder(np.zeros(3), e, ri, l, seg=128) for e, ri, l in zip(E, r, L)]
     parts.append(m3.Manifold.sphere(float(r.max()), 128))
@@ -409,7 +410,7 @@ def step_sfcal():
     R = max(d.max(), (tf + r).max()) + 0.5 * r.max()
     L = R + 3 * r
     stl = f'{OUT}/tetra_r080_SF_cal_fe.stl'
-    sfm.node_solid(sfm.soap_film_node(np.zeros(3), E, r), L).export(stl)
+    sfm.node_solid(sl.subdiv_lattice_node(np.zeros(3), E, r), L).export(stl)
     res = [fe_peak(stl, E, r, L, R, r.min() / k) for k in (4, 6, 8)]
     print('| tetra_r080 FE | SF cal | K = ' + ' / '.join(f"{q['K']:.3f}" for q in res) + ' (h = r/4, r/6, r/8) |', flush=True)
 
@@ -441,7 +442,7 @@ def step_paperfigs():
     for nm, E in nodes:
         r = np.ones(len(E))
         out = {}
-        for meth, fn in (('Savio', sfm.savio_node), ('SF', sfm.soap_film_node)):
+        for meth, fn in (('Savio', sfm.savio_node), ('SF', sl.subdiv_lattice_node)):
             sf = fn(np.zeros(3), E, r)
             ref = boolean_node(sf['E'], r, np.full(len(E), sf['d'].max() + 3.0))
             P = sample(sf['V'], sf['F'], 400_000)
@@ -522,7 +523,7 @@ def build3(E, r, L):
     m, ctrl, info = sfm.savio_node(np.zeros(3), E, r, L, levels=4)    # 4 CC levels: face count as SF / FHS
     out['Savio'] = dict(mesh=m, ctrl=ctrl, time=time.time() - t, extent=(info['t'] + r).max())
     t = time.time()
-    sf = sfm.soap_film_node(np.zeros(3), E, r)
+    sf = sl.subdiv_lattice_node(np.zeros(3), E, r)
     t_sf = time.time() - t                                           # the node patch (struts are just tubes)
     out['SF'] = dict(mesh=sfm.node_solid(sf, L), ctrl=(sf['ctrl'][0], [list(f) for f in sf['ctrl'][1]]),
                      time=t_sf, extent=sf['d'].max(), sf=sf)
@@ -544,7 +545,7 @@ METHODS3 = ('Savio', 'SF', 'FHS')
 def metrics3(name, E, r):
     E = E / np.linalg.norm(E, axis=1)[:, None]
     r = np.asarray(r, float)
-    sf0 = sfm.soap_film_node(np.zeros(3), E, r)
+    sf0 = sl.subdiv_lattice_node(np.zeros(3), E, r)
     L = np.full(len(E), max(sf0['d'].max(), 2.5 * r.max()) + 4 * r.max())
     out, R = build3(E, r, L)
     L = np.full(len(E), R + 3 * r.max())                            # struts well past the common ball
@@ -795,7 +796,7 @@ def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), 
         col = np.clip(col, 0, 1)
     img = np.ones((n_px * n_px, 3))
     img[pix_s[first]] = col
-    if edges:                                                       # visible mesh edges (control meshes)
+    if edges is not False and edges is not None:                    # visible mesh edges (control meshes)
         zb = np.full(n_px * n_px, -np.inf)
         zb[pix_s[first]] = z[sel]
         Ed = np.asarray(edges) if not isinstance(edges, bool) else m.edges_unique
