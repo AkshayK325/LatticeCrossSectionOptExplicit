@@ -135,7 +135,7 @@ def film_points(E, r):
 
 
 # ------------------------------------------------------------------------------- film mesh, upsampling, fairing
-def film_mesh(E, r, d, rows=3):
+def film_mesh(E, r, d, rows=3, row_t=None):
     """Control mesh: per cell a quad strip from its cut circle (row 0) through `rows` rows on the cylinder to its
     Voronoi loop (shared with the neighbour cells). Returns V, F, circle id per vertex (-1 none), circle parameter
     u, and row index per vertex (0 = boundary, rows + 1 = Voronoi loop)."""
@@ -154,8 +154,9 @@ def film_mesh(E, r, d, rows=3):
         m = len(W)
         ids = [None] * (rows + 2)
         ids[rows + 1] = loops[i]
+        tk = [0.0] + list(row_t if row_t is not None else [k / (rows + 1) for k in range(1, rows + 1)])
         for k in range(rows + 1):                                   # row 0 = circle, rows 1..rows interpolated
-            t = k / (rows + 1)
+            t = tk[k]
             Q = (1 - t) * ring + t * W
             if 0 < k:                                               # onto the cylinder, perpendicular to the axis
                 ax = Q @ e
@@ -294,13 +295,18 @@ def pn_loop_step(V, N, F, circ, upar, centers, axes, radii, pn=True):
 
 
 def soap_film_node(node, E, r, lam=0.3, rows=3, levels=3, fair_order=2, pn=True, smooth=True, fixed_rows=2,
-                   cotan=False):
-    """SF node patch at `node` for struts along unit E with radii r. Returns dict(V, F, circ, upar, d, ctrl=(V, F)):
+                   cotan=False, row_t=(1 / 8, 1 / 4, 5 / 8)):
+    """SF node patch at `node` for struts along unit E with radii r. The 3 inserted rows sit at row_t of the strip
+    (circle -> Voronoi loop), so the fixed band (circle + 2 rings) is the strip's first quarter, as in the paper's
+    Fig. 8a; evenly spaced rows (row_t=None) fix half the strip and leave near-crease crevices, 2.5-7x below the
+    paper's Table 1 mean deviation (notes/16, "Fig. 12 discrepancy"). Returns dict(V, F, circ, upar, d, ctrl=(V, F)):
     an open mesh whose boundary loops are exactly the cut circles (centre node + d_i e_i, radius r_i)."""
     E = _unit(np.asarray(E, float))
     r = np.broadcast_to(np.asarray(r, float), (len(E),)).copy()
     d = cut_lengths(E, r, lam)
-    V, F, circ, upar, row = film_mesh(E, r, d, rows)
+    if row_t is not None:
+        rows = len(row_t)
+    V, F, circ, upar, row = film_mesh(E, r, d, rows, row_t)
     fn = np.cross(V[F[:, 1]] - V[F[:, 0]], V[F[:, 2]] - V[F[:, 0]])
     if (fn * V[F].mean(1)).sum() < 0:                               # outward normals
         F = F[:, ::-1].copy()

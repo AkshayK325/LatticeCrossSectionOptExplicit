@@ -391,6 +391,29 @@ def step_s5b():
         print(f"| {nm} | " + ' | '.join(f"{q['K']:.3f}" for q in res) + f" | {res[-1]['nel']} |", flush=True)
 
 
+def step_sfcal():
+    """Re-run SF (paper-calibrated fixed band, soapFilm default) on the S3 and S4 nodes and the S5 tetra FE."""
+    import study_three_beam_sweep as sw
+    cases = [('regular-6', regular(6), np.ones(6)), ('regular-12', regular(12), np.ones(12)),
+             ('regular-20', regular(20), np.ones(20)), ('irregular-6', irregular(6), np.ones(6)),
+             ('irregular-12', irregular(12), np.ones(12)), ('irregular-20', irregular(20), np.ones(20))]
+    for an, ang in dict(sw.ANGLES, acute_30_120_110=(30, 120, 110)).items():
+        for rn, rad in sw.RADII.items():
+            cases.append((f'{an}_{rn}', sw.from_angles(*ang), np.array(rad)))
+    print(HEAD)
+    for nm, E, r in cases:
+        out, R = run_case(nm + '_cal', E, r, methods=('Boolean', 'SF'))
+        print(row(nm, 'SF cal', out['SF']), flush=True)
+    E, r = tetra(), np.full(4, 0.8)
+    _, d, tf = build_all(E, r, np.full(4, 8.0))
+    R = max(d.max(), (tf + r).max()) + 0.5 * r.max()
+    L = R + 3 * r
+    stl = f'{OUT}/tetra_r080_SF_cal_fe.stl'
+    sfm.node_solid(sfm.soap_film_node(np.zeros(3), E, r), L).export(stl)
+    res = [fe_peak(stl, E, r, L, R, r.min() / k) for k in (4, 6, 8)]
+    print('| tetra_r080 FE | SF cal | K = ' + ' / '.join(f"{q['K']:.3f}" for q in res) + ' (h = r/4, r/6, r/8) |', flush=True)
+
+
 def step_s3():
     """S3: regular and irregular nodes, r = 1, all methods."""
     print(HEAD)
@@ -443,7 +466,7 @@ def concave_radius(m, mask):
     return 1.0 / c.max() if (c > 0).any() else np.inf
 
 
-def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35)):
+def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), grey=False):
     """Opaque render with a z-buffer (dense surface points splatted to pixels, nearest wins): colour = mean
     curvature H r, Lambert shading. matplotlib's 3D polygons have no depth buffer."""
     import matplotlib.cm as cm
@@ -471,10 +494,15 @@ def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35)):
     first = np.r_[True, pix_s[1:] != pix_s[:-1]]
     sel = np.where(ok)[0][order[first]]
     Hf = np.clip(H[F[fi[sel]]].mean(1) * r, -1.5, 1.5)
-    col = cm.jet_r((Hf + 1.5) / 3.0)[:, :3]
+    col = np.full((len(sel), 3), 0.82) if grey else cm.jet_r((Hf + 1.5) / 3.0)[:, :3]
     fn = m.face_normals[fi[sel]]
     light = _unit_vec(d + 0.6 * up + 0.3 * rt)
-    col *= (0.35 + 0.65 * np.abs(fn @ light))[:, None]
+    lam = np.abs(fn @ light)
+    col *= (0.35 + 0.65 * lam)[:, None]
+    if grey:                                                        # specular highlight shows curvature like Fig. 12
+        h = _unit_vec(light + d)
+        col += 0.35 * (np.abs(fn @ h) ** 40)[:, None]
+        col = np.clip(col, 0, 1)
     img = np.ones((n_px * n_px, 3))
     img[pix_s[first]] = col
     ax.imshow(img.reshape(n_px, n_px, 3))
@@ -504,4 +532,4 @@ def render(ax, m, H, r, title, lim=None):
 if __name__ == '__main__':
     import os
     os.makedirs(OUT, exist_ok=True)
-    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
+    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
