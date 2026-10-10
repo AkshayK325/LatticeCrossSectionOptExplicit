@@ -4,6 +4,7 @@ update. A new run drops the runs that have ended; a run killed without notice sh
     import runStatus as rs
     rs.start('all3')            # at the start of a run
     rs.update('regular-6 SF')   # current item
+    rs.update('node x', i, n)   # ... with progress: item i (0-based) of n, % done, elapsed, time left
     (finished / failed is written automatically at exit)
 """
 import atexit
@@ -47,7 +48,11 @@ def _write(fn):
             lines += [f"[{r['state'].upper()}] {r['name']}   pid {pid}",
                       f"  command : {r['cmd']}",
                       f"  started : {r['started']}" + (f"   ended: {r['ended']}" if r.get('ended') else ''),
-                      f"  now     : {r['now']}   (at {r['updated']})", '']
+                      f"  now     : {r['now']}   (at {r['updated']})"]
+            if r.get('total'):
+                lines.append(f"  progress: {r['done']} / {r['total']} done ({100 * r['done'] / r['total']:.0f} %)"
+                             f"{r.get('eta', '')}")
+            lines.append('')
         with open(PATH, 'w') as f:
             f.write('\n'.join(lines))
 
@@ -71,14 +76,29 @@ def start(name):
     sys.excepthook = failed
 
 
-def update(msg):
+def _hm(sec):
+    sec = int(sec)
+    return f'{sec // 3600} h {sec % 3600 // 60:02d} min' if sec >= 3600 else f'{sec // 60} min'
+
+
+def update(msg, i=None, n=None):
+    """Current item; with i (items already done) and n (total), also % done and the time left, estimated from this
+    run's own pace (items skipped on a resume do not count)."""
     if 'pid' not in _me:
         return
+    if i is not None and 'i0' not in _me:
+        _me['i0'], _me['t0'] = i, time.time()
 
     def fn(runs):
         r = runs.get(_me['pid'])
         if r:
             r['now'], r['updated'] = msg, _now()
+            if i is not None:
+                r['done'], r['total'] = i, n
+                el = time.time() - _me['t0']
+                k = i - _me['i0']
+                r['eta'] = (f", elapsed {_hm(el)}, about {_hm(el / k * (n - i))} left" if k > 0 else
+                            f", elapsed {_hm(el)}, time left after the first item")
     _write(fn)
 
 

@@ -9,6 +9,7 @@ import trimesh
 
 import nodeJoint as nj
 import soapFilm as sfm
+import os
 import subdivLattice as sl
 import runStatus as rs
 
@@ -549,8 +550,8 @@ def build3(E, r, L):
 METHODS3 = ('Savio', 'SF', 'FHS')
 
 
-def metrics3(name, E, r):
-    rs.update(f'{name}: Savio / SF / FHS build + metrics')
+def metrics3(name, E, r, progress=(None, None)):
+    rs.update(f'{name}: Savio / SF / FHS build + metrics', *progress)
     E = E / np.linalg.norm(E, axis=1)[:, None]
     r = np.asarray(r, float)
     d_sf = sl.cut_lengths(E, r).max()                               # SF's cut, without building it
@@ -734,24 +735,31 @@ CASE2 = dict(valence=(3, 4, 6), theta=(30, 50, 70, 90), ratio=(1.0, 1.5, 2.0, 3.
 def step_case2():
     """Case 2 (unequal radii): Savio vs SF vs FHS over valence x smallest angle x radius ratio, every method with its
     defaults (no per-case tuning: the automation test); failures recorded with the reason (robustness).
-    Rows: STL/soap_vs_fhs/case2.rows.md."""
-    print(HEAD3)
-    for n in CASE2['valence']:
-        for th in CASE2['theta']:
-            for q in CASE2['ratio']:
-                nm = f'c2_v{n}_t{th}_q{q:g}'
-                try:
-                    E, r = case2_node(n, th, q)
-                except ValueError as ex:
-                    print(f'| {nm} | all | SKIP: {ex} | | | | | | | |', flush=True)
-                    continue
-                try:
-                    out, R, E, r = metrics3(nm, E, r)
-                except Exception as ex:
-                    print(f'| {nm} | all | FAIL: {type(ex).__name__}: {str(ex)[:80]} | | | | | | | |', flush=True)
-                    continue
-                for k in METHODS3:
-                    print(row3(nm, k, out[k]), flush=True)
+    Rows: STL/soap_vs_fhs/case2.rows.md. 'resume': skip the nodes already in that file (run with >> then)."""
+    done = set()
+    if 'resume' in sys.argv and os.path.exists(f'{OUT}/case2.rows.md'):
+        for l in open(f'{OUT}/case2.rows.md'):
+            if l.startswith('| c2_') and ('| FHS |' in l or '| all |' in l):
+                done.add(l.split('|')[1].strip())
+    else:
+        print(HEAD3)
+    todo = [(n, th, q) for n in CASE2['valence'] for th in CASE2['theta'] for q in CASE2['ratio']]
+    for i, (n, th, q) in enumerate(todo):
+        nm = f'c2_v{n}_t{th}_q{q:g}'
+        if nm in done:
+            continue
+        try:
+            E, r = case2_node(n, th, q)
+        except ValueError as ex:
+            print(f'| {nm} | all | SKIP: {ex} | | | | | | | |', flush=True)
+            continue
+        try:
+            out, R, E, r = metrics3(nm, E, r, progress=(i, len(todo)))
+        except Exception as ex:
+            print(f'| {nm} | all | FAIL: {type(ex).__name__}: {str(ex)[:80]} | | | | | | | |', flush=True)
+            continue
+        for k in METHODS3:
+            print(row3(nm, k, out[k]), flush=True)
 
 
 def step_fe3():
