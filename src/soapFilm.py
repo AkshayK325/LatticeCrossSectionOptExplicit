@@ -192,6 +192,8 @@ def fair(V, F, fixed, order=2, cotan=False):
     else:
         A = _adjacency(F, len(V))
         L = sp.diags(np.asarray(A.sum(1)).ravel()) - A
+    if order == 12:                                                # L x = 0, then L^2 x = 0 from that result
+        return fair(fair(V, F, fixed, 1, cotan), F, fixed, 2, cotan)
     K = L if order == 1 else (L @ L)
     K = K.tocsr()
     fr, fx = np.where(~fixed)[0], np.where(fixed)[0]
@@ -294,12 +296,16 @@ def pn_loop_step(V, N, F, circ, upar, centers, axes, radii, pn=True):
     return (np.vstack((Vv, Ve)), np.vstack((n1, ne)), F2, np.concatenate((circ, ce)), np.concatenate((upar, ue)))
 
 
-def soap_film_node(node, E, r, lam=0.3, rows=3, levels=3, fair_order=2, pn=True, smooth=True, fixed_rows=2,
-                   cotan=False, row_t=(1 / 8, 1 / 4, 5 / 8)):
-    """SF node patch at `node` for struts along unit E with radii r. The 3 inserted rows sit at row_t of the strip
-    (circle -> Voronoi loop), so the fixed band (circle + 2 rings) is the strip's first quarter, as in the paper's
-    Fig. 8a; evenly spaced rows (row_t=None) fix half the strip and leave near-crease crevices, 2.5-7x below the
-    paper's Table 1 mean deviation (notes/16, "Fig. 12 discrepancy"). Returns dict(V, F, circ, upar, d, ctrl=(V, F)):
+def soap_film_node(node, E, r, lam=0.3, rows=3, levels=3, fair_order=12, pn=True, smooth=True, fixed_rows=1,
+                   cotan=True, row_t=None):
+    """SF node patch at `node` for struts along unit E with radii r.
+    [3.3.2] 3 rows inserted linearly along the axial edges (row_t=None: evenly, as Fig. 8a: circle + 2 rings fixed
+    = ~half the strip); fairing: the discrete Laplacian equation, then the second-order one (fair_order=12), with
+    the cotangent (Desbrun et al. 1999, the paper's [38]) Laplacian (cotan=True). Uniform weights pull the crease
+    row inward toward the node on this irregular mesh (undershoot into the struts, wavy curvature; notes/16 R2).
+    Fixed: the boundary + its first ring (fixed_rows=1, "2 rings" counted with the boundary): the reading that
+    best reproduces Table 1 (regular-20 within 2 %); fixed_rows=2 (boundary + 2 rings) is 2-3x closer to the
+    Boolean node than Table 1. Returns dict(V, F, circ, upar, d, ctrl=(V, F)):
     an open mesh whose boundary loops are exactly the cut circles (centre node + d_i e_i, radius r_i)."""
     E = _unit(np.asarray(E, float))
     r = np.broadcast_to(np.asarray(r, float), (len(E),)).copy()
@@ -372,3 +378,65 @@ def node_solid(sf, L, spacing=None):
     if mesh.volume < 0:
         mesh.invert()
     return mesh
+
+
+# ------------------------------------------------------------------------------------- Savio-like baseline [6]
+def savio_node(node, E, r, lam=0.3, levels=5, n_sides=4):
+    """Savio-like node (Savio, Meneghello, Concheri 2018, as reproduced in the SF paper's Fig. 12, rows 2-3):
+    struts as n_sides-gon prisms (squares), the node core = convex hull of the inner prism rings, subdivided
+    `levels` times; as in the SF paper, the boundary is circle-sampled onto the same cut circles as SF (their
+    footnote 2). Our approximation: Loop instead of Catmull-Clark (triangulated quads), no PN. Returns the same
+    dict as soap_film_node (V, F, circ, upar, d, E, r, ctrl)."""
+    from scipy.spatial import ConvexHull
+    E = _unit(np.asarray(E, float))
+    r = np.broadcast_to(np.asarray(r, float), (len(E),)).copy()
+    d = cut_lengths(E, r, lam)
+    # inner rings: each must be a hull face (no other ring reaches past its plane), as nodeJoint.ring_offsets
+    t = d / (1 + lam)
+    for _ in range(50):
+        tn = t.copy()
+        for i in range(len(E)):
+            for j in range(len(E)):
+                if i != j:
+                    c = E[i] @ E[j]
+                    tn[i] = max(tn[i], t[j] * c + r[j] * np.sqrt(max(1 - c * c, 0)) + 0.02 * r[i])
+        if np.allclose(tn, t):
+            break
+        t = tn
+    d = np.maximum(d, t + 0.3 * r)                                 # the prism needs some length
+    V, circ, upar, rings_in, rings_out = [], [], [], [], []
+    nv = 0
+    ph0 = np.pi / n_sides
+    for i, (e, ri) in enumerate(zip(E, r)):
+        u, v = _frame(e)
+        ph = ph0 + 2 * np.pi * np.arange(n_sides) / n_sides
+        rad = np.outer(np.cos(ph), u) + np.outer(np.sin(ph), v)
+        V.append(t[i] * e + ri * rad); circ.append(np.full(n_sides, -1)); upar.append(np.zeros(n_sides))
+        rings_in.append(np.arange(nv, nv + n_sides)); nv += n_sides
+        V.append(d[i] * e + ri * rad); circ.append(np.full(n_sides, i)); upar.append(ph)
+        rings_out.append(np.arange(nv, nv + n_sides)); nv += n_sides
+    V, circ, upar = np.vstack(V), np.concatenate(circ), np.concatenate(upar)
+    idx = np.concatenate(rings_in)
+    H = ConvexHull(V[idx])
+    S = idx[H.simplices]
+    ring_of = np.full(len(V), -1)
+    for q, ids in enumerate(rings_in):
+        ring_of[ids] = q
+    rs = ring_of[S]
+    S = S[~((rs[:, 0] == rs[:, 1]) & (rs[:, 1] == rs[:, 2]))]           # inner ring caps
+    nrm = np.cross(V[S[:, 1]] - V[S[:, 0]], V[S[:, 2]] - V[S[:, 0]])
+    flip = (nrm * V[S].mean(1)).sum(1) < 0
+    S[flip] = S[flip][:, ::-1]
+    F = [S]
+    a_ = np.arange(n_sides)
+    b_ = (a_ + 1) % n_sides
+    for ri_, ro in zip(rings_in, rings_out):                         # prisms, outward (ccw about e, ro further)
+        F.append(np.column_stack((ri_[a_], ro[a_], ri_[b_])))
+        F.append(np.column_stack((ri_[b_], ro[a_], ro[b_])))
+    F = np.vstack(F)
+    ctrl = (V + node, F.copy())
+    N = _vertex_normals(V, F)
+    centers = [di * e for e, di in zip(E, d)]
+    for _ in range(levels):
+        V, N, F, circ, upar = pn_loop_step(V, N, F, circ, upar, centers, list(E), r, pn=False)
+    return dict(V=V + node, F=F, N=N, circ=circ, upar=upar, d=d, E=E, r=r, ctrl=ctrl)

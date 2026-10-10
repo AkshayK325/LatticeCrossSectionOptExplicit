@@ -414,6 +414,98 @@ def step_sfcal():
     print('| tetra_r080 FE | SF cal | K = ' + ' / '.join(f"{q['K']:.3f}" for q in res) + ' (h = r/4, r/6, r/8) |', flush=True)
 
 
+PAPER_T1 = {'regular-6': ((0.2846, 0.0647, 0.0715), (0.2832, 0.1732, 0.0737)),
+            'regular-12': ((0.3021, 0.0645, 0.0751), (0.3021, 0.1808, 0.0793)),
+            'regular-20': ((0.6653, 0.1009, 0.1394), (0.6958, 0.3279, 0.1666)),
+            'irregular-6': ((1.1082, 0.1643, 0.2205), (0.8457, 0.2254, 0.1659)),
+            'irregular-12': ((0.9762, 0.1442, 0.1690), (0.8029, 0.1972, 0.1481)),
+            'irregular-20': ((1.3798, 0.1681, 0.2480), (0.9722, 0.2059, 0.1601))}   # (SF, Savio): max, avg, std
+
+
+def paper_nodes():
+    return [('regular-6', regular(6)), ('regular-12', regular(12)), ('regular-20', regular(20)),
+            ('irregular-6', irregular(6)), ('irregular-12', irregular(12)), ('irregular-20', irregular(20))]
+
+
+def step_paperfigs():
+    """Recreate the SF paper's Table 1 and Figs. 12, 14, 15 (SF and the Savio-like baseline, r = 1, lambda = 0.3).
+    Figures: ResultsFig/explicit/70_SF_paper_fig12.png, 71_SF_paper_fig14.png, 72_SF_paper_fig15.png."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+    nodes = paper_nodes()
+    res = {}
+    print('| node | method | max / avg / std deviation (ours) | paper | ours vs paper (avg) |')
+    print('|---|---|---|---|---|')
+    for nm, E in nodes:
+        r = np.ones(len(E))
+        out = {}
+        for meth, fn in (('Savio', sfm.savio_node), ('SF', sfm.soap_film_node)):
+            sf = fn(np.zeros(3), E, r)
+            ref = boolean_node(sf['E'], r, np.full(len(E), sf['d'].max() + 3.0))
+            P = sample(sf['V'], sf['F'], 400_000)
+            dv = nj.surface_distance(P, ref, ring=6)
+            m = sfm.node_solid(sf, sf['d'] + 0.5)
+            m.export(f'{OUT}/paper_{nm}_{meth}.stl')
+            m = trimesh.load(f'{OUT}/paper_{nm}_{meth}.stl', process=True)
+            out[meth] = dict(sf=sf, dev=dv, mesh=m, H=mean_curvature(m))
+            pk = PAPER_T1[nm][0 if meth == 'SF' else 1]
+            print(f"| {nm} | {meth} | {dv.max():.4f} / {dv.mean():.4f} / {dv.std():.4f} | {pk[0]} / {pk[1]} / {pk[2]} | "
+                  f"{dv.mean() / pk[1]:.2f} |", flush=True)
+        res[nm] = out
+    # Fig. 12: graph, Savio control mesh + surface, SF control mesh + surface
+    fig = plt.figure(figsize=(18, 15))
+    for k, (nm, E) in enumerate(nodes):
+        sf = res[nm]['SF']['sf']
+        ax = fig.add_subplot(5, 6, 1 + k, projection='3d')
+        for e, dd in zip(sf['E'], sf['d']):
+            ax.plot(*np.c_[np.zeros(3), dd * e], 'k', lw=0.6)
+            u, v = nj._frame(e)
+            t = np.linspace(0, 2 * np.pi, 60)
+            ax.plot(*(dd * e[:, None] + np.outer(u, np.cos(t)) + np.outer(v, np.sin(t))), 'r', lw=0.6)
+        lim = sf['d'].max() + 1
+        ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim); ax.set_box_aspect((1, 1, 1))
+        ax.view_init(25, 35); ax.set_axis_off(); ax.set_title(nm, fontsize=9)
+        for row, meth in ((1, 'Savio'), (3, 'SF')):
+            o = res[nm][meth]
+            Vc, Fc = o['sf']['ctrl']
+            mc = trimesh.Trimesh(Vc, Fc, process=False)
+            lim = 1.1 * (o['sf']['d'].max() + 0.6)
+            render_z(fig.add_subplot(5, 6, 1 + k + 6 * row), mc, np.zeros(len(Vc)), 1.0,
+                     f'{meth}{"-like" if meth == "Savio" else ""} control mesh', lim, n_px=360, n_pts=600_000,
+                     grey=True, edges=True)
+            pm = trimesh.Trimesh(o['sf']['V'], o['sf']['F'], process=False)       # the nodal patch (open circles)
+            render_z(fig.add_subplot(5, 6, 1 + k + 6 * (row + 1)), pm, np.zeros(len(pm.vertices)), 1.0,
+                     f'{meth}{"-like" if meth == "Savio" else ""} surface', lim, n_px=360, n_pts=1_500_000, grey=True)
+    fig.savefig('ResultsFig/explicit/70_SF_paper_fig12.png', dpi=100, bbox_inches='tight')
+    plt.close(fig)
+    # Fig. 14: mean curvature, red (+) -> green (0) -> blue (-), one symmetric range per node for both methods
+    fig = plt.figure(figsize=(18, 6.5))
+    for k, (nm, _) in enumerate(nodes):
+        hl = max(np.quantile(np.abs(res[nm][m]['H']), 0.995) for m in ('Savio', 'SF'))
+        for row, meth in enumerate(('Savio', 'SF')):
+            o = res[nm][meth]
+            render_z(fig.add_subplot(2, 6, 1 + k + 6 * row), o['mesh'], o['H'], 1.0,
+                     f'{meth}{"-like" if meth == "Savio" else ""}: {nm} (H r, +-{hl:.1f})', 1.1 * (o['sf']['d'].max() + 0.6),
+                     n_px=360, n_pts=1_500_000, cmap='jet', hlim=hl)
+    fig.savefig('ResultsFig/explicit/71_SF_paper_fig14.png', dpi=100, bbox_inches='tight')
+    plt.close(fig)
+    # Fig. 15: deviation histograms
+    fig, axs = plt.subplots(2, 6, figsize=(20, 6))
+    for k, (nm, _) in enumerate(nodes):
+        for row, meth in enumerate(('Savio', 'SF')):
+            dv = res[nm][meth]['dev']
+            ax = axs[row, k]
+            cnt, edges_ = np.histogram(dv, bins=120, range=(0, dv.max()))
+            ax.bar(edges_[:-1], cnt, width=np.diff(edges_), align='edge', color=cm.jet(edges_[:-1] / edges_[-1]))
+            ax.set_title(f'{meth}{"-like" if meth == "Savio" else ""}: {nm}', fontsize=9)
+            ax.set_xlabel('Deviations (mm)', fontsize=8); ax.set_ylabel('Counts', fontsize=8); ax.tick_params(labelsize=7)
+    fig.tight_layout()
+    fig.savefig('ResultsFig/explicit/72_SF_paper_fig15.png', dpi=100)
+    plt.close(fig)
+
+
 def step_s3():
     """S3: regular and irregular nodes, r = 1, all methods."""
     print(HEAD)
@@ -466,7 +558,8 @@ def concave_radius(m, mask):
     return 1.0 / c.max() if (c > 0).any() else np.inf
 
 
-def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), grey=False):
+def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), grey=False, edges=False, cmap=None,
+             hlim=1.5):
     """Opaque render with a z-buffer (dense surface points splatted to pixels, nearest wins): colour = mean
     curvature H r, Lambert shading. matplotlib's 3D polygons have no depth buffer."""
     import matplotlib.cm as cm
@@ -493,8 +586,9 @@ def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), 
     pix_s = pix[order]
     first = np.r_[True, pix_s[1:] != pix_s[:-1]]
     sel = np.where(ok)[0][order[first]]
-    Hf = np.clip(H[F[fi[sel]]].mean(1) * r, -1.5, 1.5)
-    col = np.full((len(sel), 3), 0.82) if grey else cm.jet_r((Hf + 1.5) / 3.0)[:, :3]
+    Hf = np.clip(H[F[fi[sel]]].mean(1) * r, -hlim, hlim)
+    cmf = getattr(cm, cmap) if cmap else cm.jet_r
+    col = np.full((len(sel), 3), 0.82) if grey else cmf((Hf + hlim) / (2 * hlim))[:, :3]
     fn = m.face_normals[fi[sel]]
     light = _unit_vec(d + 0.6 * up + 0.3 * rt)
     lam = np.abs(fn @ light)
@@ -505,6 +599,20 @@ def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), 
         col = np.clip(col, 0, 1)
     img = np.ones((n_px * n_px, 3))
     img[pix_s[first]] = col
+    if edges:                                                       # visible mesh edges (control meshes)
+        zb = np.full(n_px * n_px, -np.inf)
+        zb[pix_s[first]] = z[sel]
+        Ed = m.edges_unique
+        k = 40
+        s_ = np.linspace(0, 1, k)
+        Q = (V[Ed[:, 0]][:, None, :] * (1 - s_)[None, :, None] + V[Ed[:, 1]][:, None, :] * s_[None, :, None]).reshape(-1, 3)
+        qx, qy, qz = Q @ rt, Q @ up, Q @ d
+        jx = ((qx / lim + 1) / 2 * n_px).astype(int)
+        jy = ((1 - (qy / lim + 1) / 2) * n_px).astype(int)
+        okq = (jx >= 0) & (jx < n_px) & (jy >= 0) & (jy < n_px)
+        pq = jy[okq] * n_px + jx[okq]
+        vis = qz[okq] >= zb[pq] - 0.015 * lim
+        img[pq[vis]] = 0.15
     ax.imshow(img.reshape(n_px, n_px, 3))
     ax.set_axis_off()
     ax.set_title(title, fontsize=8)
@@ -532,4 +640,4 @@ def render(ax, m, H, r, title, lim=None):
 if __name__ == '__main__':
     import os
     os.makedirs(OUT, exist_ok=True)
-    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
+    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
