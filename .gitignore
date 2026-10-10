@@ -202,3 +202,8 @@ abaqus/**/*.sel
 abaqus/inp/*
 !abaqus/inp/*.inp
 abaqus/**/*.env
+
+# live status of background runs (tests/runStatus.py)
+run_status.log
+run_status.log.json
+run_status.log.json.lock

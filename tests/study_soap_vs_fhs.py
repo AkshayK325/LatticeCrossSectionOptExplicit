@@ -10,6 +10,7 @@ import trimesh
 import nodeJoint as nj
 import soapFilm as sfm
 import subdivLattice as sl
+import runStatus as rs
 
 OUT = 'STL/soap_vs_fhs'
 
@@ -543,6 +544,7 @@ METHODS3 = ('Savio', 'SF', 'FHS')
 
 
 def metrics3(name, E, r):
+    rs.update(f'{name}: Savio / SF / FHS build + metrics')
     E = E / np.linalg.norm(E, axis=1)[:, None]
     r = np.asarray(r, float)
     sf0 = sl.subdiv_lattice_node(np.zeros(3), E, r)
@@ -580,6 +582,29 @@ def row3(name, k, o):
             f"{o['conc']:.3f} | {o['dih']:.0f} | {o['H99']:.2f} | {o['dvol']:+.1f} % | {o['sec']:.3f} | {o['time']:.2f} |")
 
 
+def sf_ctrl_with_struts(sf, R, n_ax=4):
+    """SF control patch + each strut from its cut circle to R as a coarse tube (the circle's own vertices, n_ax
+    rings), so the control-mesh row has the same extent as Savio's and FHS's. Returns V, triangles, edges."""
+    Vc, Fc = (np.asarray(a) for a in sf['ctrl'])
+    V, T = [Vc], [Fc]
+    nv = len(Vc)
+    for i, (e, di) in enumerate(zip(sf['E'], sf['d'])):
+        ring = np.where(np.abs(np.linalg.norm(Vc - di * e - (Vc @ e - di)[:, None] * e, axis=1) - sf['r'][i]) +
+                        np.abs(Vc @ e - di) < 1e-6)[0]
+        u, w = nj._frame(e)
+        ring = ring[np.argsort(np.arctan2(Vc[ring] @ w, Vc[ring] @ u))]
+        m = len(ring)
+        prev, a = ring, np.arange(m)
+        for z in np.linspace(di, R + sf['r'][i], n_ax + 1)[1:]:
+            cur = nv + a
+            V.append(Vc[ring] + (z - di) * e)
+            T += [np.column_stack((prev[a], cur, prev[(a + 1) % m])), np.column_stack((prev[(a + 1) % m], cur, cur[(a + 1) % m]))]
+            prev = cur
+            nv += m
+    V, T = np.vstack(V), np.vstack(T)
+    return V, T, np.unique(np.sort(np.vstack((T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]])), 1), axis=0)
+
+
 def step_all3():
     """Savio vs SF vs FHS on the SF paper's six nodes (+ Figs. 12, 14, 15 with all three) and the 25 valence-3
     nodes of notes/12 (+ 30 deg). Figures: ResultsFig/explicit/70_three_methods_fig12.png, 71_..._fig14.png,
@@ -611,18 +636,14 @@ def step_all3():
             if 'fail' in o:
                 continue
             Vc, Fc = o['ctrl']
-            Vc = np.asarray(Vc)
-            mc = trimesh.Trimesh(Vc, poly_tris(Fc), process=False)
-            keep = np.linalg.norm(Vc[poly_tris(Fc)].mean(1), axis=1) < 1.15 * R
-            mcc = trimesh.Trimesh(Vc, poly_tris(Fc)[keep], process=False)
-            ed = poly_edges(Fc)
-            ed = ed[(np.linalg.norm(Vc[ed].mean(1), axis=1) < 1.15 * R)]
-            render_z(fig.add_subplot(7, 6, 1 + c + 6 * (1 + 2 * j)), mcc, np.zeros(len(Vc)), 1.0, f'{k} control mesh',
-                     1.1 * R, n_px=340, n_pts=500_000, grey=True, edges=ed)
-            m = o['m']
-            keep = np.linalg.norm(m.vertices[m.faces].mean(1), axis=1) < R
-            render_z(fig.add_subplot(7, 6, 1 + c + 6 * (2 + 2 * j)), trimesh.Trimesh(m.vertices, m.faces[keep], process=False),
-                     np.zeros(len(m.vertices)), 1.0, f'{k} surface', 1.1 * R, n_px=340, n_pts=1_400_000, grey=True)
+            Vc, Tc, ed = np.asarray(Vc), poly_tris(Fc), poly_edges(Fc)
+            if k == 'SF':                                           # the patch ends at the cut circles: + the struts
+                Vc, Tc, ed = sf_ctrl_with_struts(o['sf'], R)
+            render_z(fig.add_subplot(7, 6, 1 + c + 6 * (1 + 2 * j)), trimesh.Trimesh(Vc, Tc, process=False),
+                     np.zeros(len(Vc)), 1.0, f'{k} control mesh', 1.1 * R, n_px=340, n_pts=2_000_000, grey=True,
+                     edges=ed, clip=R)
+            render_z(fig.add_subplot(7, 6, 1 + c + 6 * (2 + 2 * j)), o['m'], np.zeros(len(o['m'].vertices)), 1.0,
+                     f'{k} surface', 1.1 * R, n_px=340, n_pts=2_000_000, grey=True, clip=R)
     fig.savefig('ResultsFig/explicit/70_three_methods_fig12.png', dpi=95, bbox_inches='tight')
     plt.close(fig)
     # Fig. 14: mean curvature, red (+) -> green (0) -> blue (-); one symmetric range per node for all three
@@ -642,9 +663,8 @@ def step_all3():
             if k not in Hs:
                 continue
             m, H, inb = Hs[k]
-            keep = np.linalg.norm(m.vertices[m.faces].mean(1), axis=1) < R
-            render_z(fig.add_subplot(3, 6, 1 + c + 6 * j), trimesh.Trimesh(m.vertices, m.faces[keep], process=False), H, 1.0,
-                     f'{k}: {nm} (H r, +-{hl:.1f})', 1.1 * R, n_px=340, n_pts=1_400_000, cmap='jet', hlim=hl)
+            render_z(fig.add_subplot(3, 6, 1 + c + 6 * j), m, H, 1.0, f'{k}: {nm} (H r, +-{hl:.1f})', 1.1 * R,
+                     n_px=340, n_pts=2_000_000, cmap='jet', hlim=hl, clip=R)
     fig.savefig('ResultsFig/explicit/71_three_methods_fig14.png', dpi=95, bbox_inches='tight')
     plt.close(fig)
     # Fig. 15: deviation histograms in the common node ball
@@ -665,6 +685,8 @@ def step_all3():
     fig.tight_layout()
     fig.savefig('ResultsFig/explicit/72_three_methods_fig15.png', dpi=95)
     plt.close(fig)
+    if 'figs' in sys.argv:                                          # paper nodes and figures only
+        return
     # valence-3 sweep
     for an, ang in dict(sw.ANGLES, acute_30_120_110=(30, 120, 110)).items():
         for rn, rad in sw.RADII.items():
@@ -692,6 +714,7 @@ def step_fe3():
             out[k]['mesh'].export(stl)
             res = []
             for h in (4, 6, 8):
+                rs.update(f'FE {nm} {k} h = r_min/{h}')
                 try:
                     q = fe_peak(stl, E, r, L, R, r.min() / h)
                     res.append(f"{q['K']:.3f}")
@@ -756,9 +779,10 @@ def concave_radius(m, mask):
 
 
 def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), grey=False, edges=False, cmap=None,
-             hlim=1.5):
+             hlim=1.5, clip=None):
     """Opaque render with a z-buffer (dense surface points splatted to pixels, nearest wins): colour = mean
-    curvature H r, Lambert shading. matplotlib's 3D polygons have no depth buffer."""
+    curvature H r, Lambert shading. matplotlib's 3D polygons have no depth buffer. clip: show only |p| < clip
+    (exact circle cut through long strut triangles; cropping whole faces leaves saw teeth)."""
     import matplotlib.cm as cm
     V, F = np.asarray(m.vertices), np.asarray(m.faces)
     el, az = np.radians(view)
@@ -767,6 +791,8 @@ def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), 
     up /= np.linalg.norm(up)
     rt = np.cross(up, d)
     A = 0.5 * np.linalg.norm(np.cross(V[F[:, 1]] - V[F[:, 0]], V[F[:, 2]] - V[F[:, 0]]), axis=1)
+    if clip is not None:                                            # sample only faces reaching inside the ball
+        A = A * (np.linalg.norm(trimesh.triangles.closest_point(V[F], np.zeros((len(F), 3))), axis=1) < clip)
     rng = np.random.default_rng(0)
     fi = rng.choice(len(F), n_pts, p=A / A.sum())
     u, v = rng.random(n_pts), rng.random(n_pts)
@@ -778,6 +804,8 @@ def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), 
     ix = ((x / lim + 1) / 2 * n_px).astype(int)
     iy = ((1 - (y / lim + 1) / 2) * n_px).astype(int)
     ok = (ix >= 0) & (ix < n_px) & (iy >= 0) & (iy < n_px)
+    if clip is not None:
+        ok &= np.linalg.norm(P, axis=1) < clip
     pix = iy[ok] * n_px + ix[ok]
     order = np.lexsort((-z[ok], pix))                              # per pixel, nearest (largest z) first
     pix_s = pix[order]
@@ -807,6 +835,8 @@ def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), 
         jx = ((qx / lim + 1) / 2 * n_px).astype(int)
         jy = ((1 - (qy / lim + 1) / 2) * n_px).astype(int)
         okq = (jx >= 0) & (jx < n_px) & (jy >= 0) & (jy < n_px)
+        if clip is not None:
+            okq &= np.linalg.norm(Q, axis=1) < clip
         pq = jy[okq] * n_px + jx[okq]
         vis = qz[okq] >= zb[pq] - 0.015 * lim
         img[pq[vis]] = 0.15
@@ -835,6 +865,7 @@ def render(ax, m, H, r, title, lim=None):
 
 
 if __name__ == '__main__':
+    rs.start('study_soap_vs_fhs ' + ' '.join(sys.argv[1:]))
     import os
     os.makedirs(OUT, exist_ok=True)
     {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
