@@ -380,63 +380,172 @@ def node_solid(sf, L, spacing=None):
     return mesh
 
 
-# ------------------------------------------------------------------------------------- Savio-like baseline [6]
-def savio_node(node, E, r, lam=0.3, levels=5, n_sides=4):
-    """Savio-like node (Savio, Meneghello, Concheri 2018, as reproduced in the SF paper's Fig. 12, rows 2-3):
-    struts as n_sides-gon prisms (squares), the node core = convex hull of the inner prism rings, subdivided
-    `levels` times; as in the SF paper, the boundary is circle-sampled onto the same cut circles as SF (their
-    footnote 2). Our approximation: Loop instead of Catmull-Clark (triangulated quads), no PN. Returns the same
-    dict as soap_film_node (V, F, circ, upar, d, E, r, ctrl)."""
+# ------------------------------------------------------------------------------------------ Savio et al. 2018
+def catmull_clark(V, faces):
+    """One Catmull-Clark step on a closed polygon mesh (faces: list of vertex-index lists). Returns (V, quads)."""
+    nV = len(V)
+    fp = np.array([V[f].mean(0) for f in faces])
+    emap, edges, ef = {}, [], []
+    for fi, f in enumerate(faces):
+        for a, b in zip(f, f[1:] + f[:1]):
+            k = (min(a, b), max(a, b))
+            if k not in emap:
+                emap[k] = len(edges)
+                edges.append(k)
+                ef.append([])
+            ef[emap[k]].append(fi)
+    edges = np.array(edges)
+    if any(len(x) != 2 for x in ef):
+        raise ValueError('Catmull-Clark: mesh is not closed / manifold')
+    ef = np.array(ef)
+    ep = (V[edges[:, 0]] + V[edges[:, 1]] + fp[ef[:, 0]] + fp[ef[:, 1]]) / 4
+    n = np.zeros(nV)
+    Q = np.zeros_like(V)
+    R = np.zeros_like(V)
+    nf = np.zeros(nV)
+    for fi, f in enumerate(faces):
+        for v in f:
+            Q[v] += fp[fi]
+            nf[v] += 1
+    mid = 0.5 * (V[edges[:, 0]] + V[edges[:, 1]])
+    for c in (0, 1):
+        np.add.at(R, edges[:, c], mid)
+        np.add.at(n, edges[:, c], 1)
+    Q /= nf[:, None]
+    R /= n[:, None]
+    Vv = (Q + 2 * R + (n - 3)[:, None] * V) / n[:, None]
+    Vn = np.vstack((Vv, ep, fp))
+    eo, fo = nV, nV + len(edges)
+    quads = []
+    for fi, f in enumerate(faces):
+        k = len(f)
+        for j in range(k):
+            a, b, c = f[j - 1], f[j], f[(j + 1) % k]
+            quads.append([b, eo + emap[(min(b, c), max(b, c))], fo + fi, eo + emap[(min(a, b), max(a, b))]])
+    return Vn, quads
+
+
+def _cc_shrink(levels):
+    """Mean radius / half-side of the Catmull-Clark limit of a long square prism (Savio: scale the section so the
+    subdivided beam has the nominal diameter, Sec. 3.3)."""
+    n_r = 12
+    V = np.array([[s1, s2, z] for z in range(n_r) for s1, s2 in ((1, 1), (-1, 1), (-1, -1), (1, -1))], float)
+    F = [[4 * k + j, 4 * k + (j + 1) % 4, 4 * (k + 1) + (j + 1) % 4, 4 * (k + 1) + j] for k in range(n_r - 1) for j in range(4)]
+    F += [[3, 2, 1, 0], [4 * (n_r - 1) + j for j in range(4)]]
+    for _ in range(levels):
+        V, F = catmull_clark(V, F)
+    mid = np.abs(V[:, 2] - (n_r - 1) / 2) < 1.0
+    return float(np.linalg.norm(V[mid, :2], axis=1).mean())
+
+
+def savio_node(node, E, r, L, levels=3, tol=1e-9):
+    """Savio node; tries the exact Table I placement (touching node squares, shared corners: the cubic node) and,
+    where squares touch without sharing corners (non-cubic nodes), a 2 % clearance so the hull closes the gaps."""
+    try:
+        return _savio_node(node, E, r, L, levels, 0.0)
+    except ValueError:
+        return _savio_node(node, E, r, L, levels, 0.02)
+
+
+def _savio_node(node, E, r, L, levels, margin):
+    """Savio, Meneghello, Concheri (2018), Rapid Prototyping J. 24(2) 351-360, generalised to one node of any
+    valence (their Sec. 4 extension is only sketched; the SF paper does the same): each beam is a square-section
+    frustum, from the node square (half-side a_h from the MAXIMUM radius at the node, Table I) to the beam's own
+    square at mid-span, then a prism to the far end. Node squares sit at the hull-face distance (= a_h for the cubic
+    node, where adjacent squares share their corners as in Table I) and the node is closed by the convex hull of all
+    node squares (planar faces where a beam is missing). Catmull-Clark x levels, half-sides divided by the measured
+    CC shrink (their diameter compensation), far ends trimmed flat. Returns (closed trimesh, control (V, faces))."""
+    import trimesh
+    import manifold3d as m3
     from scipy.spatial import ConvexHull
     E = _unit(np.asarray(E, float))
     r = np.broadcast_to(np.asarray(r, float), (len(E),)).copy()
-    d = cut_lengths(E, r, lam)
-    # inner rings: each must be a hull face (no other ring reaches past its plane), as nodeJoint.ring_offsets
-    t = d / (1 + lam)
-    for _ in range(50):
-        tn = t.copy()
+    L = np.broadcast_to(np.asarray(L, float), (len(E),)).copy()
+    k = _cc_shrink(levels)
+    a_h = r.max() / k
+    a = r / k
+    frames = []
+    for i, e in enumerate(E):                                      # square orientation: edges facing the nearest
+        cs = [E[j] @ e for j in range(len(E)) if j != i]           # neighbour (cube: edges parallel to the axes)
+        jn = [j for j in range(len(E)) if j != i][int(np.argmax(cs))]
+        o = E[jn] - (E[jn] @ e) * e
+        u = _unit(o) if np.linalg.norm(o) > 1e-9 else _frame(e)[0]
+        frames.append((u, np.cross(e, u)))
+    corner = np.array([[1, 1], [-1, 1], [-1, -1], [1, -1]], float)
+    def square(i, ti, ah):
+        u, v = frames[i]
+        return ti * E[i] + ah * (np.outer(corner[:, 0], u) + np.outer(corner[:, 1], v))
+    t = np.full(len(E), a_h)
+    for _ in range(200):                                           # no other node square reaches past square i's
+        tn = t.copy()                                              # plane (equality = shared corners, cube)
         for i in range(len(E)):
             for j in range(len(E)):
                 if i != j:
-                    c = E[i] @ E[j]
-                    tn[i] = max(tn[i], t[j] * c + r[j] * np.sqrt(max(1 - c * c, 0)) + 0.02 * r[i])
-        if np.allclose(tn, t):
+                    tn[i] = max(tn[i], float((square(j, t[j], a_h) @ E[i]).max()) + margin * a_h)
+        if np.allclose(tn, t, atol=1e-12):
             break
         t = tn
-    d = np.maximum(d, t + 0.3 * r)                                 # the prism needs some length
-    V, circ, upar, rings_in, rings_out = [], [], [], [], []
-    nv = 0
-    ph0 = np.pi / n_sides
-    for i, (e, ri) in enumerate(zip(E, r)):
-        u, v = _frame(e)
-        ph = ph0 + 2 * np.pi * np.arange(n_sides) / n_sides
-        rad = np.outer(np.cos(ph), u) + np.outer(np.sin(ph), v)
-        V.append(t[i] * e + ri * rad); circ.append(np.full(n_sides, -1)); upar.append(np.zeros(n_sides))
-        rings_in.append(np.arange(nv, nv + n_sides)); nv += n_sides
-        V.append(d[i] * e + ri * rad); circ.append(np.full(n_sides, i)); upar.append(ph)
-        rings_out.append(np.arange(nv, nv + n_sides)); nv += n_sides
-    V, circ, upar = np.vstack(V), np.concatenate(circ), np.concatenate(upar)
-    idx = np.concatenate(rings_in)
-    H = ConvexHull(V[idx])
-    S = idx[H.simplices]
-    ring_of = np.full(len(V), -1)
-    for q, ids in enumerate(rings_in):
-        ring_of[ids] = q
-    rs = ring_of[S]
-    S = S[~((rs[:, 0] == rs[:, 1]) & (rs[:, 1] == rs[:, 2]))]           # inner ring caps
-    nrm = np.cross(V[S[:, 1]] - V[S[:, 0]], V[S[:, 2]] - V[S[:, 0]])
-    flip = (nrm * V[S].mean(1)).sum(1) < 0
-    S[flip] = S[flip][:, ::-1]
-    F = [S]
-    a_ = np.arange(n_sides)
-    b_ = (a_ + 1) % n_sides
-    for ri_, ro in zip(rings_in, rings_out):                         # prisms, outward (ccw about e, ro further)
-        F.append(np.column_stack((ri_[a_], ro[a_], ri_[b_])))
-        F.append(np.column_stack((ri_[b_], ro[a_], ro[b_])))
-    F = np.vstack(F)
-    ctrl = (V + node, F.copy())
-    N = _vertex_normals(V, F)
-    centers = [di * e for e, di in zip(E, d)]
+    rings = [(square(i, t[i], a_h), *frames[i]) for i in range(len(E))]
+    # merge shared corners (cubic node: Table I vertices common to three beams)
+    allp = np.vstack([rg for rg, _, _ in rings])
+    uniq, inv = [], []
+    for p_ in allp:
+        for q, w in enumerate(uniq):
+            if np.linalg.norm(p_ - w) < 1e-7 * a_h:
+                inv.append(q)
+                break
+        else:
+            inv.append(len(uniq))
+            uniq.append(p_)
+    V = list(uniq)
+    node_ring = [list(np.array(inv[4 * i:4 * i + 4])) for i in range(len(E))]
+    faces = []
+    H = ConvexHull(np.array(uniq))
+    ring_sets = [set(rg) for rg in node_ring]
+    # hull facets, merged by plane: drop the ones that are a node square (beam opening)
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for sx, eq in zip(H.simplices, H.equations):
+        groups[tuple(np.round(eq, 7))].append(sx)
+    for key, tris in groups.items():
+        vs = set(np.concatenate(tris))
+        if any(vs <= rs and len(vs) == 4 for rs in ring_sets):
+            continue
+        for tri in tris:                                           # keep as triangles (CC handles n-gons)
+            tri = list(tri)
+            nrm = np.cross(uniq[tri[1]] - uniq[tri[0]], uniq[tri[2]] - uniq[tri[0]])
+            if nrm @ (uniq[tri[0]]) < 0:
+                tri = tri[::-1]
+            faces.append([int(x) for x in tri])
+    for i, (e, ri) in enumerate(zip(E, r)):                        # frustum to mid-span, prism to past the end
+        rg, u, v = rings[i]
+        prev = node_ring[i]
+        zs = [0.5 * L[i], L[i] + 2 * a[i]] if 0.5 * L[i] > t[i] + 1e-6 else [L[i] + 2 * a[i]]
+        for z in zs:
+            cur = []
+            for ang in (np.pi / 4, 3 * np.pi / 4, 5 * np.pi / 4, 7 * np.pi / 4):
+                cur.append(len(V))
+                V.append(z * e + a[i] * np.sqrt(2) * (np.cos(ang) * u + np.sin(ang) * v))
+            for j in range(4):
+                faces.append([prev[j], cur[j], cur[(j + 1) % 4], prev[(j + 1) % 4]])
+            prev = cur
+        faces.append(prev[::-1])                                   # end cap (trimmed away)
+    V = np.array(V)
+    # consistent outward orientation of the control mesh
+    tm = trimesh.Trimesh(V, [f if len(f) == 3 else f[:3] for f in faces], process=False)
+    ctrl = (V + node, [list(f) for f in faces])
+    Vs, Fs = V, faces
     for _ in range(levels):
-        V, N, F, circ, upar = pn_loop_step(V, N, F, circ, upar, centers, list(E), r, pn=False)
-    return dict(V=V + node, F=F, N=N, circ=circ, upar=upar, d=d, E=E, r=r, ctrl=ctrl)
+        Vs, Fs = catmull_clark(Vs, Fs)
+    Fq = np.array(Fs)
+    T = np.vstack((Fq[:, [0, 1, 2]], Fq[:, [0, 2, 3]]))
+    mesh = trimesh.Trimesh(Vs, T, process=True)
+    trimesh.repair.fix_winding(mesh)
+    if mesh.volume < 0:
+        mesh.invert()
+    man = m3.Manifold(m3.Mesh(np.ascontiguousarray(mesh.vertices, np.float32), np.ascontiguousarray(mesh.faces, np.uint32)))
+    for e, l in zip(E, L):
+        man = man.trim_by_plane(tuple(map(float, -e)), float(-l))
+    out = man.to_mesh()
+    m = trimesh.Trimesh(np.asarray(out.vert_properties)[:, :3] + node, np.asarray(out.tri_verts), process=True)
+    return m, ctrl, dict(a_h=a_h, t=t, shrink=k)

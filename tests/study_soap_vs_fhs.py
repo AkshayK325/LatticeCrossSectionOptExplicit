@@ -506,6 +506,201 @@ def step_paperfigs():
     plt.close(fig)
 
 
+def poly_edges(faces):
+    return np.array(sorted({(min(a, b), max(a, b)) for f in faces for a, b in zip(f, list(f[1:]) + [f[0]])}))
+
+
+def poly_tris(faces):
+    return np.array([[f[0], f[k], f[k + 1]] for f in faces for k in range(1, len(f) - 1)])
+
+
+def build3(E, r, L):
+    """Savio (2018), SF (Luo & Zou 2025, R3) and FHS solids of one node with flat far ends at L, the control meshes
+    (V, polygon faces) and build times; plus the ball radius that contains every method's node region."""
+    out = {}
+    t = time.time()
+    m, ctrl, info = sfm.savio_node(np.zeros(3), E, r, L, levels=4)    # 4 CC levels: face count as SF / FHS
+    out['Savio'] = dict(mesh=m, ctrl=ctrl, time=time.time() - t, extent=(info['t'] + r).max())
+    t = time.time()
+    sf = sfm.soap_film_node(np.zeros(3), E, r)
+    t_sf = time.time() - t                                           # the node patch (struts are just tubes)
+    out['SF'] = dict(mesh=sfm.node_solid(sf, L), ctrl=(sf['ctrl'][0], [list(f) for f in sf['ctrl'][1]]),
+                     time=t_sf, extent=sf['d'].max(), sf=sf)
+    t = time.time()
+    try:
+        fm, R_s = fhs_node(E, r, L)
+        c = fhs_node.ctrl
+        out['FHS'] = dict(mesh=fm, ctrl=(np.asarray(c.vertices), [list(f) for f in np.asarray(c.faces)]),
+                          time=time.time() - t, extent=(nj.ring_offsets(E, r, R_s, core=True) + 2 * r).max())
+    except Exception as ex:
+        out['FHS'] = dict(fail=f'{type(ex).__name__}: {str(ex)[:60]}')
+    R = max(o['extent'] for o in out.values() if 'extent' in o) + 0.5 * r.max()
+    return out, R
+
+
+METHODS3 = ('Savio', 'SF', 'FHS')
+
+
+def metrics3(name, E, r):
+    E = E / np.linalg.norm(E, axis=1)[:, None]
+    r = np.asarray(r, float)
+    sf0 = sfm.soap_film_node(np.zeros(3), E, r)
+    L = np.full(len(E), max(sf0['d'].max(), 2.5 * r.max()) + 4 * r.max())
+    out, R = build3(E, r, L)
+    L = np.full(len(E), R + 3 * r.max())                            # struts well past the common ball
+    out, R = build3(E, r, L)
+    ref = boolean_node(E, r, L)
+    vb = ball_volume(ref, R)
+    for k in METHODS3:
+        o = out[k]
+        if 'fail' in o:
+            continue
+        f = f'{OUT}/m3_{name}_{k}.stl'
+        o['mesh'].export(f)
+        m = trimesh.load(f, process=True)
+        o['stl'] = f
+        o['m'] = m
+        o.update(metrics(m, E, r, R, ref))
+        o['dvol'] = 100 * (o['vol'] / vb - 1)
+        V = np.asarray(m.vertices)
+        P = sample(V, np.asarray(m.faces), 300_000, mask=np.linalg.norm(V[m.faces].mean(1), axis=1) < R)
+        o['dev'] = nj.surface_distance(P, ref, ring=6)
+    return out, R, E, r
+
+
+HEAD3 = ('| case | method | valid | mean / max / std dev. from Boolean (mm) | tightest concave radius / r | max dihedral deg | '
+         '99 % abs(H) r | volume in ball vs Boolean | min section / r | build time s |\n|---|---|---|---|---|---|---|---|---|---|')
+
+
+def row3(name, k, o):
+    if 'fail' in o:
+        return f'| {name} | {k} | FAIL: {o["fail"]} | | | | | | | |'
+    return (f"| {name} | {k} | {o['ok']} | {o['dev'].mean():.4f} / {o['dev'].max():.3f} / {o['dev'].std():.3f} | "
+            f"{o['conc']:.3f} | {o['dih']:.0f} | {o['H99']:.2f} | {o['dvol']:+.1f} % | {o['sec']:.3f} | {o['time']:.2f} |")
+
+
+def step_all3():
+    """Savio vs SF vs FHS on the SF paper's six nodes (+ Figs. 12, 14, 15 with all three) and the 25 valence-3
+    nodes of notes/12 (+ 30 deg). Figures: ResultsFig/explicit/70_three_methods_fig12.png, 71_..._fig14.png,
+    72_..._fig15.png."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+    import study_three_beam_sweep as sw
+    print(HEAD3)
+    res = {}
+    for nm, E in paper_nodes():
+        out, R, E, r = metrics3(nm, E, np.ones(len(E)))
+        res[nm] = (out, R, E, r)
+        for k in METHODS3:
+            print(row3(nm, k, out[k]), flush=True)
+    nodes = [nm for nm, _ in paper_nodes()]
+    # Fig. 12 (7 rows): graph, then control mesh + surface for each method
+    fig = plt.figure(figsize=(18, 21))
+    for c, nm in enumerate(nodes):
+        out, R, E, r = res[nm]
+        ax = fig.add_subplot(7, 6, 1 + c, projection='3d')
+        for e in E:
+            ax.plot(*np.c_[np.zeros(3), R * e], 'k', lw=0.6)
+        ax.set_xlim(-R, R); ax.set_ylim(-R, R); ax.set_zlim(-R, R); ax.set_box_aspect((1, 1, 1))
+        ax.view_init(25, 35); ax.set_axis_off(); ax.set_title(nm, fontsize=10)
+        for j, k in enumerate(METHODS3):
+            o = out[k]
+            if 'fail' in o:
+                continue
+            Vc, Fc = o['ctrl']
+            Vc = np.asarray(Vc)
+            mc = trimesh.Trimesh(Vc, poly_tris(Fc), process=False)
+            keep = np.linalg.norm(Vc[poly_tris(Fc)].mean(1), axis=1) < 1.15 * R
+            mcc = trimesh.Trimesh(Vc, poly_tris(Fc)[keep], process=False)
+            ed = poly_edges(Fc)
+            ed = ed[(np.linalg.norm(Vc[ed].mean(1), axis=1) < 1.15 * R)]
+            render_z(fig.add_subplot(7, 6, 1 + c + 6 * (1 + 2 * j)), mcc, np.zeros(len(Vc)), 1.0, f'{k} control mesh',
+                     1.1 * R, n_px=340, n_pts=500_000, grey=True, edges=ed)
+            m = o['m']
+            keep = np.linalg.norm(m.vertices[m.faces].mean(1), axis=1) < R
+            render_z(fig.add_subplot(7, 6, 1 + c + 6 * (2 + 2 * j)), trimesh.Trimesh(m.vertices, m.faces[keep], process=False),
+                     np.zeros(len(m.vertices)), 1.0, f'{k} surface', 1.1 * R, n_px=340, n_pts=1_400_000, grey=True)
+    fig.savefig('ResultsFig/explicit/70_three_methods_fig12.png', dpi=95, bbox_inches='tight')
+    plt.close(fig)
+    # Fig. 14: mean curvature, red (+) -> green (0) -> blue (-); one symmetric range per node for all three
+    fig = plt.figure(figsize=(18, 10))
+    for c, nm in enumerate(nodes):
+        out, R, E, r = res[nm]
+        Hs = {}
+        for k in METHODS3:
+            if 'fail' in out[k]:
+                continue
+            m = out[k]['m']
+            H = mean_curvature(m)
+            inb = np.linalg.norm(m.vertices, axis=1) < R
+            Hs[k] = (m, H, inb)
+        hl = max(np.quantile(np.abs(H[inb]), 0.99) for m, H, inb in Hs.values())
+        for j, k in enumerate(METHODS3):
+            if k not in Hs:
+                continue
+            m, H, inb = Hs[k]
+            keep = np.linalg.norm(m.vertices[m.faces].mean(1), axis=1) < R
+            render_z(fig.add_subplot(3, 6, 1 + c + 6 * j), trimesh.Trimesh(m.vertices, m.faces[keep], process=False), H, 1.0,
+                     f'{k}: {nm} (H r, +-{hl:.1f})', 1.1 * R, n_px=340, n_pts=1_400_000, cmap='jet', hlim=hl)
+    fig.savefig('ResultsFig/explicit/71_three_methods_fig14.png', dpi=95, bbox_inches='tight')
+    plt.close(fig)
+    # Fig. 15: deviation histograms in the common node ball
+    fig, axs = plt.subplots(3, 6, figsize=(20, 9))
+    for c, nm in enumerate(nodes):
+        out, R, E, r = res[nm]
+        xmax = max(out[k]['dev'].max() for k in METHODS3 if 'dev' in out[k])
+        for j, k in enumerate(METHODS3):
+            ax = axs[j, c]
+            if 'dev' not in out[k]:
+                continue
+            dv = out[k]['dev']
+            cnt, e_ = np.histogram(dv, bins=120, range=(0, xmax))
+            ax.bar(e_[:-1], cnt, width=np.diff(e_), align='edge', color=cm.jet(e_[:-1] / xmax))
+            ax.set_title(f'{k}: {nm} (mean {dv.mean():.3f})', fontsize=9)
+            ax.set_xlabel('Deviation from Boolean node (mm)', fontsize=8); ax.set_ylabel('Counts', fontsize=8)
+            ax.tick_params(labelsize=7)
+    fig.tight_layout()
+    fig.savefig('ResultsFig/explicit/72_three_methods_fig15.png', dpi=95)
+    plt.close(fig)
+    # valence-3 sweep
+    for an, ang in dict(sw.ANGLES, acute_30_120_110=(30, 120, 110)).items():
+        for rn, rad in sw.RADII.items():
+            nm = f'{an}_{rn}'
+            try:
+                out, R, E, r = metrics3(nm, sw.from_angles(*ang), np.array(rad))
+            except Exception as ex:
+                print(f'| {nm} | all | FAIL: {type(ex).__name__}: {str(ex)[:80]} | | | | | | | |', flush=True)
+                continue
+            for k in METHODS3:
+                print(row3(nm, k, out[k]), flush=True)
+
+
+def step_fe3():
+    """Tetrahedral node FE (as S5) for Savio and SF (R3), equal and graded radii; FHS from S5."""
+    print('| node | method | K (h = r_min/4) | K (r_min/6) | K (r_min/8) | tets (finest) |')
+    print('|---|---|---|---|---|---|')
+    for nm, r in (('tetra_r080', np.full(4, 0.8)), ('tetra_graded_100_080_060_040', np.array([1.0, 0.8, 0.6, 0.4]))):
+        E = tetra()
+        out, R = build3(E, r, np.full(4, 8.0))
+        L = R + 3 * r
+        out, R = build3(E, r, L)
+        for k in ('Savio', 'SF', 'FHS'):
+            stl = f'{OUT}/fe3_{nm}_{k}.stl'
+            out[k]['mesh'].export(stl)
+            res = []
+            for h in (4, 6, 8):
+                try:
+                    q = fe_peak(stl, E, r, L, R, r.min() / h)
+                    res.append(f"{q['K']:.3f}")
+                    nel = q['nel']
+                except Exception as ex:
+                    res.append(f'fail ({type(ex).__name__}: {str(ex)[:40]})')
+                    nel = '-'
+            print(f'| {nm} | {k} | ' + ' | '.join(res) + f' | {nel} |', flush=True)
+
+
 def step_s3():
     """S3: regular and irregular nodes, r = 1, all methods."""
     print(HEAD)
@@ -522,8 +717,9 @@ def fhs_node(E, r, L, dt=0.005):
     """FHS single node (notes/13): trim sphere, hull of node + core rings, Loop x3, anchored thin-plate fairing."""
     node = np.zeros(3)
     R_s, _ = nj.trim_radius(E, r, L, dt=dt)
-    sm, _ = nj.hull_subdivision_node(node, E, r, L, R_s, lead=1.0, core=True)
+    sm, ctrl = nj.hull_subdivision_node(node, E, r, L, R_s, lead=1.0, core=True)
     fm, _ = nj.fair_node_anchored(nj.to_trimesh(sm), node, E, r, nj.ring_offsets(E, r, R_s, core=True))
+    fhs_node.ctrl = ctrl
     return fm, R_s
 
 
@@ -602,7 +798,7 @@ def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), 
     if edges:                                                       # visible mesh edges (control meshes)
         zb = np.full(n_px * n_px, -np.inf)
         zb[pix_s[first]] = z[sel]
-        Ed = m.edges_unique
+        Ed = np.asarray(edges) if not isinstance(edges, bool) else m.edges_unique
         k = 40
         s_ = np.linspace(0, 1, k)
         Q = (V[Ed[:, 0]][:, None, :] * (1 - s_)[None, :, None] + V[Ed[:, 1]][:, None, :] * s_[None, :, None]).reshape(-1, 3)
@@ -640,4 +836,4 @@ def render(ax, m, H, r, title, lim=None):
 if __name__ == '__main__':
     import os
     os.makedirs(OUT, exist_ok=True)
-    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
+    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
