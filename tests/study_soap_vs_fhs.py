@@ -521,13 +521,19 @@ def build3(E, r, L):
     (V, polygon faces) and build times; plus the ball radius that contains every method's node region."""
     out = {}
     t = time.time()
-    m, ctrl, info = sfm.savio_node(np.zeros(3), E, r, L, levels=4)    # 4 CC levels: face count as SF / FHS
-    out['Savio'] = dict(mesh=m, ctrl=ctrl, time=time.time() - t, extent=(info['t'] + r).max())
+    try:
+        m, ctrl, info = sfm.savio_node(np.zeros(3), E, r, L, levels=4)    # 4 CC levels: face count as SF / FHS
+        out['Savio'] = dict(mesh=m, ctrl=ctrl, time=time.time() - t, extent=(info['t'] + r).max())
+    except Exception as ex:                                          # recorded, so robustness can be counted
+        out['Savio'] = dict(fail=f'{type(ex).__name__}: {str(ex)[:60]}')
     t = time.time()
-    sf = sl.subdiv_lattice_node(np.zeros(3), E, r)
-    t_sf = time.time() - t                                           # the node patch (struts are just tubes)
-    out['SF'] = dict(mesh=sfm.node_solid(sf, L), ctrl=(sf['ctrl'][0], [list(f) for f in sf['ctrl'][1]]),
-                     time=t_sf, extent=sf['d'].max(), sf=sf)
+    try:
+        sf = sl.subdiv_lattice_node(np.zeros(3), E, r)
+        t_sf = time.time() - t                                       # the node patch (struts are just tubes)
+        out['SF'] = dict(mesh=sfm.node_solid(sf, L), ctrl=(sf['ctrl'][0], [list(f) for f in sf['ctrl'][1]]),
+                         time=t_sf, extent=sf['d'].max(), sf=sf)
+    except Exception as ex:
+        out['SF'] = dict(fail=f'{type(ex).__name__}: {str(ex)[:60]}')
     t = time.time()
     try:
         fm, R_s = fhs_node(E, r, L)
@@ -547,8 +553,8 @@ def metrics3(name, E, r):
     rs.update(f'{name}: Savio / SF / FHS build + metrics')
     E = E / np.linalg.norm(E, axis=1)[:, None]
     r = np.asarray(r, float)
-    sf0 = sl.subdiv_lattice_node(np.zeros(3), E, r)
-    L = np.full(len(E), max(sf0['d'].max(), 2.5 * r.max()) + 4 * r.max())
+    d_sf = sl.cut_lengths(E, r).max()                               # SF's cut, without building it
+    L = np.full(len(E), max(d_sf, 2.5 * r.max()) + 4 * r.max())
     out, R = build3(E, r, L)
     L = np.full(len(E), R + 3 * r.max())                            # struts well past the common ball
     out, R = build3(E, r, L)
@@ -698,6 +704,54 @@ def step_all3():
                 continue
             for k in METHODS3:
                 print(row3(nm, k, out[k]), flush=True)
+
+
+def case2_node(n, theta, ratio, seed=0):
+    """Case 2 node: n unit directions whose smallest pairwise angle is theta (deg; struts 0 and 1), the others random
+    at >= theta from all; radii worst case on the acute pair (r_0 = 1, r_1 = 1 / ratio), the rest random in between."""
+    rng = np.random.default_rng(seed)
+    th = np.radians(theta)
+    E = [np.array([0, 0, 1.0]), np.array([np.sin(th), 0, np.cos(th)])]
+    for _ in range(200_000):
+        if len(E) == n:
+            break
+        v = rng.normal(size=3)
+        v /= np.linalg.norm(v)
+        if all(v @ e < np.cos(th) for e in E):
+            E.append(v)
+    else:
+        raise ValueError(f'no valence-{n} node with min angle {theta} deg')
+    E = np.array(E)
+    if np.linalg.eigvalsh(E.T @ E)[0] < 1e-6:                    # all struts in one plane through the node
+        raise ValueError('coplanar')
+    r = np.r_[1.0, 1.0 / ratio, rng.uniform(1.0 / ratio, 1.0, n - 2)]
+    return E, r
+
+
+CASE2 = dict(valence=(3, 4, 6), theta=(30, 50, 70, 90), ratio=(1.0, 1.5, 2.0, 3.0, 4.0))
+
+
+def step_case2():
+    """Case 2 (unequal radii): Savio vs SF vs FHS over valence x smallest angle x radius ratio, every method with its
+    defaults (no per-case tuning: the automation test); failures recorded with the reason (robustness).
+    Rows: STL/soap_vs_fhs/case2.rows.md."""
+    print(HEAD3)
+    for n in CASE2['valence']:
+        for th in CASE2['theta']:
+            for q in CASE2['ratio']:
+                nm = f'c2_v{n}_t{th}_q{q:g}'
+                try:
+                    E, r = case2_node(n, th, q)
+                except ValueError as ex:
+                    print(f'| {nm} | all | SKIP: {ex} | | | | | | | |', flush=True)
+                    continue
+                try:
+                    out, R, E, r = metrics3(nm, E, r)
+                except Exception as ex:
+                    print(f'| {nm} | all | FAIL: {type(ex).__name__}: {str(ex)[:80]} | | | | | | | |', flush=True)
+                    continue
+                for k in METHODS3:
+                    print(row3(nm, k, out[k]), flush=True)
 
 
 def step_fe3():
@@ -868,4 +922,4 @@ if __name__ == '__main__':
     rs.start('study_soap_vs_fhs ' + ' '.join(sys.argv[1:]))
     import os
     os.makedirs(OUT, exist_ok=True)
-    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
+    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3, 'case2': step_case2}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()

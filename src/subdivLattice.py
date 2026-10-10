@@ -347,8 +347,7 @@ def subdiv_lattice_node(node, E, r, lap_iter=2, subdiv_iter=3):
     d (circle distances), E, r, ctrl = the faired initial mesh."""
     E = _unit(np.asarray(E, float))
     r = np.broadcast_to(np.asarray(r, float), (len(E),)).copy()
-    c = E.mean(0)
-    if np.linalg.eigvalsh((E - c).T @ (E - c))[0] < 1e-10 and len(E) > 3:
+    if np.linalg.eigvalsh(E.T @ E)[0] < 1e-10:                   # all in one plane through the node
         raise ValueError('coplanar struts (checkCoplanar)')
     d = cut_lengths(E, r)
     V, F, props = initial_mesh(E, r, d)
