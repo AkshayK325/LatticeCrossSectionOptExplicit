@@ -152,13 +152,15 @@ def tet_quality(P, T):
 
 
 def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False, algo3d=10, extra_opt=(), algo2d=6,
-                  size_min=0.5, smooth2d=0, opt2d=(), plate_refine=None):
+                  size_min=0.5, smooth2d=0, opt2d=(), plate_refine=None, ball_refine=None):
     """Solid tet mesh of a watertight STL (e.g. an FHS lattice, nodeJoint.lattice_fhs): gmsh splits the discrete
     surface at sharp edges (> angle deg: the plate rims; the FHS fillets are smooth, < 20 deg), reparametrises the
     patches, remeshes the surface at ~h (finer where curved: `curvature` elements per 2 pi) and fills it with linear
     tets (HXT + Netgen optimisation), so the solid mesh is independent of the STL's fine triangulation.
     Returns (P, T) 0-based."""
     import gmsh
+    if gmsh.isInitialized():                                       # a previous call raised: drop its model
+        gmsh.finalize()
     gmsh.initialize()
     gmsh.option.setNumber('General.Terminal', 1 if verbose else 0)
     gmsh.merge(str(stl))
@@ -185,6 +187,16 @@ def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False
         fm = gmsh.model.mesh.field.add('Min')
         gmsh.model.mesh.field.setNumbers(fm, 'FieldsList', fields)
         gmsh.model.mesh.field.setAsBackgroundMesh(fm)
+    if ball_refine is not None:
+        # finer elements in a ball (centre, radius, h_in, thickness): one node joint for stress concentration
+        c, R, hb, th = ball_refine
+        gmsh.option.setNumber('Mesh.MeshSizeMin', min(size_min * h, size_min * hb))
+        f = gmsh.model.mesh.field.add('Ball')
+        for k, v in (('VIn', hb), ('VOut', h), ('XCenter', c[0]), ('YCenter', c[1]), ('ZCenter', c[2]),
+                     ('Radius', R), ('Thickness', th)):
+            gmsh.model.mesh.field.setNumber(f, k, float(v))
+        gmsh.model.mesh.field.setAsBackgroundMesh(f)
+        gmsh.option.setNumber('Mesh.MeshSizeExtendFromBoundary', 0)
     gmsh.option.setNumber('Mesh.MeshSizeFromCurvature', curvature)
     gmsh.option.setNumber('Mesh.Algorithm', algo2d)
     gmsh.option.setNumber('Mesh.Algorithm3D', algo3d)
@@ -201,7 +213,7 @@ def gmsh_from_stl(stl, h, angle=40.0, curvature=12, optimize=True, verbose=False
             raise
         gmsh.finalize()                                            # HXT can fail on a valid surface: classic Delaunay
         return gmsh_from_stl(stl, h, angle, curvature, optimize, verbose, 1, extra_opt, algo2d, size_min, smooth2d, opt2d,
-                             plate_refine)
+                             plate_refine, ball_refine)
     for method in extra_opt:                                       # e.g. 'Netgen', 'Relocate3D'
         gmsh.model.mesh.optimize(method, niter=3)
     tags, coords, _ = gmsh.model.mesh.getNodes()
