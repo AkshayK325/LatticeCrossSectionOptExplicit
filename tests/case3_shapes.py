@@ -55,3 +55,35 @@ def cross(req, arm=0.45, rho=0.15, roll=0.0):
     xy *= req * np.sqrt(np.pi / Polygon(xy).area)
     c, s_ = np.cos(roll), np.sin(roll)
     return xy @ np.array([[c, s_], [-s_, c]])
+
+
+def vae_sections(n_grid=8, seed=0):
+    """Real optimiser sections: decode a grid of VAE latent designs (z1, z2) in [0, 1]^2 with k = 1, theta = 0
+    (sectionModel.shapePredict + SplineGeometry(5).rotate_cross_section, checkpoint of tests/legacy_setup.py).
+    Returns [(z1, z2, contour, solidity = area / convex-hull area)] for the valid (simple) contours."""
+    import torch
+    from legacy_setup import load_vae
+    from sectionModel import shapePredict
+    from splineGeom import SplineGeometry
+    from shapely.geometry import Polygon
+    net = load_vae()
+    sg = SplineGeometry(5)
+    g = np.linspace(0.05, 0.95, n_grid)
+    Z = np.array([(a, b) for a in g for b in g])
+    x = torch.tensor(np.c_[Z, np.ones(len(Z)), np.zeros(len(Z))], dtype=net.input_data.dtype)
+    with torch.no_grad():
+        cp, th = shapePredict(x, net)
+    out = []
+    for (a, b), c, t in zip(Z, cp.numpy(), th.numpy()):
+        try:
+            xy = sg.rotate_cross_section(np.asarray(c, float), float(t))
+        except Exception:
+            continue
+        xy = np.asarray(xy, float)
+        _, keep = np.unique(np.round(xy, 9), axis=0, return_index=True)
+        xy = xy[np.sort(keep)]
+        P = Polygon(xy)
+        if len(xy) < 20 or not P.is_valid or P.area <= 0:
+            continue
+        out.append((a, b, xy, P.area / P.convex_hull.area))
+    return out
