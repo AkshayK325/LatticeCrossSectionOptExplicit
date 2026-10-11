@@ -241,6 +241,12 @@ LEAD_SECTION = 0.5   # lead (x r_eq) of non-circular struts: the section is with
                      # ring (1.25-1.75 with lead 1.0), creases no worse (notes/17 P7)
 
 
+def _blend(s):
+    """Smoothstep 0 -> 1 on s in [0, 1] (clamped)."""
+    s = np.clip(s, 0.0, 1.0)
+    return s * s * (3 - 2 * s)
+
+
 def strictly_convex_ring(c, sag=0.03):
     """The ring c (n x 2, counter-clockwise) made strictly convex, keeping its vertex count and order: vertices off
     the ring's convex hull are moved onto a parabolic arc over their hull edge, bulging outward. Used where a ring
@@ -258,6 +264,7 @@ def strictly_convex_ring(c, sag=0.03):
         u1, u2 = b - a, d - b
         ext[q] = np.arctan2(u1[0] * u2[1] - u1[1] * u2[0], u1 @ u2)
     out = c.copy()
+    c0 = c.mean(0)
     for q in range(m):
         a, b = hv[q], hv[(q + 1) % m]
         k = (b - a) % n
@@ -267,7 +274,16 @@ def strictly_convex_ring(c, sag=0.03):
         A, B = c[a], c[b]
         ab = B - A
         sg = min(sag, 0.1 * min(ext[q], ext[(q + 1) % m]))       # end slope 4 sg < exterior angle / 2
-        tt = np.linspace(0, 1, k + 1)[1:-1]
+        # parameter on the edge where the ray from the centroid through each vertex meets it, so that blending a
+        # ring into c moves its vertices radially (even spacing crossed neighbouring rings: folds, notes/17 P7.3)
+        P = c[idx] - c0
+        den = P[:, 0] * ab[1] - P[:, 1] * ab[0]
+        num_ = (A - c0)[0] * P[:, 1] - (A - c0)[1] * P[:, 0]
+        tt = np.where(np.abs(den) > 1e-12, num_ / np.where(np.abs(den) > 1e-12, den, 1.0), np.nan)
+        radial_ok = (np.all(np.isfinite(tt)) and tt.min() > 1e-6 and tt.max() < 1 - 1e-6
+                     and np.all(np.diff(tt) > 1e-6))
+        if not radial_ok:                                          # not star-shaped from the centroid here
+            tt = np.linspace(0, 1, k + 1)[1:-1]
         nrm = np.array([ab[1], -ab[0]]) / np.linalg.norm(ab)        # outward for a counter-clockwise ring
         out[idx] = A + tt[:, None] * ab + (4 * sg * np.linalg.norm(ab) * tt * (1 - tt))[:, None] * nrm
     if len(ConvexHull(out).vertices) != n:
@@ -351,7 +367,11 @@ def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.
         zs = np.concatenate((z0, np.arange(z0[-1] + dz, l + 3 * dz, dz)))
         start = nv
         for kz, z in enumerate(zs):
-            V.append(node + z * e + (circ0 if kz == 0 else circ))
+            if sec is None:
+                V.append(node + z * e + (circ0 if kz == 0 else circ))
+            else:                                                  # hull ring -> section over a physical length
+                b = _blend((z - ti) / (LEAD_SECTION * r))
+                V.append(node + z * e + (1 - b) * circ0 + b * circ)
             nv += n
         ring0.append((start, n))
         for k in range(len(zs) - 1):
@@ -863,7 +883,12 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
                           lead if secs[i] is None else min(lead, LEAD_SECTION), mid)
         start = nv
         for kz, z in enumerate(zs):
-            V.append(X[a] + z * e + (circ_h if kz in (0, len(zs) - 1) else circ))
+            if secs[i] is None:
+                V.append(X[a] + z * e + (circ_h if kz in (0, len(zs) - 1) else circ))
+            else:                                                  # blend from both node rings (short struts:
+                bl = LEAD_SECTION * r                              # the two blends overlap, no full section)
+                bb = _blend((z - zs[0]) / bl) * _blend((zs[-1] - z) / bl)
+                V.append(X[a] + z * e + (1 - bb) * circ_h + bb * circ)
             nv += n
         for q in range(len(zs) - 1):
             F.append(_tube_faces(start + q * n, start + (q + 1) * n, n))
