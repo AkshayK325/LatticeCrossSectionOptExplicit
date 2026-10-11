@@ -50,5 +50,17 @@ def test_lattice_fhs_watertight_smooth(tmp_path):
     m = trimesh.load(f, process=True)
     assert m.is_watertight and m.is_volume
     assert _dihedral_max(m, H) < 20
-    assert abs(m.volume - 283.4) < 0.01 * 283.4
+    # 301.2: with core containment (2026-10-11, notes/17 P3.4); without it 283.4, but the strut section then thinned
+    # to 0.878 r at the interior nodes (the thin-plate fairing cut into the cores)
+    assert abs(m.volume - 301.2) < 0.01 * 301.2
     assert len(m.faces) < 150_000                                # 2 levels + limit + coarse middles (was 558k)
+    import study_three_beam_joint as tb                          # no strut thins at an interior node
+    for a, b in C:
+        e = X[b] - X[a]
+        l = np.linalg.norm(e)
+        for nd, d in ((a, e / l), (b, -e / l)):
+            if X[nd, 2] in (0.0, H):                             # plate nodes: the plate cuts the slices
+                continue
+            tb.NODE = X[nd]
+            _, R = tb.section_profile(m, d, s_max=0.5 * l, ds=0.05)
+            assert np.nanmin(R) > 0.95 * 0.8

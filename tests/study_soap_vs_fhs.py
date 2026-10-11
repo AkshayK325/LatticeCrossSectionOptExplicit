@@ -550,7 +550,7 @@ def build3(E, r, L):
 METHODS3 = ('Savio', 'SF', 'FHS')
 
 
-def metrics3(name, E, r, progress=(None, None)):
+def metrics3(name, E, r, progress=(None, None), keep_stl=True):
     rs.update(f'{name}: Savio / SF / FHS build + metrics', *progress)
     E = E / np.linalg.norm(E, axis=1)[:, None]
     r = np.asarray(r, float)
@@ -568,6 +568,8 @@ def metrics3(name, E, r, progress=(None, None)):
         f = f'{OUT}/m3_{name}_{k}.stl'
         o['mesh'].export(f)
         m = trimesh.load(f, process=True)
+        if not keep_stl:                                             # sweeps: the rows are the record (disk)
+            os.remove(f)
         o['stl'] = f
         o['m'] = m
         o.update(metrics(m, E, r, R, ref))
@@ -754,12 +756,56 @@ def step_case2():
             print(f'| {nm} | all | SKIP: {ex} | | | | | | | |', flush=True)
             continue
         try:
-            out, R, E, r = metrics3(nm, E, r, progress=(i, len(todo)))
+            out, R, E, r = metrics3(nm, E, r, progress=(i, len(todo)), keep_stl=False)
         except Exception as ex:
             print(f'| {nm} | all | FAIL: {type(ex).__name__}: {str(ex)[:80]} | | | | | | | |', flush=True)
             continue
         for k in METHODS3:
             print(row3(nm, k, out[k]), flush=True)
+
+
+GALLERY = (('c2_v3_t50_q3', 'SF folds', (3, 50, 3.0)), ('c2_v3_t90_q4', 'SF necks, Savio bloats', (3, 90, 4.0)),
+           ('c2_v6_t50_q4', 'Savio bloats', (6, 50, 4.0)), ('c2_v3_t30_q1', 'acute valence 3 (FHS back fix)', (3, 30, 1.0)),
+           ('regular-12', 'baseline (paper node)', None))
+
+
+def good3(o):
+    """Robustness verdict (notes/17): watertight, section >= 0.95 r_i, no fold (dihedral < 90 deg)."""
+    return 'fail' not in o and o['ok'] and o['sec'] >= 0.95 and o['dih'] < 90
+
+
+def step_gallery():
+    """Example joints of the three methods on nodes chosen from the case-2 rows by failure type, coloured by mean
+    curvature (one range per node), metrics and the verdict in each title. ResultsFig/explicit/75_case2_gallery.png."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(4.6 * 3, 4.9 * len(GALLERY)))
+    for c, (nm, why, arg) in enumerate(GALLERY):
+        E, r = (case2_node(*arg) if arg else (regular(12), np.ones(12)))
+        out, R, E, r = metrics3(nm, E, r, progress=(c, len(GALLERY)), keep_stl=False)
+        Hs = {k: mean_curvature(out[k]['m']) for k in METHODS3 if 'm' in out[k]}
+        hl = max(np.quantile(np.abs(H[np.linalg.norm(out[k]['m'].vertices, axis=1) < R]), 0.99) for k, H in Hs.items())
+        front = E.sum(0)
+        if np.linalg.norm(front) < 1e-6 * len(E):
+            front = np.array([0.74, 0.52, 0.42])
+        front /= np.linalg.norm(front)
+        view = (np.degrees(np.arcsin(front[2])), np.degrees(np.arctan2(front[1], front[0])))
+        for j, k in enumerate(METHODS3):
+            ax = fig.add_subplot(len(GALLERY), 3, 1 + 3 * c + j)
+            o = out[k]
+            if 'm' not in o:
+                ax.set_axis_off()
+                ax.set_title(f'{nm} {k}: FAIL {o.get("fail", "")}', fontsize=9)
+                continue
+            verdict = 'GOOD' if good3(o) else 'FAIL'
+            render_z(ax, o['m'], Hs[k], 1.0,
+                     f"{nm} ({why})\n{k}: {verdict}  section {o['sec']:.2f} r  dihedral {o['dih']:.0f} deg\n"
+                     f"concave {o['conc']:.2f} r  vol {o['dvol']:+.0f} %  build {o['time']:.1f} s",
+                     1.05 * R, n_px=330, n_pts=1_800_000, view=view, cmap='jet', hlim=hl, clip=R)
+            print(row3(nm, k, o), flush=True)
+    fig.savefig('ResultsFig/explicit/75_case2_gallery.png', dpi=90, bbox_inches='tight')
+    plt.close(fig)
 
 
 def step_fe3():
@@ -868,6 +914,10 @@ def render_z(ax, m, H, r, title, lim, n_px=420, n_pts=2_500_000, view=(25, 35), 
     ok = (ix >= 0) & (ix < n_px) & (iy >= 0) & (iy < n_px)
     if clip is not None:
         ok &= np.linalg.norm(P, axis=1) < clip
+    if not ok.any():                                                 # nothing in view
+        ax.set_axis_off()
+        ax.set_title(title + ' (empty view)', fontsize=8)
+        return
     pix = iy[ok] * n_px + ix[ok]
     order = np.lexsort((-z[ok], pix))                              # per pixel, nearest (largest z) first
     pix_s = pix[order]
@@ -930,4 +980,4 @@ if __name__ == '__main__':
     rs.start('study_soap_vs_fhs ' + ' '.join(sys.argv[1:]))
     import os
     os.makedirs(OUT, exist_ok=True)
-    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3, 'case2': step_case2}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
+    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3, 'case2': step_case2, 'gallery': step_gallery}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()

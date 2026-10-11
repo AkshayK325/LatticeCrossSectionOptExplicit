@@ -144,13 +144,38 @@ def loop_shrink(n, spacing_ratio=1.0, levels=3, limit=False):
     return float(np.linalg.norm(V2[mid, :2], axis=1).mean())
 
 
-def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.0, core=False):
+def _fibonacci(n=64):
+    k = np.arange(n) + 0.5
+    z = 1 - 2 * k / n
+    ph = np.pi * (1 + 5 ** 0.5) * k
+    return np.column_stack((np.sqrt(1 - z * z) * np.cos(ph), np.sqrt(1 - z * z) * np.sin(ph), z))
+
+
+def ball_points(P_hull, center, rho, margin, dirs, t_ring):
+    """Points of the node ball (radius rho, Fibonacci directions) outside the hull of P_hull by more than margin:
+    the back of a node whose beams lie in a narrow cone (notes/17 P3.4). Points inside or near the hull are dropped
+    (no near-duplicate hull vertices), and so are points not behind every node ring's plane by margin
+    ((p - c) . e_i <= t_i - margin), so each ring stays a face of the hull (the tubes attach there; else the cap
+    removal leaves a non-manifold edge)."""
+    from scipy.spatial import ConvexHull
+    Pb = center + rho * _fibonacci()
+    H0 = ConvexHull(P_hull)
+    out = (Pb @ H0.equations[:, :3].T + H0.equations[:, 3]).max(1) > margin
+    behind = (((Pb - center) @ np.asarray(dirs).T) <= np.asarray(t_ring) - margin).all(1)
+    return Pb[out & behind]
+
+
+def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.0, core=False, ball=True):
     """Method C1: organic node by subdivision of a hull control mesh (notes/12).
     Control mesh = convex hull of one ring per beam (at ring_offsets: outside the trim sphere and each ring a face of
     the hull), with the ring caps removed,
     plus a control tube per beam (rings one edge length apart, past the far end, capped). Loop subdivision gives a
     smooth (C2 away from extraordinary vertices) surface whose tubes converge to the beams (control rings enlarged
-    by the measured Loop shrink); the far ends are then trimmed flat. Returns the watertight manifold."""
+    by the measured Loop shrink); the far ends are then trimmed flat. ball: also hull points on the node ball
+    (radius r_max, Loop-shrink compensated), so the hull has a back behind the node point when all beams lie in a
+    narrow cone (else the core rings are nearly coplanar, the hull is flat there and the surface dents and creases
+    inside the Boolean node's ball, notes/17 P3.4); points the beams already cover drop out of the hull.
+    Returns the watertight manifold."""
     from scipy.spatial import ConvexHull
     r_min = radii.min()
     toff = ring_offsets(dirs, radii * np.array([1 / loop_shrink(ring_count(r, r_min, n_min), levels=levels)
@@ -191,6 +216,15 @@ def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.
             V.append(node + rc * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v)))
             cores.append(np.arange(nv, nv + n))
             nv += n
+    if ball:
+        Vr = np.vstack(V)
+        Pb = ball_points(Vr[np.concatenate([np.arange(s, s + n) for s, n in ring0] + cores)], node,
+                         radii.max() / loop_shrink(ring_count(radii.max(), r_min, n_min), levels=levels), 0.05 * r_min,
+                         dirs, toff)
+        if len(Pb):
+            V.append(Pb)
+            cores.append(np.arange(nv, nv + len(Pb)))
+            nv += len(Pb)
     V = np.vstack(V)
     # node: hull of the first ring of every beam (+ the core rings), without the ring caps
     idx = np.concatenate([np.arange(s, s + n) for s, n in ring0] + cores)
@@ -271,11 +305,78 @@ def flank_weights(V, node, dirs, radii, reach):
     return np.exp(-(np.maximum(D[0], 0.0) / a) ** 2) * (1.0 - np.exp(-((D[1] - D[0]) / b) ** 2))
 
 
-def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.0):
+def capsule_depth(P, A, B, R):
+    """Signed distance from points P to the union of capsules (segments A_k-B_k, radius R_k; < 0 inside) and, per
+    point, its projection onto the nearest capsule's surface. The struts' capsules from the node point are the
+    Boolean node (cylinders + a radius-r ball at the node)."""
+    best = np.full(len(P), np.inf)
+    proj = P.copy()
+    for a, b, r in zip(A, B, R):
+        ab = b - a
+        t = np.clip((P - a) @ ab / (ab @ ab), 0.0, 1.0)
+        q = a + t[:, None] * ab
+        d = P - q
+        n = np.linalg.norm(d, axis=1)
+        sd = n - r
+        s = sd < best
+        best[s] = sd[s]
+        ok = s & (n > 1e-12)
+        proj[ok] = q[ok] + r * d[ok] / n[ok, None]
+    return best, proj
+
+
+def smooth_core_depth(P, node, dirs, radii, reach, h=1e-4):
+    """core_clearance (smooth union of the beam capsules: no crease where two cores meet) and each point's
+    projection onto that surface along the clearance gradient (central differences)."""
+    d = core_clearance(P, node, dirs, radii, reach)
+    g = np.zeros_like(P)
+    for k in range(3):
+        dp = np.zeros(3)
+        dp[k] = h
+        g[:, k] = (core_clearance(P + dp, node, dirs, radii, reach) - core_clearance(P - dp, node, dirs, radii, reach)) / (2 * h)
+    gn = np.linalg.norm(g, axis=1)
+    ok = gn > 1e-9
+    proj = P.copy()
+    proj[ok] = P[ok] - (d[ok] / gn[ok] ** 2)[:, None] * g[ok]
+    return d, proj
+
+
+def contained_fair_solve(K, wv, V0, fixed, depth, tol, strong, max_iter=12):
+    """min x^T K x + sum w_v |x_v - x0_v|^2 subject to depth(x) >= -tol (the surface stays outside the cores), by an
+    active set: solve, pin every new violator firmly (weight `strong`) to its projection on the core surface,
+    re-solve, until no new violator. The thin plate then fairs around the pinned points. Returns (V, n_pinned,
+    iterations)."""
+    import scipy.sparse as sp
+    import scipy.sparse.linalg as spl
+    fr, fx = np.where(~fixed)[0], np.where(fixed)[0]
+    wc = np.zeros(len(V0))
+    T = np.zeros_like(V0)
+    for it in range(max_iter):
+        A = (K + sp.diags(wv + wc)).tocsr()
+        solve = spl.factorized(A[fr][:, fr].tocsc())
+        Vn = V0.copy()
+        for k in range(3):
+            Vn[fr, k] = solve(wv[fr] * V0[fr, k] + wc[fr] * T[fr, k] - A[fr][:, fx] @ V0[fx, k])
+        d, proj = depth(Vn)
+        new = (d < -tol) & ~fixed & (wc == 0)
+        if not new.any():
+            contained_fair_solve.pinned_mask = wc > 0
+            return Vn, int((wc > 0).sum()), it + 1
+        wc[new] = strong[new]
+        T[new] = proj[new]
+    contained_fair_solve.pinned_mask = wc > 0
+    return Vn, int((wc > 0).sum()), max_iter
+
+
+def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.0, contain='smooth', tol=0.02,
+                       strong=1e1):
     """FHS fairing (Faired Hull-Subdivision node, anchored): least-squares fairing, min x^T K x + sum_v w_v |x_v - x0_v|^2, with the thin-plate
     energy K = C^T M^-1 C (cotangent C, lumped area M), the beams fixed beyond t_ring_i + free_len * r_i, and soft
     anchors w = anchor * area / r_min^4 * flank_weights on the beams' flanks, so the crevices fair freely but no beam
-    necks. One linear solve (no clamping, no folds). Returns (mesh, fixed mask)."""
+    necks. One linear solve (no clamping, no folds). contain: also keep the surface outside every beam's core (its
+    cylinder continued to the node point + a radius-r ball there = the Boolean node), within tol * r_min, by an active
+    set (`contained_fair_solve`); without it the thin plate can cut into the cores behind the node point of an acute
+    valence-3 node (section 0.82 r at 30 deg, notes/17 P3.4). Returns (mesh, fixed mask)."""
     import scipy.sparse as sp
     import scipy.sparse.linalg as spl
     V = np.asarray(mesh.vertices, float)
@@ -292,6 +393,13 @@ def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.
     # data term anchor * integral |x - x0|^2 / r_min^4 dA, consistent with the thin-plate energy integral |Lap x|^2 dA
     wv = anchor * M.diagonal() / radii.min() ** 4 * flank_weights(V, node, dirs, radii,
                                                                    t_ring + free_len * radii + 2 * radii)
+    if contain:
+        reach = t_ring + free_len * radii + 2 * radii
+        depth = ((lambda X: smooth_core_depth(X, node, dirs, radii, reach)) if contain == 'smooth' else
+                 (lambda X: capsule_depth(X, np.tile(node, (len(dirs), 1)), node + reach[:, None] * dirs, radii)))
+        Vn, fair_node_anchored.pinned, _ = contained_fair_solve(
+            K, wv, V, fixed, depth, tol * radii.min(), strong * anchor * M.diagonal() / radii.min() ** 4)
+        return trimesh.Trimesh(Vn, F, process=False), fixed
     A = (K + sp.diags(wv)).tocsr()
     fr = np.where(~fixed)[0]
     fx = np.where(fixed)[0]
@@ -429,7 +537,7 @@ def mirror_at_plates(X, conn, radii, z_range, tol=1e-9):
 
 
 def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, anchor=10.0, n_min=16,
-                limit=True, mid=3.0, mirror=False):
+                limit=True, mid=3.0, mirror=False, ball=True, contain=True, tol=0.02, strong=1e1):
     """FHS (Faired Hull-Subdivision) node joints for a whole lattice (algorithm: notes/13_FHS_NodeAlgorithm.md). Every node of degree >= 2 gets a node
     patch (convex hull of its node rings + core rings, ring caps removed); every strut a control tube between the
     node rings at its two ends; the whole control mesh is Loop-subdivided, the node regions are faired in one
@@ -519,6 +627,16 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
             idx.append(np.arange(nv, nv + n))
             ring_of.append(np.full(n, -1))
             nv += n
+        if ball:                                                   # the node's back (notes/17 P3.4)
+            Vt = np.vstack(V)
+            Pb = ball_points(Vt[np.concatenate(idx)], X[nd], max(rc[i] for i, _ in ends),
+                             0.05 * min(radii[i] for i, _ in ends),
+                             [E[i] if k == 0 else -E[i] for i, k in ends], [toff[i, k] for i, k in ends])
+            if len(Pb):
+                V.append(Pb)
+                idx.append(np.arange(nv, nv + len(Pb)))
+                ring_of.append(np.full(len(Pb), -1))
+                nv += len(Pb)
         Vall = np.vstack(V)
         idx = np.concatenate(idx)
         ring_of = np.concatenate(ring_of)
@@ -554,6 +672,7 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
         if len(ends) == 1:
             fixed |= np.linalg.norm(V2 - X[nd], axis=1) < 3 * radii[ends[0][0]]
     flank = np.zeros(len(V2))
+    groups = []
     owner = cKDTree(X).query(V2)[1]
     for nd, ends in enumerate(inc):
         sel = np.where(owner == nd)[0]
@@ -563,17 +682,29 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
         rr = np.array([radii[i] for i, _ in ends])
         reach = np.array([toff[i, k] for i, k in ends]) + free_len * rr + 2 * rr
         flank[sel] = flank_weights(V2[sel], X[nd], dirs, rr, reach)
+        groups.append((nd, sel, dirs, rr, reach))
     Lc = cotan_laplacian(V2, F2)
     area = 0.5 * np.linalg.norm(np.cross(V2[F2[:, 1]] - V2[F2[:, 0]], V2[F2[:, 2]] - V2[F2[:, 0]]), axis=1)
     M = sp.diags(np.bincount(F2.ravel(), weights=np.repeat(area / 3, 3), minlength=len(V2)))
     K = (Lc.T @ M @ Lc).tocsr()
     wv = anchor * M.diagonal() / r_min ** 4 * flank
-    A = (K + sp.diags(wv)).tocsr()
     fr, fx = np.where(~fixed)[0], np.where(fixed)[0]
-    solve = spl.factorized(A[fr][:, fr].tocsc())
-    Vn = V2.copy()
-    for k in range(3):
-        Vn[fr, k] = solve(wv[fr] * V2[fr, k] - A[fr][:, fx] @ V2[fx, k])
+    if contain:                                                    # stay outside each node's smooth core union
+        def depth(P):
+            d = np.full(len(P), np.inf)
+            proj = P.copy()
+            for nd, sel, dirs, rr, reach in groups:
+                d[sel], proj[sel] = smooth_core_depth(P[sel], X[nd], dirs, rr, reach)
+            return d, proj
+        Vn, n_pin, _ = contained_fair_solve(K, wv, V2, fixed, depth, tol * r_min,
+                                            strong * anchor * M.diagonal() / r_min ** 4)
+    else:
+        A = (K + sp.diags(wv)).tocsr()
+        solve = spl.factorized(A[fr][:, fr].tocsc())
+        Vn = V2.copy()
+        for k in range(3):
+            Vn[fr, k] = solve(wv[fr] * V2[fr, k] - A[fr][:, fx] @ V2[fx, k])
+        n_pin = 0
     if z_range is not None:
         # cut planes: the plates, or (mirror) 2 PLATE_GAP inside the material, where the symmetric surface crosses
         # cleanly instead of having vertices exactly on the symmetry plane
@@ -595,7 +726,7 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
             for zc, z0 in zip(cuts, z_range):
                 V[np.abs(V[:, 2] - zc) < 1e-7, 2] = z0
             man = m3.Manifold(m3.Mesh64(np.array(V, np.float64), np.array(mesh.tri_verts, np.uint64)))   # writable copies
-    return man, dict(control_faces=len(ctrl.faces), free_vertices=len(fr), ring_offsets=toff)
+    return man, dict(control_faces=len(ctrl.faces), free_vertices=len(fr), ring_offsets=toff, pinned=n_pin)
 
 
 # ---------------------------------------------------------------- mesh size: deviation between two surfaces
