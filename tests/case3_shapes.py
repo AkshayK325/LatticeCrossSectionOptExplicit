@@ -34,3 +34,24 @@ def slice_section(m, node, e, s_):
     return None
 
 
+
+
+def peanut(req, a=0.35, roll=0.0, m=720):
+    """Non-convex doubly symmetric section r(t) = 1 + a cos 2t (non-convex for a > 0.2), scaled to area pi req^2."""
+    t = np.linspace(0, 2 * np.pi, m, endpoint=False)
+    rr = 1 + a * np.cos(2 * t)
+    xy = np.c_[rr * np.cos(t), rr * np.sin(t)]
+    xy *= req * np.sqrt(np.pi / Polygon(xy).area)
+    c, s_ = np.cos(roll), np.sin(roll)
+    return xy @ np.array([[c, s_], [-s_, c]])
+
+
+def cross(req, arm=0.45, rho=0.15, roll=0.0):
+    """Non-convex rounded plus-shaped section (arm half-width / half-length), scaled to area pi req^2."""
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    g = unary_union([box(-1, -arm, 1, arm), box(-arm, -1, arm, 1)]).buffer(-rho).buffer(2 * rho).buffer(-rho, 32)
+    xy = np.asarray(g.exterior.coords)[:-1]
+    xy *= req * np.sqrt(np.pi / Polygon(xy).area)
+    c, s_ = np.cos(roll), np.sin(roll)
+    return xy @ np.array([[c, s_], [-s_, c]])
