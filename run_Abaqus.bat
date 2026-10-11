@@ -39,6 +39,7 @@ set "INP_DIR=%ROOT%abaqus\inp"
 set "LOG_DIR=%ROOT%abaqus\logs"
 set "ODB_DIR=%ROOT%abaqus\odb"
 set "CSV_DIR=%ROOT%abaqus\csv"
+set "SPLIT_EXIT=0"
 
 echo.
 echo ==========================================
@@ -143,6 +144,23 @@ if exist "%ODB_DIR%\%NAME%_history.csv" (
 )
 
 REM ==========================================
+REM SPLIT LARGE CSV FILES
+REM ==========================================
+
+echo.
+echo Checking CSV sizes...
+
+if exist "%CSV_DIR%\%NAME%_field_U.csv" (
+    call abaqus python "%ROOT%split_csv_under_50mb.py" "%CSV_DIR%\%NAME%_field_U.csv" --remove-original
+    if errorlevel 1 set "SPLIT_EXIT=1"
+)
+
+if exist "%CSV_DIR%\%NAME%_history.csv" (
+    call abaqus python "%ROOT%split_csv_under_50mb.py" "%CSV_DIR%\%NAME%_history.csv" --remove-original
+    if errorlevel 1 set "SPLIT_EXIT=1"
+)
+
+REM ==========================================
 REM CLEAN UP ABAQUS TEMPORARY FILES
 REM ==========================================
 
@@ -162,4 +180,5 @@ echo.
 
 if not "%ABAQUS_EXIT%"=="0" exit /b %ABAQUS_EXIT%
 if defined EXTRACT_EXIT if not "%EXTRACT_EXIT%"=="0" exit /b %EXTRACT_EXIT%
+if not "%SPLIT_EXIT%"=="0" exit /b %SPLIT_EXIT%
 exit /b 0
