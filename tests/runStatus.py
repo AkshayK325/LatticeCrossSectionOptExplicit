@@ -109,4 +109,8 @@ def _finish():
             err = _me.get('error')
             r['state'], r['ended'] = ('failed' if err else 'finished'), _now()
             r['now'], r['updated'] = (err or 'done'), _now()
+            if r.get('total') and not err:                          # skipped tail items never report progress
+                r['done'] = r['total']
+            if r.get('total') and 't0' in _me:
+                r['eta'] = f", took {_hm(time.time() - _me['t0'])}"
     _write(fn)
