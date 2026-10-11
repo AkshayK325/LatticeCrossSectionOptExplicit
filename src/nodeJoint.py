@@ -237,6 +237,10 @@ def control_ring(xy, n, levels=3, limit=False, phase=0.0, smooth=0.0, spacing_ra
     return np.column_stack((c.real, c.imag))
 
 
+LEAD_SECTION = 0.5   # lead (x r_eq) of non-circular struts: the section is within 1 % r_eq ~1.0 r_eq from the node
+                     # ring (1.25-1.75 with lead 1.0), creases no worse (notes/17 P7)
+
+
 def strictly_convex_ring(c, sag=0.03):
     """The ring c (n x 2, counter-clockwise) made strictly convex, keeping its vertex count and order: vertices off
     the ring's convex hull are moved onto a parabolic arc over their hull edge, bulging outward. Used where a ring
@@ -342,7 +346,8 @@ def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.
         ti = toff[len(ring0)]
         # control rings: the first two gaps `lead` * r long (a longer blend from the hull into the beam), then one
         # edge length apart
-        z0 = [ti] + ([ti + lead * r, ti + 2 * lead * r] if lead > 0 else [])
+        ld = lead if sec is None else min(lead, LEAD_SECTION)         # sections recover their shape sooner
+        z0 = [ti] + ([ti + ld * r, ti + 2 * ld * r] if ld > 0 else [])
         zs = np.concatenate((z0, np.arange(z0[-1] + dz, l + 3 * dz, dz)))
         start = nv
         for kz, z in enumerate(zs):
@@ -823,7 +828,8 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
         else:
             P_ = np.vstack((secs[i], secs[i][:1]))
             dz = np.linalg.norm(np.diff(P_, axis=0), axis=1).sum() / n
-        zs = _strut_rings(toff[i, 0], length[i] - toff[i, 1], r, dz, lead, mid)
+        zs = _strut_rings(toff[i, 0], length[i] - toff[i, 1], r, dz,
+                          lead if secs[i] is None else min(lead, LEAD_SECTION), mid)
         start = nv
         for kz, z in enumerate(zs):
             V.append(X[a] + z * e + (circ_h if kz in (0, len(zs) - 1) else circ))
