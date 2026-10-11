@@ -193,7 +193,7 @@ def ring_limit_operator(n, levels=3, limit=False, spacing_ratio=1.0):
         return _RING_OP[key]
     t = np.linspace(0, 2 * np.pi, n, endpoint=False)
     dz = spacing_ratio * 2 * np.sin(np.pi / n)
-    nr = 24
+    nr = 9                                                          # = 24 to machine precision (finite Loop support)
     F = np.vstack([_tube_faces(k * n, (k + 1) * n, n) for k in range(nr - 1)])
 
     def run(ring):
@@ -438,52 +438,87 @@ def cotan_laplacian(V, F):
 _SDF_CACHE = {}
 
 
-def polygon_sdf(Q, poly):
-    """Signed distance from 2D points Q (k x 2) to the closed polygon poly (m x 2): < 0 inside (even-odd). The
-    magnitude is the distance to the contour resampled at ~perimeter / 2000 (k-d tree, cached per polygon; error
-    < 0.1 % of the perimeter / 2pi), the sign from matplotlib's point-in-polygon."""
-    from matplotlib.path import Path
+def polygon_sdf(Q, poly, grad=False):
+    """Signed distance from 2D points Q (k x 2) to the closed polygon poly (m x 2), < 0 inside, and optionally its
+    gradient. The contour is resampled at ~perimeter / 2000 (k-d tree, cached per polygon; distance error < 0.1 % of
+    perimeter / 2pi); the sign is that of (q - s) . n_s, s the nearest sample and n_s its outward normal (the SDF
+    gradient points along the normal at the nearest point), not a point-in-polygon test (83 % of the time before,
+    notes/17 P7.2)."""
     from scipy.spatial import cKDTree
     key = (poly.shape, poly.tobytes())
     if key not in _SDF_CACHE:
-        P = np.vstack((poly, poly[:1]))
-        sl = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]
+        P = np.asarray(poly, float)
+        if (np.roll(P[:, 0], -1) * P[:, 1] - P[:, 0] * np.roll(P[:, 1], -1)).sum() > 0:   # make counter-clockwise
+            P = P[::-1]
+        Pc = np.vstack((P, P[:1]))
+        sl = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(Pc, axis=0), axis=1))]
         t = np.linspace(0, sl[-1], 2000, endpoint=False)
-        D = np.column_stack((np.interp(t, sl, P[:, 0]), np.interp(t, sl, P[:, 1])))
-        _SDF_CACHE[key] = (cKDTree(D), Path(poly))
-    tree, path = _SDF_CACHE[key]
-    d = tree.query(Q)[0]
-    return np.where(path.contains_points(Q), -d, d)
+        D = np.column_stack((np.interp(t, sl, Pc[:, 0]), np.interp(t, sl, Pc[:, 1])))
+        tg = np.roll(D, -1, axis=0) - np.roll(D, 1, axis=0)
+        N = np.column_stack((tg[:, 1], -tg[:, 0]))
+        N /= np.linalg.norm(N, axis=1, keepdims=True)                 # outward (counter-clockwise contour)
+        _SDF_CACHE[key] = (cKDTree(D), D, N)
+    tree, D, N = _SDF_CACHE[key]
+    d, j = tree.query(Q)
+    R = Q - D[j]
+    sg = np.where((R * N[j]).sum(1) < 0, -1.0, 1.0)
+    if not grad:
+        return sg * d
+    g = np.where((d > 1e-12)[:, None], sg[:, None] * R / np.maximum(d, 1e-12)[:, None], N[j])
+    return sg * d, g
 
 
-def core_distance(P, node, e, r, reach, section=None):
-    """Signed distance from P to one beam's core, the beam continued to the node point (axial 0 .. reach). Circle
-    (section None): the capsule of radius r (rounded ends; with the other capsules it is the Boolean node with its
-    ball). Section (contour in the beam frame _frame(e)): the prism of that section with flat ends."""
-    w = np.clip((P - node) @ e, 0.0, reach)
+def core_distance(P, node, e, r, reach, section=None, grad=False):
+    """Signed distance from P to one beam's core, the beam continued to the node point (axial 0 .. reach), and
+    optionally its gradient. Circle (section None): the capsule of radius r (rounded ends; with the other capsules it
+    is the Boolean node with its ball). Section (contour in the beam frame _frame(e)): the prism of that section with
+    flat ends."""
+    x = (P - node) @ e
+    w = np.clip(x, 0.0, reach)
     D = (P - node) - np.outer(w, e)
     if section is None:
-        return np.linalg.norm(D, axis=1) - r
+        nD = np.linalg.norm(D, axis=1)
+        if not grad:
+            return nD - r
+        return nD - r, D / np.maximum(nD, 1e-12)[:, None]
     u, v = _frame(e)
-    a = np.abs(((P - node) @ e) - w)                               # beyond an end
-    d2 = polygon_sdf(np.column_stack((D @ u, D @ v)), np.asarray(section, float))
-    return np.where((d2 > 0) | (a > 0), np.sqrt(np.maximum(d2, 0.0) ** 2 + a ** 2), d2)
+    a = x - w                                                       # signed: < 0 behind the node, > 0 past reach
+    q = np.column_stack((D @ u, D @ v))
+    if grad:
+        d2, g2 = polygon_sdf(q, np.asarray(section, float), grad=True)
+        g3 = np.outer(g2[:, 0], u) + np.outer(g2[:, 1], v)
+    else:
+        d2 = polygon_sdf(q, np.asarray(section, float))
+    out = (d2 > 0) | (a != 0)
+    dp = np.maximum(d2, 0.0)
+    d = np.where(out, np.sqrt(dp ** 2 + a ** 2), d2)
+    if not grad:
+        return d
+    go = (dp[:, None] * g3 + a[:, None] * e) / np.maximum(d, 1e-12)[:, None]
+    return d, np.where(out[:, None], go, g3)
 
 
-def core_clearance(P, node, dirs, radii, reach, sections=None):
+def core_clearance(P, node, dirs, radii, reach, sections=None, grad=False):
     """Smooth distance from P to the union of the beam cores (each beam's capsule from the node point to reach_i):
     cubic smooth minimum (width 0.5 r_min) of the capsule distances, so it has no jumps and no creases where two
     cores meet."""
     k = 0.5 * radii.min()
-    out = None
+    out = g = None
     for i, (e, r, l) in enumerate(zip(dirs, radii, reach)):
-        d = core_distance(P, node, e, r, l, None if sections is None else sections[i])
-        if out is None:
-            out = d
+        sec = None if sections is None else sections[i]
+        if grad:
+            d, gd = core_distance(P, node, e, r, l, sec, grad=True)
         else:
-            hh = np.maximum(k - np.abs(out - d), 0.0) / k
-            out = np.minimum(out, d) - hh ** 3 * k / 6.0
-    return out
+            d = core_distance(P, node, e, r, l, sec)
+        if out is None:
+            out, g = d, (gd if grad else None)
+            continue
+        hh = np.maximum(k - np.abs(out - d), 0.0) / k
+        if grad:                                                    # d/d(out) of the cubic smooth minimum
+            wa = np.where(out < d, 1.0 - 0.5 * hh ** 2, 0.5 * hh ** 2)
+            g = wa[:, None] * g + (1.0 - wa)[:, None] * gd
+        out = np.minimum(out, d) - hh ** 3 * k / 6.0
+    return (out, g) if grad else out
 
 
 def flank_weights(V, node, dirs, radii, reach, sections=None):
@@ -520,14 +555,8 @@ def capsule_depth(P, A, B, R):
 
 def smooth_core_depth(P, node, dirs, radii, reach, h=1e-4, sections=None):
     """core_clearance (smooth union of the beam capsules: no crease where two cores meet) and each point's
-    projection onto that surface along the clearance gradient (central differences)."""
-    d = core_clearance(P, node, dirs, radii, reach, sections)
-    g = np.zeros_like(P)
-    for k in range(3):
-        dp = np.zeros(3)
-        dp[k] = h
-        g[:, k] = (core_clearance(P + dp, node, dirs, radii, reach, sections) -
-                   core_clearance(P - dp, node, dirs, radii, reach, sections)) / (2 * h)
+    projection onto that surface along the clearance gradient (analytic; was 6 extra evaluations)."""
+    d, g = core_clearance(P, node, dirs, radii, reach, sections, grad=True)
     gn = np.linalg.norm(g, axis=1)
     ok = gn > 1e-9
     proj = P.copy()
@@ -551,7 +580,9 @@ def contained_fair_solve(K, wv, V0, fixed, depth, tol, strong, max_iter=12):
         Vn = V0.copy()
         for k in range(3):
             Vn[fr, k] = solve(wv[fr] * V0[fr, k] + wc[fr] * T[fr, k] - A[fr][:, fx] @ V0[fx, k])
-        d, proj = depth(Vn)
+        d = np.full(len(Vn), np.inf)                               # only the free vertices can violate
+        proj = Vn.copy()
+        d[fr], proj[fr] = depth(Vn[fr])
         new = (d < -tol) & ~fixed & (wc == 0)
         if not new.any():
             contained_fair_solve.pinned_mask = wc > 0
@@ -933,11 +964,17 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
     wv = anchor * M.diagonal() / r_min ** 4 * flank
     fr, fx = np.where(~fixed)[0], np.where(fixed)[0]
     if contain:                                                    # stay outside each node's smooth core union
-        def depth(P):
+        pos = np.full(len(V2), -1)                                  # global vertex -> index among the free ones
+        pos[fr] = np.arange(len(fr))
+
+        def depth(P):                                               # P: the free vertices (fr order)
             d = np.full(len(P), np.inf)
             proj = P.copy()
             for nd, sel, dirs, rr, reach, ss in groups:
-                d[sel], proj[sel] = smooth_core_depth(P[sel], X[nd], dirs, rr, reach, sections=ss)
+                q = pos[sel]
+                q = q[q >= 0]
+                if len(q):
+                    d[q], proj[q] = smooth_core_depth(P[q], X[nd], dirs, rr, reach, sections=ss)
             return d, proj
         Vn, n_pin, _ = contained_fair_solve(K, wv, V2, fixed, depth, tol * r_min,
                                             strong * anchor * M.diagonal() / r_min ** 4)
