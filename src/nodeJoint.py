@@ -218,12 +218,12 @@ def ring_limit_operator(n, levels=3, limit=False, spacing_ratio=1.0):
     return T
 
 
-def control_ring(xy, n, levels=3, limit=False, phase=0.0, smooth=0.0):
+def control_ring(xy, n, levels=3, limit=False, phase=0.0, smooth=0.0, spacing_ratio=1.0):
     """Control ring (n x 2) whose subdivided tube has the section xy: least squares T c = the contour sampled at the
     n 2^levels limit points (arclength), plus smooth * |T|^2 |D2 c|^2 (D2: circular second difference). The plain fit
     rings along flat sides (curvature stripes along the strut); smooth = 1e-2 halves that ripple at < 0.15 % r_eq
     more deviation (notes/17 P6). For a circle (either way) it is the radius / loop_shrink compensation."""
-    T = ring_limit_operator(n, levels, limit)
+    T = ring_limit_operator(n, levels, limit, spacing_ratio)
     tgt = section_ring(xy, T.shape[0], phase)
     b = tgt[:, 0] + 1j * tgt[:, 1]
     if smooth > 0:
@@ -271,16 +271,17 @@ def strictly_convex_ring(c, sag=0.03):
     return out
 
 
-def section_hausdorff(xy, c, levels=3, limit=False):
+def section_hausdorff(xy, c, levels=3, limit=False, spacing_ratio=1.0):
     """Hausdorff distance between the subdivided tube section of control ring c and the contour xy."""
     from shapely.geometry import LineString
-    T = ring_limit_operator(len(c), levels, limit)
+    T = ring_limit_operator(len(c), levels, limit, spacing_ratio)
     lim = T @ (c[:, 0] + 1j * c[:, 1])
     a = LineString(np.vstack((np.c_[lim.real, lim.imag], [[lim[0].real, lim[0].imag]])))
     return a.hausdorff_distance(LineString(np.vstack((xy, xy[:1]))))
 
 
-def section_control_ring(xy, n_min=16, levels=3, limit=False, tol=0.01, n_max=128, phase=0.0, smooth=0.0):
+def section_control_ring(xy, n_min=16, levels=3, limit=False, tol=0.01, n_max=128, phase=0.0, smooth=0.0,
+                         spacing_ratio=1.0):
     """Control ring for a general (convex or not) section: the smallest ring count n >= n_min, a multiple of 4
     (doubly symmetric sections), whose subdivided section is within tol * r_eq (r_eq = sqrt(A / pi)) of xy.
     Returns (control ring n x 2, n, Hausdorff / r_eq)."""
@@ -289,8 +290,8 @@ def section_control_ring(xy, n_min=16, levels=3, limit=False, tol=0.01, n_max=12
     req = np.sqrt(Polygon(xy).area / np.pi)
     n = int(4 * np.ceil(n_min / 4))
     while True:
-        c = control_ring(xy, n, levels, limit, phase, smooth)
-        h = section_hausdorff(xy, c, levels, limit) / req
+        c = control_ring(xy, n, levels, limit, phase, smooth, spacing_ratio)
+        h = section_hausdorff(xy, c, levels, limit, spacing_ratio) / req
         if h <= tol or n >= n_max:
             return c, n, h
         n += 4
@@ -672,19 +673,25 @@ def _strut_rings(z_lo, z_hi, r, dz, lead, mid=1.0):
     return np.concatenate((a, np.linspace(a[-1], b[0], n + 1)[1:-1], b))
 
 
-def merge_straight_chains(X, conn, radii, cos_tol=1e-6, r_tol=1e-9):
+def merge_straight_chains(X, conn, radii, cos_tol=1e-6, r_tol=1e-9, tags=None):
     """Merge struts that continue straight through a degree-2 node with the same radius (element subdivisions, not
     joints): such a node would otherwise get a node patch and its dense blend rings for nothing. Returns
-    (conn, radii) of the merged struts (node indices unchanged)."""
+    (conn, radii) of the merged struts (node indices unchanged); with tags (the section of each strut, None for a
+    circle), only circular struts merge (a section is given in its strut's frame, which a merged strut may reverse),
+    and (conn, radii, tags) is returned."""
     conn = [tuple(c) for c in np.asarray(conn, int)]
     radii = list(np.broadcast_to(np.asarray(radii, float), (len(conn),)))
+    tg = None if tags is None else list(tags)
+
+    def same(k0, k1):
+        return tg is None or (tg[k0] is None and tg[k1] is None)
     while True:
         deg = {}
         for k, (a, b) in enumerate(conn):
             deg.setdefault(a, []).append(k)
             deg.setdefault(b, []).append(k)
         for n, ks in deg.items():
-            if len(ks) != 2 or abs(radii[ks[0]] - radii[ks[1]]) > r_tol:
+            if len(ks) != 2 or abs(radii[ks[0]] - radii[ks[1]]) > r_tol or not same(ks[0], ks[1]):
                 continue
             ends = [conn[k][1] if conn[k][0] == n else conn[k][0] for k in ks]
             u, v = X[ends[0]] - X[n], X[ends[1]] - X[n]
@@ -692,9 +699,11 @@ def merge_straight_chains(X, conn, radii, cos_tol=1e-6, r_tol=1e-9):
                 keep, drop = sorted(ks)
                 conn[keep] = (ends[0], ends[1])
                 del conn[drop], radii[drop]
+                if tg is not None:
+                    del tg[drop]
                 break
         else:
-            return np.array(conn), np.array(radii)
+            return (np.array(conn), np.array(radii)) if tg is None else (np.array(conn), np.array(radii), tg)
 
 
 PLATE_GAP = 0.005         # mm: no FHS vertex closer than this to a plate plane before the trim
@@ -726,7 +735,7 @@ def mirror_at_plates(X, conn, radii, z_range, tol=1e-9):
 
 
 def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, anchor=10.0, n_min=16,
-                limit=True, mid=3.0, mirror=False, ball=True, contain=True, tol=0.02, strong=1e1):
+                limit=True, mid=3.0, mirror=False, ball=True, contain=True, tol=0.02, strong=1e1, sections=None):
     """FHS (Faired Hull-Subdivision) node joints for a whole lattice (algorithm: notes/13_FHS_NodeAlgorithm.md). Every node of degree >= 2 gets a node
     patch (convex hull of its node rings + core rings, ring caps removed); every strut a control tube between the
     node rings at its two ends; the whole control mesh is Loop-subdivided, the node regions are faired in one
@@ -736,20 +745,47 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
     facets that break the FE remesh, 2026-10-08).
     Mesh size (notes/14): 2 Loop levels with the vertices moved onto the exact limit surface (limit), and the
     strut-middle control rings mid edge lengths apart: ~5x fewer faces than 3 plain levels, 99 % of the surface
-    within ~10 um of it. Returns (watertight manifold, info dict)."""
+    within ~10 um of it. sections: per strut (conn order) None (circle of radius radii_i) or a convex section
+    contour (m x 2) in the strut frame _frame(e_i), e_i from conn[i][0] to conn[i][1], roll applied; radii_i is then
+    its equivalent radius sqrt(A / pi) (notes/17 P6). Returns (watertight manifold, info dict)."""
     import scipy.sparse as sp
     import scipy.sparse.linalg as spl
     from scipy.spatial import ConvexHull, cKDTree
     X = np.asarray(X, float)
     if z_range is not None and mirror:                                 # symmetric joints at the plates
+        if sections is not None:
+            raise ValueError('lattice_fhs: mirror=True is not supported with sections')
         X, conn, radii = mirror_at_plates(X, conn, np.broadcast_to(np.asarray(radii, float), (len(conn),)), z_range)
-    conn, radii = merge_straight_chains(X, conn, radii)                 # element splits are not joints
+    if sections is None:
+        conn, radii = merge_straight_chains(X, conn, radii)             # element splits are not joints
+        secs = [None] * len(conn)
+    else:
+        conn, radii, secs = merge_straight_chains(X, conn, radii, tags=sections)
     r_min = radii.min()
     nring = np.array([ring_count(r, r_min, n_min) for r in radii])
     shrink = {n: loop_shrink(n, spacing_ratio=mid, levels=levels, limit=limit) for n in set(nring.tolist())}
     rc = np.array([r / shrink[n] for r, n in zip(radii, nring)])
+    cring, hring = [], []                                           # per strut: control ring, hull (end) ring
+    for i, (r, n) in enumerate(zip(radii, nring)):
+        if secs[i] is None:
+            t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+            c = rc[i] * np.column_stack((np.cos(t), np.sin(t)))
+            cring.append(c)
+            hring.append(c)
+        else:
+            c, nring[i], _ = section_control_ring(secs[i], n_min=n, levels=levels, limit=limit, spacing_ratio=mid)
+            cring.append(c)
+            hring.append(strictly_convex_ring(c))
+    rc = np.array([max(np.linalg.norm(c, axis=1).max(), np.linalg.norm(h, axis=1).max()) for c, h in zip(cring, hring)])
     length = np.linalg.norm(X[conn[:, 1]] - X[conn[:, 0]], axis=1)
     E = (X[conn[:, 1]] - X[conn[:, 0]]) / length[:, None]
+
+    def sec_at(i, k):                                               # strut i's section in the frame of its end k
+        if secs[i] is None or k == 0:
+            return secs[i]
+        u, v = _frame(E[i])
+        u2, v2 = _frame(-E[i])
+        return np.asarray(secs[i]) @ np.array([[u @ u2, u @ v2], [v @ u2, v @ v2]])
     inc = [[] for _ in X]
     for i, (a, b) in enumerate(conn):
         inc[a].append((i, 0))
@@ -762,7 +798,7 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
                 toff[i, k] = 0.0
             continue
         dirs = np.array([E[i] if k == 0 else -E[i] for i, k in ends])
-        rr = np.array([radii[i] for i, _ in ends])
+        rr = np.array([radii[i] if secs[i] is None else np.linalg.norm(secs[i], axis=1).max() for i, _ in ends])
         try:
             R_s, _ = trim_radius(dirs, rr, np.array([length[i] for i, _ in ends]))
         except ValueError:                                         # no overlap at all (e.g. collinear struts)
@@ -780,12 +816,17 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
     for i, (a, b) in enumerate(conn):
         n, e, r = nring[i], E[i], radii[i]
         u, v = _frame(e)
-        t = np.linspace(0, 2 * np.pi, n, endpoint=False)
-        circ = rc[i] * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v))
-        zs = _strut_rings(toff[i, 0], length[i] - toff[i, 1], r, 2 * r * np.sin(np.pi / n), lead, mid)
+        circ = np.outer(cring[i][:, 0], u) + np.outer(cring[i][:, 1], v)
+        circ_h = np.outer(hring[i][:, 0], u) + np.outer(hring[i][:, 1], v)     # end rings: hull faces
+        if secs[i] is None:
+            dz = 2 * r * np.sin(np.pi / n)
+        else:
+            P_ = np.vstack((secs[i], secs[i][:1]))
+            dz = np.linalg.norm(np.diff(P_, axis=0), axis=1).sum() / n
+        zs = _strut_rings(toff[i, 0], length[i] - toff[i, 1], r, dz, lead, mid)
         start = nv
-        for z in zs:
-            V.append(X[a] + z * e + circ)
+        for kz, z in enumerate(zs):
+            V.append(X[a] + z * e + (circ_h if kz in (0, len(zs) - 1) else circ))
             nv += n
         for q in range(len(zs) - 1):
             F.append(_tube_faces(start + q * n, start + (q + 1) * n, n))
@@ -809,10 +850,17 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
             ring_of.append(np.full(n, q))
         for i, k in ends:                                          # core rings at the node point
             e = E[i] if k == 0 else -E[i]
-            u, v = _frame(e)
             n = nring[i]
-            t = np.linspace(0, 2 * np.pi, n, endpoint=False) + np.pi / n
-            V.append(X[nd] + rc[i] * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v)))
+            if secs[i] is None:
+                u, v = _frame(e)
+                t = np.linspace(0, 2 * np.pi, n, endpoint=False) + np.pi / n
+                V.append(X[nd] + rc[i] * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v)))
+            else:                                                  # the hull ring, half a step on, strut frame
+                u, v = _frame(E[i])
+                ch = hring[i]
+                cm = 0.5 * (ch + np.roll(ch, -1, axis=0))
+                cm *= np.linalg.norm(ch, axis=1).mean() / np.linalg.norm(cm, axis=1).mean()
+                V.append(X[nd] + np.outer(cm[:, 0], u) + np.outer(cm[:, 1], v))
             idx.append(np.arange(nv, nv + n))
             ring_of.append(np.full(n, -1))
             nv += n
@@ -854,9 +902,8 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
     fixed = np.zeros(len(V2), bool)
     for i, (a, b) in enumerate(conn):
         w = (V2 - X[a]) @ E[i]
-        rad = np.linalg.norm((V2 - X[a]) - np.outer(w, E[i]), axis=1)
-        fixed |= ((w > toff[i, 0] + free_len * radii[i]) & (w < length[i] - toff[i, 1] - free_len * radii[i])
-                  & (np.abs(rad - radii[i]) < 0.05 * radii[i]))
+        band = (w > toff[i, 0] + free_len * radii[i]) & (w < length[i] - toff[i, 1] - free_len * radii[i])
+        fixed[band] |= np.abs(core_distance(V2[band], X[a], E[i], radii[i], np.inf, secs[i])) < 0.05 * radii[i]
     for nd, ends in enumerate(inc):                                # free ends stay as subdivided
         if len(ends) == 1:
             fixed |= np.linalg.norm(V2 - X[nd], axis=1) < 3 * radii[ends[0][0]]
@@ -870,8 +917,9 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
         dirs = np.array([E[i] if k == 0 else -E[i] for i, k in ends])
         rr = np.array([radii[i] for i, _ in ends])
         reach = np.array([toff[i, k] for i, k in ends]) + free_len * rr + 2 * rr
-        flank[sel] = flank_weights(V2[sel], X[nd], dirs, rr, reach)
-        groups.append((nd, sel, dirs, rr, reach))
+        ss = None if all(secs[i] is None for i, _ in ends) else [sec_at(i, k) for i, k in ends]
+        flank[sel] = flank_weights(V2[sel], X[nd], dirs, rr, reach, ss)
+        groups.append((nd, sel, dirs, rr, reach, ss))
     Lc = cotan_laplacian(V2, F2)
     area = 0.5 * np.linalg.norm(np.cross(V2[F2[:, 1]] - V2[F2[:, 0]], V2[F2[:, 2]] - V2[F2[:, 0]]), axis=1)
     M = sp.diags(np.bincount(F2.ravel(), weights=np.repeat(area / 3, 3), minlength=len(V2)))
@@ -882,8 +930,8 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
         def depth(P):
             d = np.full(len(P), np.inf)
             proj = P.copy()
-            for nd, sel, dirs, rr, reach in groups:
-                d[sel], proj[sel] = smooth_core_depth(P[sel], X[nd], dirs, rr, reach)
+            for nd, sel, dirs, rr, reach, ss in groups:
+                d[sel], proj[sel] = smooth_core_depth(P[sel], X[nd], dirs, rr, reach, sections=ss)
             return d, proj
         Vn, n_pin, _ = contained_fair_solve(K, wv, V2, fixed, depth, tol * r_min,
                                             strong * anchor * M.diagonal() / r_min ** 4)
