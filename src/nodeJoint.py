@@ -165,6 +165,93 @@ def ball_points(P_hull, center, rho, margin, dirs, t_ring):
     return Pb[out & behind]
 
 
+def section_ring(xy, n, phase=0.0):
+    """n points along the closed section contour xy (m x 2, in the beam frame u, v), equally spaced by arclength,
+    counter-clockwise, starting where the polar angle is `phase` (so neighbouring rings of one beam correspond)."""
+    xy = np.asarray(xy, float)
+    if np.allclose(xy[0], xy[-1]):
+        xy = xy[:-1]
+    if (np.roll(xy[:, 0], -1) * xy[:, 1] - xy[:, 0] * np.roll(xy[:, 1], -1)).sum() > 0:   # clockwise: reverse
+        xy = xy[::-1]
+    k0 = np.argmin(np.abs(np.angle(np.exp(1j * (np.arctan2(xy[:, 1], xy[:, 0]) - phase)))))
+    xy = np.roll(xy, -k0, axis=0)
+    P = np.vstack((xy, xy[:1]))
+    s = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]
+    t = np.linspace(0.0, s[-1], n, endpoint=False)
+    return np.column_stack((np.interp(t, s, P[:, 0]), np.interp(t, s, P[:, 1])))
+
+
+_RING_OP = {}
+
+
+def ring_limit_operator(n, levels=3, limit=False, spacing_ratio=1.0):
+    """Linear map T (complex, n 2^levels x n) from a long tube's control ring (identical rings spacing_ratio edge
+    lengths apart) to its subdivided (or limit) cross-section, ordered counter-clockwise from control vertex 0.
+    Measured on a test tube (Loop is linear, and the same in x and y); T is circulant by construction."""
+    key = (n, levels, limit, spacing_ratio)
+    if key in _RING_OP:
+        return _RING_OP[key]
+    t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    dz = spacing_ratio * 2 * np.sin(np.pi / n)
+    nr = 24
+    F = np.vstack([_tube_faces(k * n, (k + 1) * n, n) for k in range(nr - 1)])
+
+    def run(ring):
+        V = np.vstack([np.column_stack((ring.real, ring.imag, np.full(n, k * dz))) for k in range(nr)])
+        V2, F2 = trimesh.remesh.subdivide_loop(V, F, iterations=levels)
+        if limit:
+            V2 = loop_limit(V2, F2)
+        return V2
+    Vc = run(np.exp(1j * t))                                       # unit circle: find the mid ring and its order
+    zm = (nr // 2) * dz
+    sel = np.where(np.abs(Vc[:, 2] - zm) < 1e-9)[0]
+    sel = sel[np.argsort(np.mod(np.arctan2(Vc[sel, 1], Vc[sel, 0]) + 1e-9, 2 * np.pi))]
+    m = len(sel)
+    if m != n * 2 ** levels:
+        raise RuntimeError(f'ring_limit_operator: mid ring has {m} points, expected {n * 2 ** levels}')
+    e0 = np.zeros(n, complex)
+    e0[0] = 1.0
+    Vd = run(e0)
+    col = Vd[sel, 0] + 1j * Vd[sel, 1]
+    T = np.column_stack([np.roll(col, j * 2 ** levels) for j in range(n)])
+    _RING_OP[key] = T
+    return T
+
+
+def control_ring(xy, n, levels=3, limit=False, phase=0.0):
+    """Control ring (n x 2) whose subdivided tube has the section xy: least squares T c = the contour sampled at the
+    n 2^levels limit points (arclength). For a circle this is the radius / loop_shrink compensation."""
+    T = ring_limit_operator(n, levels, limit)
+    tgt = section_ring(xy, T.shape[0], phase)
+    c, *_ = np.linalg.lstsq(T, tgt[:, 0] + 1j * tgt[:, 1], rcond=None)
+    return np.column_stack((c.real, c.imag))
+
+
+def section_hausdorff(xy, c, levels=3, limit=False):
+    """Hausdorff distance between the subdivided tube section of control ring c and the contour xy."""
+    from shapely.geometry import LineString
+    T = ring_limit_operator(len(c), levels, limit)
+    lim = T @ (c[:, 0] + 1j * c[:, 1])
+    a = LineString(np.vstack((np.c_[lim.real, lim.imag], [[lim[0].real, lim[0].imag]])))
+    return a.hausdorff_distance(LineString(np.vstack((xy, xy[:1]))))
+
+
+def section_control_ring(xy, n_min=16, levels=3, limit=False, tol=0.01, n_max=128, phase=0.0):
+    """Control ring for a general (convex or not) section: the smallest ring count n >= n_min, a multiple of 4
+    (doubly symmetric sections), whose subdivided section is within tol * r_eq (r_eq = sqrt(A / pi)) of xy.
+    Returns (control ring n x 2, n, Hausdorff / r_eq)."""
+    from shapely.geometry import Polygon
+    xy = np.asarray(xy, float)
+    req = np.sqrt(Polygon(xy).area / np.pi)
+    n = int(4 * np.ceil(n_min / 4))
+    while True:
+        c = control_ring(xy, n, levels, limit, phase)
+        h = section_hausdorff(xy, c, levels, limit) / req
+        if h <= tol or n >= n_max:
+            return c, n, h
+        n += 4
+
+
 def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.0, core=False, ball=True):
     """Method C1: organic node by subdivision of a hull control mesh (notes/12).
     Control mesh = convex hull of one ring per beam (at ring_offsets: outside the trim sphere and each ring a face of

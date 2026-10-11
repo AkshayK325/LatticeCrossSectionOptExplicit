@@ -808,6 +808,78 @@ def step_gallery():
     plt.close(fig)
 
 
+SCALE = dict(cells=(('C4', 0.8), ('B', 1.0), ('O', 0.6)), n=(1, 2, 3, 4, 5))
+
+
+def lattice_nodes(X, C):
+    """Per lattice node: unit directions of its struts (away from the node) and their half lengths."""
+    out = []
+    for nd in range(len(X)):
+        es, ls = [], []
+        for a, b in C:
+            if nd in (a, b):
+                d = X[b] - X[a] if a == nd else X[a] - X[b]
+                es.append(d / np.linalg.norm(d))
+                ls.append(0.5 * np.linalg.norm(d))
+        out.append((np.array(es), np.array(ls)))
+    return out
+
+
+def step_scale():
+    """P8 scalability (notes/17): FHS = the whole lattice (lattice_fhs: n x n x 1 cells, plates trimmed); Savio and SF
+    = every lattice node built on its own (strut stubs to half length), no final union, so their totals are a lower
+    bound. Rows: STL/soap_vs_fhs/scale.rows.md. Per lattice: wall time, nodes, node success (watertight), faces, STL MB."""
+    from latticeSetup import example3
+    print('| cell | n x n | struts | nodes | method | built + watertight / nodes | failures (reason: count) | '
+          'time s | faces | STL MB |')
+    print('|---|---|---|---|---|---|---|---|---|---|')
+    todo = [(c, r, n) for c, r in SCALE['cells'] for n in SCALE['n']]
+    for it, (cell, rr, n) in enumerate(todo):
+        lat = example3(elemSize=1.0, nx=n, ny=n, name=cell)
+        X, C = lat['X'], np.asarray(lat['conn'])
+        H = X[:, 2].max()
+        nodes = lattice_nodes(X, C)
+        rs.update(f'{cell} {n}x{n} FHS lattice', it, len(todo))
+        t = time.time()
+        try:
+            man, info = nj.lattice_fhs(X, C, rr, z_range=(0.0, H))
+            m = nj.to_stl_mesh(man)
+            tt = time.time() - t
+            print(f"| {cell} | {n}x{n} | {len(C)} | {len(X)} | FHS (whole lattice) | {int(m.is_watertight)} / 1 lattice | - | "
+                  f"{tt:.1f} | {len(m.faces)} | {50 * len(m.faces) / 1e6:.1f} |", flush=True)
+        except Exception as ex:
+            print(f'| {cell} | {n}x{n} | {len(C)} | {len(X)} | FHS (whole lattice) | 0 / 1 | {type(ex).__name__}: '
+                  f'{str(ex)[:60]} | {time.time() - t:.1f} | | |', flush=True)
+        for meth in ('Savio', 'SF'):
+            rs.update(f'{cell} {n}x{n} {meth} per node', it, len(todo))
+            ok, fails, faces, tt = 0, {}, 0, 0.0
+            for E, L in nodes:
+                r = np.full(len(E), rr)
+                t = time.time()
+                try:
+                    if meth == 'Savio':
+                        m, _, _ = sfm.savio_node(np.zeros(3), E, r, L, levels=4)
+                        m = nj.to_trimesh(m) if not isinstance(m, trimesh.Trimesh) else m
+                    else:
+                        sf = sl.subdiv_lattice_node(np.zeros(3), E, r)
+                        if (sf['d'] > L).any():
+                            raise ValueError('cut circle beyond the strut half length')
+                        m = sfm.node_solid(sf, L)
+                    tt += time.time() - t
+                    faces += len(m.faces)
+                    if m.is_watertight:
+                        ok += 1
+                    else:
+                        fails['not watertight'] = fails.get('not watertight', 0) + 1
+                except Exception as ex:
+                    tt += time.time() - t
+                    k = f'{type(ex).__name__}: {str(ex)[:40]}'
+                    fails[k] = fails.get(k, 0) + 1
+            fs = '; '.join(f'{k}: {v}' for k, v in fails.items()) or '-'
+            print(f'| {cell} | {n}x{n} | {len(C)} | {len(X)} | {meth} (per node, no union) | {ok} / {len(nodes)} | {fs} | '
+                  f'{tt:.1f} | {faces} | {50 * faces / 1e6:.1f} |', flush=True)
+
+
 def step_fe3():
     """Tetrahedral node FE (as S5) for Savio and SF (R3), equal and graded radii; FHS from S5."""
     print('| node | method | K (h = r_min/4) | K (r_min/6) | K (r_min/8) | tets (finest) |')
@@ -980,4 +1052,4 @@ if __name__ == '__main__':
     rs.start('study_soap_vs_fhs ' + ' '.join(sys.argv[1:]))
     import os
     os.makedirs(OUT, exist_ok=True)
-    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3, 'case2': step_case2, 'gallery': step_gallery}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
+    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3, 'case2': step_case2, 'gallery': step_gallery, 'scale': step_scale}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
