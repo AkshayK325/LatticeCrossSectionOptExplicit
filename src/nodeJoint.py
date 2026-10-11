@@ -241,6 +241,60 @@ LEAD_SECTION = 0.5   # lead (x r_eq) of non-circular struts: the section is with
                      # ring (1.25-1.75 with lead 1.0), creases no worse (notes/17 P7)
 
 
+CORNER_RADIUS = 0.08   # x r_eq: section corners rounded before the fit (notes/17 P7.4): the smallest radius tested
+                       # that removes the C0-corner creases of VAE sections (max dihedral 44-83 -> 21 deg)
+
+
+def section_properties(xy):
+    """Area, principal second moments (I1 >= I2) about the centroid, of the closed contour xy."""
+    from shapely.geometry import Polygon
+    from shapely.geometry.polygon import orient
+    P = orient(Polygon(xy), 1.0)                                   # counter-clockwise: positive signed areas
+    x, y = np.asarray(P.exterior.coords).T
+    a = x[:-1] * y[1:] - x[1:] * y[:-1]
+    A = a.sum() / 2
+    cx, cy = ((x[:-1] + x[1:]) * a).sum() / (6 * A), ((y[:-1] + y[1:]) * a).sum() / (6 * A)
+    Ixx = ((y[:-1] ** 2 + y[:-1] * y[1:] + y[1:] ** 2) * a).sum() / 12 - A * cy ** 2
+    Iyy = ((x[:-1] ** 2 + x[:-1] * x[1:] + x[1:] ** 2) * a).sum() / 12 - A * cx ** 2
+    Ixy = ((x[:-1] * y[1:] + 2 * x[:-1] * y[:-1] + 2 * x[1:] * y[1:] + x[1:] * y[:-1]) * a).sum() / 24 - A * cx * cy
+    m, d = 0.5 * (Ixx + Iyy), np.hypot(0.5 * (Ixx - Iyy), Ixy)
+    return float(A), float(m + d), float(m - d)
+
+
+def round_section(xy, rho, n=720):
+    """The section contour with every corner rounded to radius rho: morphological closing (re-entrant corners, e.g. an
+    I-section's web-flange root) then opening (convex corners); smooth parts with curvature radius >= rho are
+    unchanged. Resampled to n points by arclength. Raises if the topology changes (a feature thinner than 2 rho)."""
+    from shapely.geometry import Polygon
+    if rho <= 0:
+        return np.asarray(xy, float)
+    Q = Polygon(xy).buffer(rho, 64).buffer(-2 * rho, 64).buffer(rho, 64)
+    if Q.geom_type != 'Polygon' or Q.is_empty or len(Q.interiors):
+        raise ValueError(f'round_section: rho = {rho:.4g} changes the section topology (feature thinner than 2 rho)')
+    return section_ring(np.asarray(Q.exterior.coords)[:-1], n)
+
+
+def prepare_sections(sections, radii, corner_radius=CORNER_RADIUS, corner_radius_abs=0.0):
+    """Round each given section (None = circle, unchanged) with rho = max(corner_radius r_eq, corner_radius_abs) and
+    return (sections, report). report per section: rho and the relative change of A, I1, I2, so the beam model can use
+    the properties of the geometry that is built. Deterministic: the single-node builder and its fairing call it with
+    the same input and get the same contour."""
+    if sections is None:
+        return None, []
+    out, rep_ = [], []
+    for sec, r in zip(sections, radii):
+        if sec is None:
+            out.append(None)
+            rep_.append(None)
+            continue
+        rho = max(corner_radius * r, corner_radius_abs)
+        q = round_section(sec, rho)
+        p0, p1 = section_properties(sec), section_properties(q)
+        out.append(q)
+        rep_.append(dict(rho=rho, dA=p1[0] / p0[0] - 1, dI1=p1[1] / p0[1] - 1, dI2=p1[2] / p0[2] - 1))
+    return out, rep_
+
+
 def _blend(s):
     """Smoothstep 0 -> 1 on s in [0, 1] (clamped)."""
     s = np.clip(s, 0.0, 1.0)
@@ -318,7 +372,7 @@ def section_control_ring(xy, n_min=16, levels=3, limit=False, tol=0.01, n_max=12
 
 
 def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.0, core=False, ball=True,
-                          sections=None):
+                          sections=None, corner_radius=CORNER_RADIUS, corner_radius_abs=0.0):
     """Method C1: organic node by subdivision of a hull control mesh (notes/12).
     Control mesh = convex hull of one ring per beam (at ring_offsets: outside the trim sphere and each ring a face of
     the hull), with the ring caps removed,
@@ -334,6 +388,7 @@ def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.
     Returns the watertight manifold."""
     from scipy.spatial import ConvexHull
     r_min = radii.min()
+    sections, hull_subdivision_node.section_report = prepare_sections(sections, radii, corner_radius, corner_radius_abs)
     ctrl_rings = []                                               # per beam: control ring in (u, v), n
     for i, r in enumerate(radii):
         sec = None if sections is None else sections[i]
@@ -614,7 +669,7 @@ def contained_fair_solve(K, wv, V0, fixed, depth, tol, strong, max_iter=12):
 
 
 def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.0, contain='smooth', tol=0.02,
-                       strong=1e1, sections=None):
+                       strong=1e1, sections=None, corner_radius=CORNER_RADIUS, corner_radius_abs=0.0):
     """FHS fairing (Faired Hull-Subdivision node, anchored): least-squares fairing, min x^T K x + sum_v w_v |x_v - x0_v|^2, with the thin-plate
     energy K = C^T M^-1 C (cotangent C, lumped area M), the beams fixed beyond t_ring_i + free_len * r_i, and soft
     anchors w = anchor * area / r_min^4 * flank_weights on the beams' flanks, so the crevices fair freely but no beam
@@ -626,6 +681,7 @@ def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.
     import scipy.sparse.linalg as spl
     V = np.asarray(mesh.vertices, float)
     F = np.asarray(mesh.faces)
+    sections, _ = prepare_sections(sections, radii, corner_radius, corner_radius_abs)   # = the builder's contours
     fixed = np.zeros(len(V), bool)
     for i, (e, r, t) in enumerate(zip(dirs, radii, t_ring)):
         w = (V - node) @ e
@@ -791,7 +847,8 @@ def mirror_at_plates(X, conn, radii, z_range, tol=1e-9):
 
 
 def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, anchor=10.0, n_min=16,
-                limit=True, mid=3.0, mirror=False, ball=True, contain=True, tol=0.02, strong=1e1, sections=None):
+                limit=True, mid=3.0, mirror=False, ball=True, contain=True, tol=0.02, strong=1e1, sections=None,
+                corner_radius=CORNER_RADIUS, corner_radius_abs=0.0):
     """FHS (Faired Hull-Subdivision) node joints for a whole lattice (algorithm: notes/13_FHS_NodeAlgorithm.md). Every node of degree >= 2 gets a node
     patch (convex hull of its node rings + core rings, ring caps removed); every strut a control tube between the
     node rings at its two ends; the whole control mesh is Loop-subdivided, the node regions are faired in one
@@ -815,7 +872,10 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
     if sections is None:
         conn, radii = merge_straight_chains(X, conn, radii)             # element splits are not joints
         secs = [None] * len(conn)
+        sec_report = []
     else:
+        sections, sec_report = prepare_sections(sections, np.broadcast_to(np.asarray(radii, float), (len(conn),)),
+                                                corner_radius, corner_radius_abs)
         conn, radii, secs = merge_straight_chains(X, conn, radii, tags=sections)
     r_min = radii.min()
     nring = np.array([ring_count(r, r_min, n_min) for r in radii])
@@ -1031,7 +1091,8 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
             for zc, z0 in zip(cuts, z_range):
                 V[np.abs(V[:, 2] - zc) < 1e-7, 2] = z0
             man = m3.Manifold(m3.Mesh64(np.array(V, np.float64), np.array(mesh.tri_verts, np.uint64)))   # writable copies
-    return man, dict(control_faces=len(ctrl.faces), free_vertices=len(fr), ring_offsets=toff, pinned=n_pin)
+    return man, dict(control_faces=len(ctrl.faces), free_vertices=len(fr), ring_offsets=toff, pinned=n_pin,
+                     section_report=sec_report)
 
 
 # ---------------------------------------------------------------- mesh size: deviation between two surfaces
