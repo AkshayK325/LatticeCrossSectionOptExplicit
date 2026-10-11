@@ -932,15 +932,26 @@ def step_scaleplot():
 
 
 def step_fe3():
-    """Tetrahedral node FE (as S5) for Savio and SF (R3), equal and graded radii; FHS from S5."""
+    """Node FE (as S5) for Savio, SF and FHS. Default: the tetra node, equal and graded radii (sum e_i = 0: the
+    clamp reaction is a pure axial force). 'v3': two graded valence-3 nodes of case 2 (notes/17 P3.2); their
+    directions do not sum to zero, so the clamped (thick) strut also carries a bending moment, the same load case for
+    every method."""
     print('| node | method | K (h = r_min/4) | K (r_min/6) | K (r_min/8) | tets (finest) |')
     print('|---|---|---|---|---|---|')
-    for nm, r in (('tetra_r080', np.full(4, 0.8)), ('tetra_graded_100_080_060_040', np.array([1.0, 0.8, 0.6, 0.4]))):
-        E = tetra()
-        out, R = build3(E, r, np.full(4, 8.0))
+    if 'v3' in sys.argv:
+        nodes = [('c2_v3_t50_q3', *case2_node(3, 50, 3.0)), ('c2_v3_t90_q4', *case2_node(3, 90, 4.0))]
+    else:
+        nodes = [('tetra_r080', tetra(), np.full(4, 0.8)),
+                 ('tetra_graded_100_080_060_040', tetra(), np.array([1.0, 0.8, 0.6, 0.4]))]
+    for nm, E, r in nodes:
+        E = E / np.linalg.norm(E, axis=1)[:, None]
+        out, R = build3(E, r, np.full(len(E), 8.0))
         L = R + 3 * r
         out, R = build3(E, r, L)
         for k in ('Savio', 'SF', 'FHS'):
+            if 'fail' in out[k]:
+                print(f'| {nm} | {k} | build FAIL: {out[k]["fail"]} | | | |', flush=True)
+                continue
             stl = f'{OUT}/fe3_{nm}_{k}.stl'
             out[k]['mesh'].export(stl)
             res = []

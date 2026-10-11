@@ -218,13 +218,57 @@ def ring_limit_operator(n, levels=3, limit=False, spacing_ratio=1.0):
     return T
 
 
-def control_ring(xy, n, levels=3, limit=False, phase=0.0):
+def control_ring(xy, n, levels=3, limit=False, phase=0.0, smooth=0.0):
     """Control ring (n x 2) whose subdivided tube has the section xy: least squares T c = the contour sampled at the
-    n 2^levels limit points (arclength). For a circle this is the radius / loop_shrink compensation."""
+    n 2^levels limit points (arclength), plus smooth * |T|^2 |D2 c|^2 (D2: circular second difference). The plain fit
+    rings along flat sides (curvature stripes along the strut); smooth = 1e-2 halves that ripple at < 0.15 % r_eq
+    more deviation (notes/17 P6). For a circle (either way) it is the radius / loop_shrink compensation."""
     T = ring_limit_operator(n, levels, limit)
     tgt = section_ring(xy, T.shape[0], phase)
-    c, *_ = np.linalg.lstsq(T, tgt[:, 0] + 1j * tgt[:, 1], rcond=None)
+    b = tgt[:, 0] + 1j * tgt[:, 1]
+    if smooth > 0:
+        I = np.eye(n)
+        D = np.roll(I, 1, 1) - 2 * I + np.roll(I, -1, 1)
+        A = np.vstack((T, np.sqrt(smooth) * np.linalg.norm(T, 2) * D))
+        b = np.r_[b, np.zeros(n)]
+    else:
+        A = T
+    c, *_ = np.linalg.lstsq(A, b, rcond=None)
     return np.column_stack((c.real, c.imag))
+
+
+def strictly_convex_ring(c, sag=0.03):
+    """The ring c (n x 2, counter-clockwise) made strictly convex, keeping its vertex count and order: vertices off
+    the ring's convex hull are moved onto a parabolic arc over their hull edge, bulging outward. Used where a ring
+    must be a face of the node hull (first ring, core ring): an inverse-subdivision control ring rings (Gibbs-like)
+    along flat sides and is not convex there (notes/17 P6). The bulge of each edge is sag x its length, capped at a
+    tenth of the exterior angles at its two ends, so the turn stays positive where two arcs meet; the result is
+    checked (every vertex a hull vertex) and an error is raised otherwise."""
+    from scipy.spatial import ConvexHull
+    n = len(c)
+    hv = np.sort(ConvexHull(c).vertices)
+    m = len(hv)
+    ext = np.empty(m)                                              # exterior angle at each hull vertex
+    for q in range(m):
+        a, b, d = c[hv[q - 1]], c[hv[q]], c[hv[(q + 1) % m]]
+        u1, u2 = b - a, d - b
+        ext[q] = np.arctan2(u1[0] * u2[1] - u1[1] * u2[0], u1 @ u2)
+    out = c.copy()
+    for q in range(m):
+        a, b = hv[q], hv[(q + 1) % m]
+        k = (b - a) % n
+        if k < 2:
+            continue
+        idx = (a + np.arange(1, k)) % n
+        A, B = c[a], c[b]
+        ab = B - A
+        sg = min(sag, 0.1 * min(ext[q], ext[(q + 1) % m]))       # end slope 4 sg < exterior angle / 2
+        tt = np.linspace(0, 1, k + 1)[1:-1]
+        nrm = np.array([ab[1], -ab[0]]) / np.linalg.norm(ab)        # outward for a counter-clockwise ring
+        out[idx] = A + tt[:, None] * ab + (4 * sg * np.linalg.norm(ab) * tt * (1 - tt))[:, None] * nrm
+    if len(ConvexHull(out).vertices) != n:
+        raise RuntimeError('strictly_convex_ring: could not make the hull ring strictly convex')
+    return out
 
 
 def section_hausdorff(xy, c, levels=3, limit=False):
@@ -236,7 +280,7 @@ def section_hausdorff(xy, c, levels=3, limit=False):
     return a.hausdorff_distance(LineString(np.vstack((xy, xy[:1]))))
 
 
-def section_control_ring(xy, n_min=16, levels=3, limit=False, tol=0.01, n_max=128, phase=0.0):
+def section_control_ring(xy, n_min=16, levels=3, limit=False, tol=0.01, n_max=128, phase=0.0, smooth=0.0):
     """Control ring for a general (convex or not) section: the smallest ring count n >= n_min, a multiple of 4
     (doubly symmetric sections), whose subdivided section is within tol * r_eq (r_eq = sqrt(A / pi)) of xy.
     Returns (control ring n x 2, n, Hausdorff / r_eq)."""
@@ -245,14 +289,15 @@ def section_control_ring(xy, n_min=16, levels=3, limit=False, tol=0.01, n_max=12
     req = np.sqrt(Polygon(xy).area / np.pi)
     n = int(4 * np.ceil(n_min / 4))
     while True:
-        c = control_ring(xy, n, levels, limit, phase)
+        c = control_ring(xy, n, levels, limit, phase, smooth)
         h = section_hausdorff(xy, c, levels, limit) / req
         if h <= tol or n >= n_max:
             return c, n, h
         n += 4
 
 
-def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.0, core=False, ball=True):
+def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.0, core=False, ball=True,
+                          sections=None):
     """Method C1: organic node by subdivision of a hull control mesh (notes/12).
     Control mesh = convex hull of one ring per beam (at ring_offsets: outside the trim sphere and each ring a face of
     the hull), with the ring caps removed,
@@ -262,28 +307,45 @@ def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.
     (radius r_max, Loop-shrink compensated), so the hull has a back behind the node point when all beams lie in a
     narrow cone (else the core rings are nearly coplanar, the hull is flat there and the surface dents and creases
     inside the Boolean node's ball, notes/17 P3.4); points the beams already cover drop out of the hull.
+    sections: per beam None (circle of radius r_i) or a convex section contour (m x 2, in the frame _frame(e_i),
+    roll applied) with r_i its equivalent radius; its control ring is the inverse-subdivision fit
+    (`section_control_ring`, within 1 % r_eq), and the ring offsets / ball use its circumradius (notes/17 P6).
     Returns the watertight manifold."""
     from scipy.spatial import ConvexHull
     r_min = radii.min()
-    toff = ring_offsets(dirs, radii * np.array([1 / loop_shrink(ring_count(r, r_min, n_min), levels=levels)
-                                                 for r in radii]), R_s, core=core)
+    ctrl_rings = []                                               # per beam: control ring in (u, v), n
+    for i, r in enumerate(radii):
+        sec = None if sections is None else sections[i]
+        if sec is None:
+            n = ring_count(r, r_min, n_min)
+            t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+            ctrl_rings.append((r / loop_shrink(n, levels=levels) * np.column_stack((np.cos(t), np.sin(t))), n, None))
+        else:
+            c, n, _ = section_control_ring(sec, n_min=ring_count(r, r_min, n_min), levels=levels)
+            ctrl_rings.append((c, n, sec))
+    hull_rings = [c if sec is None else strictly_convex_ring(c) for c, _, sec in ctrl_rings]   # hull members
+    r_out = np.array([max(np.linalg.norm(c, axis=1).max(), np.linalg.norm(h, axis=1).max())
+                      for (c, _, _), h in zip(ctrl_rings, hull_rings)])                  # control circumradius
+    toff = ring_offsets(dirs, r_out, R_s, core=core)
     V, F, ring0 = [], [], []
     nv = 0
-    for e, r, l in zip(dirs, radii, L):
-        n = ring_count(r, r_min, n_min)
-        rc = r / loop_shrink(n, levels=levels)
+    for (e, r, l), (c, n, sec), ch in zip(zip(dirs, radii, L), ctrl_rings, hull_rings):
         u, v = _frame(e)
-        t = np.linspace(0, 2 * np.pi, n, endpoint=False)
-        circ = rc * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v))
-        dz = 2 * r * np.sin(np.pi / n)
+        circ = np.outer(c[:, 0], u) + np.outer(c[:, 1], v)
+        circ0 = np.outer(ch[:, 0], u) + np.outer(ch[:, 1], v)       # first ring: a hull face, strictly convex
+        if sec is None:
+            dz = 2 * r * np.sin(np.pi / n)
+        else:                                                       # the section's own edge length
+            P_ = np.vstack((sec, sec[:1]))
+            dz = np.linalg.norm(np.diff(P_, axis=0), axis=1).sum() / n
         ti = toff[len(ring0)]
         # control rings: the first two gaps `lead` * r long (a longer blend from the hull into the beam), then one
         # edge length apart
         z0 = [ti] + ([ti + lead * r, ti + 2 * lead * r] if lead > 0 else [])
         zs = np.concatenate((z0, np.arange(z0[-1] + dz, l + 3 * dz, dz)))
         start = nv
-        for z in zs:
-            V.append(node + z * e + circ)
+        for kz, z in enumerate(zs):
+            V.append(node + z * e + (circ0 if kz == 0 else circ))
             nv += n
         ring0.append((start, n))
         for k in range(len(zs) - 1):
@@ -295,19 +357,25 @@ def hull_subdivision_node(node, dirs, radii, L, R_s, levels=3, n_min=16, lead=0.
         nv += 1
     cores = []
     if core:     # each beam's own section at the node: the hull then contains every beam up to the node point
-        for e, r in zip(dirs, radii):
-            n = ring_count(r, r_min, n_min)
+        for (e, r), (c, n, sec) in zip(zip(dirs, radii), ctrl_rings):
             u, v = _frame(e)
-            t = np.linspace(0, 2 * np.pi, n, endpoint=False) + np.pi / n
-            rc = r / loop_shrink(n, levels=levels)                 # same Loop-shrink compensation as the tubes
-            V.append(node + rc * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v)))
+            if sec is None:
+                t = np.linspace(0, 2 * np.pi, n, endpoint=False) + np.pi / n
+                rc = r / loop_shrink(n, levels=levels)             # same Loop-shrink compensation as the tubes
+                V.append(node + rc * (np.outer(np.cos(t), u) + np.outer(np.sin(t), v)))
+            else:                                                   # the hull ring, half a step rotated
+                ch = strictly_convex_ring(c)
+                cm = 0.5 * (ch + np.roll(ch, -1, axis=0))
+                cm *= (np.linalg.norm(ch, axis=1).mean() / np.linalg.norm(cm, axis=1).mean())
+                V.append(node + np.outer(cm[:, 0], u) + np.outer(cm[:, 1], v))
             cores.append(np.arange(nv, nv + n))
             nv += n
     if ball:
         Vr = np.vstack(V)
-        Pb = ball_points(Vr[np.concatenate([np.arange(s, s + n) for s, n in ring0] + cores)], node,
-                         radii.max() / loop_shrink(ring_count(radii.max(), r_min, n_min), levels=levels), 0.05 * r_min,
-                         dirs, toff)
+        rho = (radii.max() / loop_shrink(ring_count(radii.max(), r_min, n_min), levels=levels) if sections is None
+               else r_out.max())
+        Pb = ball_points(Vr[np.concatenate([np.arange(s, s + n) for s, n in ring0] + cores)], node, rho,
+                         0.05 * r_min, dirs, toff)
         if len(Pb):
             V.append(Pb)
             cores.append(np.arange(nv, nv + len(Pb)))
@@ -361,15 +429,49 @@ def cotan_laplacian(V, F):
     return sp.diags(1.0 / M) @ Cm
 
 
-def core_clearance(P, node, dirs, radii, reach):
+_SDF_CACHE = {}
+
+
+def polygon_sdf(Q, poly):
+    """Signed distance from 2D points Q (k x 2) to the closed polygon poly (m x 2): < 0 inside (even-odd). The
+    magnitude is the distance to the contour resampled at ~perimeter / 2000 (k-d tree, cached per polygon; error
+    < 0.1 % of the perimeter / 2pi), the sign from matplotlib's point-in-polygon."""
+    from matplotlib.path import Path
+    from scipy.spatial import cKDTree
+    key = (poly.shape, poly.tobytes())
+    if key not in _SDF_CACHE:
+        P = np.vstack((poly, poly[:1]))
+        sl = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]
+        t = np.linspace(0, sl[-1], 2000, endpoint=False)
+        D = np.column_stack((np.interp(t, sl, P[:, 0]), np.interp(t, sl, P[:, 1])))
+        _SDF_CACHE[key] = (cKDTree(D), Path(poly))
+    tree, path = _SDF_CACHE[key]
+    d = tree.query(Q)[0]
+    return np.where(path.contains_points(Q), -d, d)
+
+
+def core_distance(P, node, e, r, reach, section=None):
+    """Signed distance from P to one beam's core, the beam continued to the node point (axial 0 .. reach). Circle
+    (section None): the capsule of radius r (rounded ends; with the other capsules it is the Boolean node with its
+    ball). Section (contour in the beam frame _frame(e)): the prism of that section with flat ends."""
+    w = np.clip((P - node) @ e, 0.0, reach)
+    D = (P - node) - np.outer(w, e)
+    if section is None:
+        return np.linalg.norm(D, axis=1) - r
+    u, v = _frame(e)
+    a = np.abs(((P - node) @ e) - w)                               # beyond an end
+    d2 = polygon_sdf(np.column_stack((D @ u, D @ v)), np.asarray(section, float))
+    return np.where((d2 > 0) | (a > 0), np.sqrt(np.maximum(d2, 0.0) ** 2 + a ** 2), d2)
+
+
+def core_clearance(P, node, dirs, radii, reach, sections=None):
     """Smooth distance from P to the union of the beam cores (each beam's capsule from the node point to reach_i):
     cubic smooth minimum (width 0.5 r_min) of the capsule distances, so it has no jumps and no creases where two
     cores meet."""
     k = 0.5 * radii.min()
     out = None
-    for e, r, l in zip(dirs, radii, reach):
-        w = np.clip((P - node) @ e, 0.0, l)
-        d = np.linalg.norm((P - node) - np.outer(w, e), axis=1) - r
+    for i, (e, r, l) in enumerate(zip(dirs, radii, reach)):
+        d = core_distance(P, node, e, r, l, None if sections is None else sections[i])
         if out is None:
             out = d
         else:
@@ -378,14 +480,12 @@ def core_clearance(P, node, dirs, radii, reach):
     return out
 
 
-def flank_weights(V, node, dirs, radii, reach):
+def flank_weights(V, node, dirs, radii, reach, sections=None):
     """Anchor weight per vertex for the anchored fairing, in [0, 1]: ~1 on a beam's own flank (close to its core,
     i.e. the beam cylinder continued to the node point, and away from every other core) where the thin plate would
     neck the beam; ~0 in the crevices (comparably close to two cores), which stay free to fair."""
-    D = []
-    for e, r, l in zip(dirs, radii, reach):
-        w = np.clip((V - node) @ e, 0.0, l)
-        D.append(np.linalg.norm((V - node) - np.outer(w, e), axis=1) - r)
+    D = [core_distance(V, node, e, r, l, None if sections is None else sections[i])
+         for i, (e, r, l) in enumerate(zip(dirs, radii, reach))]
     D = np.sort(np.array(D), axis=0)
     a = 0.3 * radii.min()
     b = 0.5 * radii.min()
@@ -412,15 +512,16 @@ def capsule_depth(P, A, B, R):
     return best, proj
 
 
-def smooth_core_depth(P, node, dirs, radii, reach, h=1e-4):
+def smooth_core_depth(P, node, dirs, radii, reach, h=1e-4, sections=None):
     """core_clearance (smooth union of the beam capsules: no crease where two cores meet) and each point's
     projection onto that surface along the clearance gradient (central differences)."""
-    d = core_clearance(P, node, dirs, radii, reach)
+    d = core_clearance(P, node, dirs, radii, reach, sections)
     g = np.zeros_like(P)
     for k in range(3):
         dp = np.zeros(3)
         dp[k] = h
-        g[:, k] = (core_clearance(P + dp, node, dirs, radii, reach) - core_clearance(P - dp, node, dirs, radii, reach)) / (2 * h)
+        g[:, k] = (core_clearance(P + dp, node, dirs, radii, reach, sections) -
+                   core_clearance(P - dp, node, dirs, radii, reach, sections)) / (2 * h)
     gn = np.linalg.norm(g, axis=1)
     ok = gn > 1e-9
     proj = P.copy()
@@ -456,7 +557,7 @@ def contained_fair_solve(K, wv, V0, fixed, depth, tol, strong, max_iter=12):
 
 
 def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.0, contain='smooth', tol=0.02,
-                       strong=1e1):
+                       strong=1e1, sections=None):
     """FHS fairing (Faired Hull-Subdivision node, anchored): least-squares fairing, min x^T K x + sum_v w_v |x_v - x0_v|^2, with the thin-plate
     energy K = C^T M^-1 C (cotangent C, lumped area M), the beams fixed beyond t_ring_i + free_len * r_i, and soft
     anchors w = anchor * area / r_min^4 * flank_weights on the beams' flanks, so the crevices fair freely but no beam
@@ -469,20 +570,21 @@ def fair_node_anchored(mesh, node, dirs, radii, t_ring, free_len=1.0, anchor=10.
     V = np.asarray(mesh.vertices, float)
     F = np.asarray(mesh.faces)
     fixed = np.zeros(len(V), bool)
-    for e, r, t in zip(dirs, radii, t_ring):
+    for i, (e, r, t) in enumerate(zip(dirs, radii, t_ring)):
         w = (V - node) @ e
-        rad = np.linalg.norm((V - node) - np.outer(w, e), axis=1)
-        fixed |= (w > t + free_len * r) & (np.abs(rad - r) < 0.05 * r)
+        far = w > t + free_len * r                                  # on the beam's own tube past the free length
+        sec = None if sections is None else sections[i]
+        fixed[far] |= np.abs(core_distance(V[far], node, e, r, np.inf, sec)) < 0.05 * r
     Lc = cotan_laplacian(V, F)                                        # M^-1 C
     area = 0.5 * np.linalg.norm(np.cross(V[F[:, 1]] - V[F[:, 0]], V[F[:, 2]] - V[F[:, 0]]), axis=1)
     M = sp.diags(np.bincount(F.ravel(), weights=np.repeat(area / 3, 3), minlength=len(V)))
     K = (Lc.T @ M @ Lc).tocsr()                                       # = C^T M^-1 C
     # data term anchor * integral |x - x0|^2 / r_min^4 dA, consistent with the thin-plate energy integral |Lap x|^2 dA
     wv = anchor * M.diagonal() / radii.min() ** 4 * flank_weights(V, node, dirs, radii,
-                                                                   t_ring + free_len * radii + 2 * radii)
+                                                                   t_ring + free_len * radii + 2 * radii, sections)
     if contain:
         reach = t_ring + free_len * radii + 2 * radii
-        depth = ((lambda X: smooth_core_depth(X, node, dirs, radii, reach)) if contain == 'smooth' else
+        depth = ((lambda X: smooth_core_depth(X, node, dirs, radii, reach, sections=sections)) if contain == 'smooth' else
                  (lambda X: capsule_depth(X, np.tile(node, (len(dirs), 1)), node + reach[:, None] * dirs, radii)))
         Vn, fair_node_anchored.pinned, _ = contained_fair_solve(
             K, wv, V, fixed, depth, tol * radii.min(), strong * anchor * M.diagonal() / radii.min() ** 4)
