@@ -285,7 +285,7 @@ def build_all(E, r, L):
     return M, sf['d'], nj.ring_offsets(E, r, R_s, core=True)
 
 
-def fe_peak(stl, E, r, L, R, h_in, fixed=0, nu=0.3, verbose=False):
+def fe_peak(stl, E, r, L, R, h_in, fixed=0, nu=0.3, verbose=False, max_tets=1_500_000):
     """Linear-static P2 tet FE (scikit-fem) of one node solid: strut `fixed` clamped at its far end, every other
     strut pulled along its axis at its far end with the same force F = pi r_min^2 (unit nominal stress in the
     thinnest strut); for a tetrahedral node the forces balance the clamp reaction exactly (sum e_i = 0), so the
@@ -297,6 +297,8 @@ def fe_peak(stl, E, r, L, R, h_in, fixed=0, nu=0.3, verbose=False):
     from skfem.models.elasticity import linear_elasticity, lame_parameters
     P, T = solid.gmsh_from_stl(stl, h=max(r.max() / 1.5, 2 * h_in), curvature=0, algo3d=1,
                                ball_refine=((0, 0, 0), R, h_in, 0.5 * R))
+    if len(T) > max_tets:                                           # P2 assembly + AMG of more ran a 50 GB job into
+        raise RuntimeError(f'mesh too large: {len(T)} tets > {max_tets}')   # the system OOM killer (2026-10-11)
     mesh = MeshTet(P.T.copy(), T.T.copy())
     el = ElementVector(ElementTetP2())
     ib = Basis(mesh, el, intorder=4)
@@ -936,6 +938,9 @@ def step_fe3():
     clamp reaction is a pure axial force). 'v3': two graded valence-3 nodes of case 2 (notes/17 P3.2); their
     directions do not sum to zero, so the clamped (thick) strut also carries a bending moment, the same load case for
     every method."""
+    import resource                                                 # a runaway fails here, not in the system OOM
+    lim = 32 * 1024 ** 3
+    resource.setrlimit(resource.RLIMIT_AS, (lim, lim))
     print('| node | method | K (h = r_min/4) | K (r_min/6) | K (r_min/8) | tets (finest) |')
     print('|---|---|---|---|---|---|')
     if 'v3' in sys.argv:
