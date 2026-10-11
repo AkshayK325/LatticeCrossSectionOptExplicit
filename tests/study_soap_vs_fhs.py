@@ -880,6 +880,57 @@ def step_scale():
                   f'{tt:.1f} | {faces} | {50 * faces / 1e6:.1f} |', flush=True)
 
 
+def step_scaleplot():
+    """Fig. 76 from STL/soap_vs_fhs/scale.rows.md: per cell type (columns), build time, STL size and node success vs
+    strut count (rows), one series per method (fixed colour + marker + direct label), log-log slope in the label.
+    Savio / SF are per-node builds without the final union (a lower bound for them)."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    rows = [l.split('|')[1:-1] for l in open(f'{OUT}/scale.rows.md') if l.startswith('| ') and 'cell |' not in l
+            and '---' not in l]
+    cells = (('C4', 'C4'), ('B', 'BCC'), ('O', 'octet'))
+    meths = (('FHS', 'FHS (whole lattice)', '#2a78d6', 'o'), ('Savio', 'Savio (per node)', '#eb6834', 's'),
+             ('SF', 'SF (per node)', '#1baf7a', '^'))
+    fig, axs = plt.subplots(3, 3, figsize=(13, 10.5))
+    for c, (cell, cname) in enumerate(cells):
+        for k, lab, col, mk in meths:
+            R = [r for r in rows if r[0].strip() == cell and r[4].strip().startswith(k)]
+            ns = np.array([float(r[2]) for r in R])
+            t = np.array([float(r[7]) for r in R])
+            mb = np.array([float(r[9]) for r in R])
+            okn = [r[5].split('/') for r in R]
+            succ = np.array([100.0 * float(a) / float(b.split()[0]) for a, b in okn])
+            slope = np.polyfit(np.log(ns), np.log(t), 1)[0]
+            for row, y, ylab in ((0, t, 'build time (s)'), (1, mb, 'STL size (MB, binary)'), (2, succ, 'nodes built + watertight (%)')):
+                ax = axs[row, c]
+                off = {'FHS': 1.0, 'Savio': 0.0, 'SF': -1.0}[k] if row == 2 else 0.0   # 100 % lines apart
+                ax.plot(ns, y + off, color=col, marker=mk, ms=6, lw=2, label=lab + (f', time ~ n^{slope:.2f}' if row == 0 else ''))
+                if row < 2:
+                    ax.set_xscale('log'); ax.set_yscale('log')
+                    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+                    ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+                    ax.set_xticks([t_ for t_ in (20, 50, 100, 200, 500) if ns.min() * 0.8 <= t_ <= ns.max() * 1.2])
+                    ax.text(ns[-1] * 1.06, y[-1], k, color='#333333', fontsize=8, va='center')
+                ax.set_ylabel(ylab, fontsize=9)
+                ax.grid(True, color='#e6e6e6', lw=0.6)
+                ax.set_axisbelow(True)
+                for sp in ('top', 'right'):
+                    ax.spines[sp].set_visible(False)
+        axs[0, c].set_title(f'{cname} lattice, 1x1 to 5x5 cells', fontsize=10)
+        axs[2, c].set_xlabel('struts', fontsize=9)
+        axs[2, c].set_ylim(50, 104)
+        axs[2, c].legend(fontsize=7.5, frameon=False, loc='lower left')
+        axs[0, c].legend(fontsize=7.5, frameon=False, loc='upper left')
+    fig.text(0.5, 0.004, 'Savio and SF: every lattice node built on its own with strut stubs to half length, no final union '
+             '(their totals are a lower bound); SF failures: cut circle beyond the strut half length.\n'
+             'FHS success = the whole lattice built and watertight (1 / 1). Bottom row: 100 % lines offset by 1 for '
+             'visibility. Same machine, run in parallel with other jobs.', ha='center', fontsize=8, color='#555555')
+    fig.tight_layout(rect=(0, 0.035, 1, 1))
+    fig.savefig('ResultsFig/explicit/76_scalability_three_methods.png', dpi=110)
+    plt.close(fig)
+
+
 def step_fe3():
     """Tetrahedral node FE (as S5) for Savio and SF (R3), equal and graded radii; FHS from S5."""
     print('| node | method | K (h = r_min/4) | K (r_min/6) | K (r_min/8) | tets (finest) |')
@@ -1052,4 +1103,4 @@ if __name__ == '__main__':
     rs.start('study_soap_vs_fhs ' + ' '.join(sys.argv[1:]))
     import os
     os.makedirs(OUT, exist_ok=True)
-    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3, 'case2': step_case2, 'gallery': step_gallery, 'scale': step_scale}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
+    {'s1s2': step_s1s2, 's3': step_s3, 'hull': step_hull, 's4': step_s4, 's5': step_s5, 's5b': step_s5b, 'sfcal': step_sfcal, 'paperfigs': step_paperfigs, 'all3': step_all3, 'fe3': step_fe3, 'case2': step_case2, 'gallery': step_gallery, 'scale': step_scale, 'scaleplot': step_scaleplot}[sys.argv[1] if len(sys.argv) > 1 else 's1s2']()
