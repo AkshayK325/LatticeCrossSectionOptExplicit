@@ -666,3 +666,13 @@ Blind predictions (ours, before Abaqus), nominal / kirchhoff relaxation:
 
 The bending cases do not depend on the relax form (axial only). The reaction sign follows each code's RF
 convention; compare.py compares like with like.
+
+### Results 2026-10-12: Level B1 (all 8 runs)
+
+Ours (current law) vs Abaqus:
+- **Axial:** 0.5-2.1 % in all of peak, ramp end, relaxed hold and ramp work (B1a-d).
+- **Bending:** -1 to -6 % (L 11; B1e-f, B1e2 mesh-converged within 0.8 %) and -8 to -9 % (L 5.5, B1g); ours softer.
+- The Kirchhoff relax variant is off by 8-10 % at 30 % strain: rejected, nominal kept.
+- **Conclusion:** the strut material law is validated; the H-cell excess stiffness (BCC / C12) is at the joint /
+  cell level.
+- Next: B3 joint specimen, linear and EPU 45 (notes/15 "B1 results").
