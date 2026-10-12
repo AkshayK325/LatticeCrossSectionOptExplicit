@@ -619,3 +619,50 @@ Meshing:
   - folder, scripts and plan created;
   - A1 inp written;
   - our A1 prediction recorded (`ours/A1_cantilever.csv`, `results/A1_cantilever.md`).
+
+## Level B1: single EPU 45 strut (material-law check), new 2026-10-12
+
+Why: the H cells (notes/15 "H results") show the beam model too stiff on BCC / C12 with EPU 45 (stroke up to
+-12.5 %, peak +26 %), though it matched the same cells with linear E. B1 separates the strut material law from the
+joint model.
+- One strut, the H cells' material block, no impactor / joint / contact.
+- Prescribed displacement: SMOOTH STEP over the ramp, then held.
+- Reaction = sum RF3 (axial) or RF1 (bending) at BOT.
+
+| case (abaqus/inp) | test | mesh | T | est. wall time |
+|---|---|---|---|---|
+| B1a_strut_axial_comp30_fast | short cylinder L 2 r 1, frictionless platens, 30 % compression in 0.3 ms + 0.7 ms hold | 2.2k C3D10M | 1 ms | minutes |
+| B1b_strut_axial_comp30_slow | as B1a, ramp 3 ms + 1 ms hold | 2.2k | 4 ms | ~10 min |
+| B1c_strut_axial_tens30_fast | as B1a in tension (stress-measure signature) | 2.2k | 1 ms | minutes |
+| B1d_strut_axial_comp05_fast | as B1a, 5 % (BCC strain level) | 2.2k | 1 ms | minutes |
+| B1e_strut_bend_fast | fixed-guided L 11 r 1, tip 1.1 mm in 0.3 ms + 0.7 ms hold | 10.2k | 1 ms | ~15-30 min |
+| B1f_strut_bend_slow | as B1e, ramp 3 ms + 1 ms hold | 10.2k | 4 ms | ~1 h |
+| B1g_strut_bend_stubby_fast | as B1e with L 5.5 (shear part, as BCC r 1.5) | 5.4k | 1 ms | ~15 min |
+| B1e2_strut_bend_fast_h020 | B1e refined (h 0.2, 48 around): mesh convergence | 74k | 1 ms | ~1-3 h |
+
+Order: B1a, B1c, B1d, B1e (they decide) → B1g, B1b, B1f → B1e2 (convergence of the bending answer).
+
+Run and extract as for the other levels:
+- `abaqus job=<name> input=<name>.inp double=both cpus=<n> interactive`
+- `abaqus python extract_odb.py <name>.odb`
+
+Then, here:
+- `PYTHONPATH=src:tests python abaqus/b1_predict.py` adds the Abaqus rows to `abaqus/results/B1_summary.md`;
+- `python abaqus/compare.py B1a ...` gives the overlays and pass marks (peak / ramp-end / hold-end reaction and
+  ramp work within 5 %).
+
+Blind predictions (ours, before Abaqus), nominal / kirchhoff relaxation:
+
+| case | peak reaction [N] | end of ramp | end of hold | ramp work [N mm] |
+|---|---|---|---|---|
+| B1a | 155 / 139 | 82.0 / 72.6 | 21.2 / 21.2 | -56.9 / -53.1 |
+| B1b | 31.4 / 28.2 | 21.4 / 21.3 | 21.2 / 21.2 | -12.3 / -11.3 |
+| B1c | 76.5 / 81.8 | -33.5 / -36.7 | -11.0 / -11.0 | -34.1 / -35.9 |
+| B1d | 16.9 / 16.6 | 7.87 / 7.72 | 2.39 / 2.39 | -1.18 / -1.17 |
+| B1e | 1.04 (both) | -0.588 | -0.105 | -0.507 |
+| B1f | 0.149 | -0.105 | -0.105 | -0.122 |
+| B1g | 2.46 | -1.11 | -0.340 | -0.932 |
+| B1e2 | as B1e (same beam) | | | |
+
+The bending cases do not depend on the relax form (axial only). The reaction sign follows each code's RF
+convention; compare.py compares like with like.
