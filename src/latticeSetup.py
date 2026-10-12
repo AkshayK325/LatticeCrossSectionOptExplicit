@@ -190,7 +190,8 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
     A, I = circle_sections(r_elem, nu=mat['nu'])
     if 'yeoh' in mat:                                            # visco-hyperelastic (EPU 45)
         from explicitFE import ViscoHyperLaw
-        beam_law = ViscoHyperLaw(fr, A, I, mat, fibre=fibre)   # fibre: large-strain bending + torsion
+        beam_law = ViscoHyperLaw(fr, A, I, mat, fibre=fibre,   # fibre: large-strain bending + torsion
+                                 relax=mat.get('relax', 'nominal'))
     else:
         E, G = mat['E'], mat['G']
         beam_law = lambda d: fr.elastic_law(d, A, I, E, G)

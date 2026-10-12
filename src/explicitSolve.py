@@ -16,14 +16,16 @@ def strain_energy(d, f_loc):
 
 def simulate(frame, law, m, j, dt, n_steps, u0=None, v0=None, R0=None, w0=None,
              fix_u=None, fix_r=None, f_ext=None, contact=None, tie=None, damping=0.0, record_every=1,
-             callback=None, t_end=None):
+             callback=None, t_end=None, v_fixed=None):
     """Run n_steps. fix_u / fix_r: bool masks (N,3) of fixed translation / rotation DOFs (held at u0/R0).
     f_ext(t) -> (F (N,3), Mom (N,3)) or None. contact(u, v) -> F (N,3) or None.
     tie: node indices moving as one rigid translating body (e.g. a bonded impactor plate; put its mass into m
     on those nodes and fix their rotations). damping: mass-proportional coefficient alpha (1/s).
     dt: float, a per-step sequence (replay a recorded schedule), or a callable dt(step, u, R, v) (adaptive);
     with a callable, n_steps may be None and t_end sets the duration. hist['dt'] holds the steps used.
-    callback(step, t, state, fint) -> dict of scalars to record. Returns dict of recorded histories."""
+    callback(step, t, state, fint) -> dict of scalars to record. Returns dict of recorded histories.
+    v_fixed(t) -> (N, 3) velocities of the fix_u DOFs (prescribed motion, e.g. a ramp-and-hold); set at mid-step,
+    so a piecewise-linear displacement is followed exactly. Without it fix_u DOFs keep their initial velocity v0."""
     N, dtype = frame.N, frame.X.dtype
     z = torch.zeros(N, 3, dtype=dtype)
     u = z.clone() if u0 is None else u0.clone()
@@ -71,6 +73,8 @@ def simulate(frame, law, m, j, dt, n_steps, u0=None, v0=None, R0=None, w0=None,
             law.step_dt = h                              # history-dependent law: step size for its update
         v = v + 0.5 * h * a
         w = w + 0.5 * h * al
+        if v_fixed is not None:
+            v = torch.where(keep_u, v_fixed(t + 0.5 * h), v)
         u = u + h * v
         R = rodrigues(h * w) @ R
         t += h
@@ -79,6 +83,8 @@ def simulate(frame, law, m, j, dt, n_steps, u0=None, v0=None, R0=None, w0=None,
             law.commit(fint[2])                          # accept the step: advance internal variables
         v = v + 0.5 * h * a
         w = w + 0.5 * h * al
+        if v_fixed is not None:
+            v = torch.where(keep_u, v_fixed(t), v)
     hist['u'] = torch.stack(hist['u'])
     hist['R'] = torch.stack(hist['R'])
     hist['state'] = (u, v, R, w)

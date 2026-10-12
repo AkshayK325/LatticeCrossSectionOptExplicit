@@ -206,10 +206,18 @@ class ViscoHyperLaw:
     each step; calls in between (stable_dt, autograd) never change the history. With step_dt -> 0 the law
     returns the instantaneous (E0) response, which is what the stable time step must see.
     # ponytail: linear (E_inf) bending/torsion; fibre integration if bending strains get large
+    relax: which axial quantity the Prony branches relax. 'nominal' (default): the axial force N = A P (1st Piola).
+    'kirchhoff': lambda N = A J sigma (J = 1), the Kirchhoff-type stress that Abaqus' finite-strain
+    viscoelasticity relaxes (deviatoric Kirchhoff; bulk unrelaxed here). Same at small strain and after relaxation;
+    at 30 % fast compression the nominal form is ~18 % stiffer in a 1D estimate, softer in tension (notes/15, B1).
+    q / f_prev / last_q / last_f hold the relaxed quantity in either case (the adjoint reads them as they are).
     """
 
-    def __init__(self, frame, A, I, mat, fibre=True, n_r=4, n_theta=16):
+    def __init__(self, frame, A, I, mat, fibre=True, n_r=4, n_theta=16, relax='nominal'):
         self.fr, self.A, self.I, self.mat = frame, A, I, mat
+        if relax not in ('nominal', 'kirchhoff'):
+            raise ValueError(f"ViscoHyperLaw: relax must be 'nominal' or 'kirchhoff', not {relax!r}")
+        self.relax = relax
         self.C = mat['yeoh']
         self.fibre = fibre
         if fibre:                                  # polar quadrature of a solid circle of radius r (unit r)
@@ -274,19 +282,34 @@ class ViscoHyperLaw:
         b = -torch.expm1(-x) / x                     # (1 - a)/x, -> 1 as h -> 0
         return a * self.q + self.beta * b * (f - self.f_prev)
 
+    def _stretch(self, d):
+        return (1 + d[:, 0] / self.fr.L0)[:, None]
+
+    def _to_measure(self, f, d):
+        """Long-term resultants -> the relaxed quantity (axial N -> lambda N for 'kirchhoff')."""
+        if self.relax == 'nominal':
+            return f
+        return torch.cat((f[:, :1] * self._stretch(d), f[:, 1:]), dim=1)
+
+    def _from_measure(self, q, d):
+        if self.relax == 'nominal':
+            return q
+        return torch.cat((q[:, :1] / self._stretch(d), q[:, 1:]), dim=1)
+
     def __call__(self, d):
         f = self.f_inf(d)
-        br = self._branches(f)
+        fm = self._to_measure(f, d)
+        br = self._branches(fm)
         if not getattr(self, '_outer_grad', True):
-            br, f = br.detach(), f.detach()
-        self.last_q, self.last_f = br, f                  # what commit(d) would store (used by adjoint.DropStepper)
-        return f + br.sum(0)
+            br, f, fm = br.detach(), f.detach(), fm.detach()
+        self.last_q, self.last_f = br, fm                 # what commit(d) would store (used by adjoint.DropStepper)
+        return f + self._from_measure(br.sum(0), d)
 
     def commit(self, d):
         self._outer_grad = torch.is_grad_enabled()
-        f = self.f_inf(d)
-        self.q = self._branches(f)
-        self.f_prev = f
+        fm = self._to_measure(self.f_inf(d), d)
+        self.q = self._branches(fm)
+        self.f_prev = fm
 
     def stored_long_term(self, d, w=None):
         """Long-term elastic energy (diagnostics). Fibre mode: linear Timoshenko energy + (U_fibre - U_quad).

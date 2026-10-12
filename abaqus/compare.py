@@ -131,7 +131,18 @@ def _rig_labels_from_inp(name):
     return {'ref': ref, 'bot': bot}
 
 
+def _b1_labels_from_inp(name):
+    """Driven node and BOT node set of a B1 strut, read from the .inp that was run."""
+    import re
+    txt = (cases.ROOT / 'inp' / f'{name}.inp').read_text()
+    drv = int(re.search(r'\*NSET, NSET=DRV\n(\d+)', txt).group(1))
+    blk = re.search(r'\*NSET, NSET=BOT\n(.*?)\n\*', txt, re.S).group(1)
+    return {'drv': drv, 'bot': [int(v) for v in re.split(r'[,\s]+', blk.strip()) if v]}
+
+
 def labels(case):
+    if case.startswith('B1'):
+        return _b1_labels_from_inp(cases.CASES[case]['spec']['name'])
     if case == 'A1':
         return {'tip': cases.A1['n_el'] + 1, 'root': 1}
     if case.startswith('A2'):
@@ -158,6 +169,11 @@ def signals(case, ours):
          ('strain energy', 'ALLSE', 'ALLSE', None, 'N mm', None)]
     if case.startswith('H'):                                     # EPU 45: viscous (Prony) dissipation
         E.append(('viscous dissipation', 'ALLCD', 'ALLCD', None, 'N mm', None))
+    if case.startswith('B1'):                                   # single EPU 45 strut, prescribed ramp-and-hold
+        comp = '1' if cases.CASES[case]['spec']['mode'] == 'bend' else '3'
+        return [('driven displacement', 'Udrv', 'U' + comp, ('node', L['drv']), 'mm', 0.01),
+                ('bottom reaction (sum RF)', 'RFbot', 'RF' + comp, ('sum', L['bot']), 'N', 0.05),
+                ('kinetic energy', 'ALLKE', 'ALLKE', None, 'N mm', None)]
     if case == 'A1':
         return [('tip U3', 'U3', 'U3', ('node', L['tip']), 'mm', 0.01), ('tip U1', 'U1', 'U1', ('node', L['tip']), 'mm', 0.02),
                 ('tip UR2', 'UR2', 'UR2', ('node', L['tip']), 'rad', 0.01),
@@ -191,6 +207,23 @@ def scalar_metrics(case, ours, ab):
 
     def rel(a, b):
         return abs(a - b) / max(abs(b), 1e-300)
+    if case.startswith('B1'):
+        sp = cases.CASES[case]['spec']
+        comp = '1' if sp['mode'] == 'bend' else '3'
+        rf, ud = pick(ab, 'RF' + comp, ('sum', L['bot'])), pick(ab, 'U' + comp, ('node', L['drv']))
+        if rf is not None and ud is not None:
+            to, ro = ours['time'], ours['RFbot']
+            tr, te = sp['t_ramp'], sp['t_ramp'] + sp['t_hold']
+            pk_o, pk_a = np.abs(ro).max(), np.abs(rf[1]).max()
+            out.append(('peak |reaction| [N]', pk_o, pk_a, rel(pk_o, pk_a), 0.05))
+            r_o, r_a = np.interp(tr, to, ro), np.interp(tr, *rf)
+            out.append(('reaction at the end of the ramp [N]', r_o, r_a, rel(r_o, r_a), 0.05))
+            h_o, h_a = np.interp(te, to, ro), np.interp(te, *rf)
+            out.append(('reaction at the end of the hold (relaxed) [N]', h_o, h_a, rel(h_o, h_a), 0.05))
+            k_o, k_a = to <= tr, rf[0] <= tr                     # work during the ramp: int RF dU
+            w_o = np.trapezoid(ro[k_o], ours['Udrv'][k_o])
+            w_a = np.trapezoid(rf[1][k_a], np.interp(rf[0][k_a], *ud))
+            out.append(('work during the ramp [N mm]', w_o, w_a, rel(w_o, w_a), 0.05))
     if case == 'A1':
         r = pick(ab, 'U3', ('node', L['tip']))
         if r is not None:

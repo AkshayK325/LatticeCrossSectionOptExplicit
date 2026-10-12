@@ -506,7 +506,7 @@ def _a4_rig(c=A4):
     mat = dict(E=E, G=E / (2 * (1 + NU)), nu=NU, rho=RHO, E0=E)      # E0 key = contact stiffness modulus
     if c.get('material') == 'epu45':                                  # visco-hyperelastic: ViscoHyperLaw in drop_rig
         from material import epu45
-        mat = epu45()
+        mat = dict(epu45(), relax=c.get('relax', 'nominal'))        # 'kirchhoff': B1 / notes/15 candidate fix
     r_elem = torch.as_tensor(strut_radii(c, lat)[np.asarray(lat['beam_of_elem'])])
     rig = drop_rig(lat, r_elem, {'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}, mat=mat,
                    energy_J=c['energy_J'], v0_ms=c['v0'] / 1e3, plate_mass=c['plate_mass'], gap0=0.1,
@@ -873,6 +873,179 @@ ALLKE, ALLIE, ALLSE, ALLWK, ETOTAL, ALLAE, ALLVD, ALLFD, ALLCD
 """
 
 
+# ------------------------------------------------------------------------------------------------ B1
+# Single-strut EPU 45 material checks (notes/15 "H results"): the beam law vs Abaqus' solid with the SAME material
+# block as the H cells, under identical PRESCRIBED ramp-and-hold motion (no impactor, no joint, no contact), so only
+# the material law and the beam kinematics differ. Axial: a short cylinder (L 2, r 1) between frictionless platens
+# = homogeneous uniaxial stress (a slender strut would buckle at ~2 % under these ends). Bending: a fixed-guided
+# strut (L 11 = the BCC r 1.0 strut, r 1), tip driven sideways, rotations held, axial free.
+# Fast ramp 0.3 ms (~6 tau: the BCC first compression), slow 3 ms (~60 tau: the C4 crush); each followed by a hold.
+# The ramp is a SMOOTH STEP in displacement (Abaqus' xi^3 (10 - 15 xi + 6 xi^2): zero velocity and acceleration at
+# both ends), so neither code sees a velocity jump (an inertial spike would dominate the peak reaction). Beam
+# elements 1 mm long, as in the lattice model (n_el = L).
+B1 = dict(name='B1a_strut_axial_comp30_fast', mode='axial', L=2.0, r=1.0, amount=-0.30, t_ramp=3e-4, t_hold=7e-4,
+          h=0.25, n_el=2, out_dt=2e-6, field_frames=20,
+          title='B1a: EPU 45 short cylinder (L 2, r 1), frictionless platens, 30 % compression in 0.3 ms, hold 0.7 ms')
+B1_CASES = {
+    'B1a': B1,
+    'B1b': dict(B1, name='B1b_strut_axial_comp30_slow', t_ramp=3e-3, t_hold=1e-3, out_dt=1e-5,
+                title='B1b: as B1a, 30 % compression in 3 ms, hold 1 ms (near-relaxed rate, as the C4 crush)'),
+    'B1c': dict(B1, name='B1c_strut_axial_tens30_fast', amount=+0.30,
+                title='B1c: as B1a in TENSION, 30 % in 0.3 ms, hold 0.7 ms (stress-measure signature: sign flips)'),
+    'B1d': dict(B1, name='B1d_strut_axial_comp05_fast', amount=-0.05,
+                title='B1d: as B1a, 5 % compression in 0.3 ms (BCC-cell strain level), hold 0.7 ms'),
+    'B1e': dict(B1, name='B1e_strut_bend_fast', mode='bend', L=11.0, amount=1.1, h=0.4, n_el=11,
+                title='B1e: EPU 45 strut L 11, r 1, fixed-guided, tip 1.1 mm (0.1 L) sideways in 0.3 ms, hold 0.7 ms'),
+    'B1f': dict(B1, name='B1f_strut_bend_slow', mode='bend', L=11.0, amount=1.1, h=0.4, n_el=11, t_ramp=3e-3,
+                t_hold=1e-3, out_dt=1e-5, title='B1f: as B1e, tip 1.1 mm in 3 ms, hold 1 ms'),
+    'B1g': dict(B1, name='B1g_strut_bend_stubby_fast', mode='bend', L=5.5, amount=0.55, h=0.25, n_el=6,
+                title='B1g: as B1e with L 5.5 (L/r 5.5: shear part as BCC r 1.5 struts), tip 0.55 mm in 0.3 ms'),
+    'B1e2': dict(B1, name='B1e2_strut_bend_fast_h020', mode='bend', L=11.0, amount=1.1, h=0.2, curv=48, n_el=11,
+                 title='B1e2: B1e refined (h 0.2, 48 elements around): solid mesh convergence of the bending case'),
+}
+
+
+def b1_mesh(c):
+    """gmsh C3D10M of the cylinder (z 0..L) and node sets: bot / top faces, an axis node and a rim node on the bottom."""
+    import trimesh
+    import solid
+    stl = ROOT.parent / 'STL' / 'abaqus_b1' / f"{c['name']}.stl"
+    stl.parent.mkdir(parents=True, exist_ok=True)
+    cyl = trimesh.creation.cylinder(radius=c['r'], height=c['L'], sections=128)
+    cyl.apply_translation((0, 0, 0.5 * c['L']))
+    cyl.export(stl)
+    P, T = solid.gmsh_from_stl(stl, c['h'], curvature=c.get('curv', 24))      # elements per 2 pi around the strut
+    P10, T10 = solid.quadratic(P, T)
+    bot = np.nonzero(np.isclose(P10[:, 2], 0.0, atol=1e-6))[0]
+    top = np.nonzero(np.isclose(P10[:, 2], c['L'], atol=1e-6))[0]
+    axis = bot[np.argmin(np.linalg.norm(P10[bot, :2], axis=1))]
+    rim = bot[np.argmin(np.linalg.norm(P10[bot, :2] - (c['r'], 0.0), axis=1))]
+    topc = top[np.argmin(np.linalg.norm(P10[top, :2], axis=1))]
+    return dict(P=P10, T=T10, bot=bot, top=top, axis=axis, rim=rim, topc=topc)
+
+
+def _b1_amp(c):
+    """Driven displacement at the end of the ramp: axial strain x L (sign = compression / tension), bending tip."""
+    return c['amount'] * c['L'] if c['mode'] == 'axial' else c['amount']
+
+
+def _smooth_step_rate(c, t):
+    """d/dt of amp * xi^3 (10 - 15 xi + 6 xi^2), xi = t / t_ramp (Abaqus SMOOTH STEP), 0 after the ramp."""
+    xi = t / c['t_ramp']
+    return 0.0 if xi >= 1.0 or xi <= 0.0 else _b1_amp(c) / c['t_ramp'] * 30 * xi * xi * (1 - xi) ** 2
+
+
+def b1_inp(c=B1):
+    g = b1_mesh(c)
+    P, T = g['P'], g['T']
+    T_end = c['t_ramp'] + c['t_hold']
+    U = _b1_amp(c)
+    ref = len(P) + 1
+    bend = c['mode'] == 'bend'
+    nodes = _fmt_rows([(i + 1, *map(float, x)) for i, x in enumerate(P)] + ([(ref, 0.0, 0.0, c['L'])] if bend else []))
+    elems = _fmt_rows([(e + 1, *map(int, t + 1)) for e, t in enumerate(T)])
+    if bend:
+        bc = f"""*RIGID BODY, REF NODE={ref}, TIE NSET=TOP
+*BOUNDARY
+BOT, ENCASTRE
+REF, 2, 2
+REF, 4, 6
+*BOUNDARY, AMPLITUDE=RAMP
+REF, 1, 1, {U:.10g}"""
+        drv = f'*NSET, NSET=REF\n{ref}\n*NSET, NSET=DRV\n{ref}'
+    else:
+        bc = f"""*BOUNDARY
+BOT, 3, 3
+AXN, 1, 2
+RIMN, 2, 2
+*BOUNDARY, AMPLITUDE=RAMP
+TOP, 3, 3, {U:.10g}"""
+        drv = f"*NSET, NSET=DRV\n{g['topc'] + 1}"
+    return f"""*HEADING
+{c['title']}
+** Generated by abaqus/cases.py (B1, notes/15): gmsh h {c['h']} mm, {len(T)} C3D10M, {len(P)} nodes. Units: mm, N, s,
+** tonne, MPa. Same EPU 45 block as the H cells. Prescribed ramp-and-hold displacement {U:.6g} mm, smooth step over
+** {c['t_ramp']:.3g} s (amplitude RAMP), then held; the reaction is RF at BOT.
+*NODE
+{nodes}
+*ELEMENT, TYPE=C3D10M, ELSET=STRUT
+{elems}
+*NSET, NSET=BOT
+{_wrap(', '.join(str(k + 1) for k in g['bot']))}
+*NSET, NSET=TOP
+{_wrap(', '.join(str(k + 1) for k in g['top']))}
+*NSET, NSET=AXN
+{g['axis'] + 1}
+*NSET, NSET=RIMN
+{g['rim'] + 1}
+{drv}
+*SOLID SECTION, ELSET=STRUT, MATERIAL=EPU45
+,
+{material_block(material='epu45')}
+*AMPLITUDE, NAME=RAMP, DEFINITION=SMOOTH STEP
+0., 0., {c['t_ramp']:.10g}, 1.
+*STEP, NAME=RAMPHOLD, NLGEOM=YES
+*DYNAMIC, EXPLICIT
+, {T_end:.10g}
+{bc}
+*OUTPUT, FIELD, NUMBER INTERVAL={c['field_frames']}
+*NODE OUTPUT
+U
+*OUTPUT, HISTORY, TIME INTERVAL={c['out_dt']:.10g}
+*NODE OUTPUT, NSET=DRV
+U1, U3
+*NODE OUTPUT, NSET=BOT
+RF1, RF3
+*ENERGY OUTPUT
+ALLKE, ALLIE, ALLSE, ALLWK, ETOTAL, ALLAE, ALLVD, ALLCD
+*END STEP
+"""
+
+
+def b1_ours(c=B1, relax='nominal'):
+    """Our beam (ViscoHyperLaw, the optimiser's EPU 45 law) under the same prescribed ramp-and-hold."""
+    import torch
+    from explicitFE import Frame, ViscoHyperLaw, lumped_mass, stable_dt
+    from explicitSolve import simulate
+    from latticeSetup import circle_sections
+    from material import epu45
+    torch.set_default_dtype(torch.float64)
+    n = c['n_el']
+    z = np.linspace(0, c['L'], n + 1)
+    X = np.stack([np.zeros(n + 1), np.zeros(n + 1), z], 1)
+    conn = np.stack([np.arange(n), np.arange(1, n + 1)], 1)
+    fr = Frame(X, conn)
+    A, I = circle_sections(torch.full((n,), c['r']), nu=NU)
+    mat = epu45()
+    law = ViscoHyperLaw(fr, A, I, mat, relax=relax)
+    m, j = lumped_mass(fr, A, I, mat['rho'])
+    top, bend = n, c['mode'] == 'bend'
+    comp = 0 if bend else 2
+    fix_u = torch.zeros(fr.N, 3, dtype=torch.bool)
+    fix_r = torch.zeros(fr.N, 3, dtype=torch.bool)
+    fix_u[0] = fix_r[0] = fix_r[top] = True
+    fix_u[top] = torch.tensor([True, True, not bend])               # bending: tip u1 driven, u2 held, u3 free
+    def v_fixed(t):                                                # the smooth-step ramp, as Abaqus
+        out = torch.zeros(fr.N, 3)
+        out[top, comp] = _smooth_step_rate(c, t)
+        return out
+    dt, _ = stable_dt(fr, law, m, j, courant=0.8)
+    T_end = c['t_ramp'] + c['t_hold']
+    nst = int(math.ceil(T_end / dt))
+    dt = T_end / nst
+    rec = max(1, int(round(c['out_dt'] / dt)))
+    law.reset()
+
+    def cb(k, t, state, fint):
+        u, vv, R, w = state
+        fu = fint[0]
+        ke = 0.5 * (m * (vv ** 2).sum(1)).sum() + 0.5 * (j * (w ** 2).sum(1)).sum()
+        return {'Udrv': u[top, comp].item(), 'RFbot': fu[0, comp].item(), 'ALLKE': ke.item()}
+    with torch.no_grad():
+        h = simulate(fr, law, m, j, dt, nst, fix_u=fix_u, fix_r=fix_r, record_every=rec, callback=cb, v_fixed=v_fixed)
+    return _pack(h, ('Udrv', 'RFbot', 'ALLKE'), dt, nst)
+
+
 # ------------------------------------------------------------------------------------------------ A3s
 A3s = dict(A3, name='A3s2_crossed_solid_cylinders_fine', n_sq=16, n_rad=5, rbias=1.6, ds=0.25, ds_min=0.03, growth=1.15,
            T=1e-3, hourglass='ENHANCED', field_frames=20, ball_dt=1e-4,
@@ -1103,6 +1276,7 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
                     joint=JOINT_SV)
             for k, v in (('B2e', B2e), ('B2f', B2f), ('B2g', B2g), ('B2h', B2h), ('B2i', B2i), ('B2j', B2j), ('B2k', B2k))},
          'B2af': dict(spec=B2a_f, inp=lambda: b2_inp(B2a_f), ours=lambda: a4_ours(B2a_f)),
+         **{k: dict(spec=v, inp=(lambda v=v: b1_inp(v)), ours=(lambda v=v: b1_ours(v))) for k, v in B1_CASES.items()},
          # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape
          # is added to the joint model (notes/15)
          'F1a': dict(spec=F1a, inp=lambda: b2_inp(F1a), ours=lambda: a4_ours(dict(F1a, joint=JOINT_FHS)),
