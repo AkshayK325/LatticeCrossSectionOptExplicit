@@ -1,0 +1,153 @@
+1
+
+   Abaqus 2024                                  Date 12-Oct-2026   Time 10:14:02
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          B1a: EPU 45 short cylinder (L 2, r 1), frictionless platens, 30 % compression in 0.3 ms, hold 0.7 ms                                                                                                                                                                                                                                                                                                                                                                                                                            
+  *ELEMENT, TYPE=C3D10M, ELSET=STRUT
+  *MATERIAL, NAME=EPU45
+  *DENSITY
+  *HYPERELASTIC, YEOH, MODULI=LONG TERM
+
+ ***WARNING: D1 FOR HYPERELASTIC MATERIAL IS TOO SMALL. THIS LEADS TO A VERY 
+             HIGH BULK MODULUS. A SUGGESTED VALUE FOR D1 IS BETWEEN 8.33333E-03 
+             AND 2.08333E-02. D2, D3...etc ARE SUGGESTED TO BE SCALED 
+             PROPORTIONALLY IF THEY ARE NON-ZERO. ANALYSIS USING SINGLE 
+             PRECISION MAY RESULT IN A NOISY SOLUTION. IT IS THEREFORE 
+             RECOMMENDED THAT THE ANALYSIS BE RUN IN DOUBLE PRECISION.
+  *VISCOELASTIC, TIME=PRONY
+
+ ***NOTE: FOR AN Abaqus/Explicit ANALYSIS CONTAINING A *HYPERELASTIC OR 
+          *HYPERFOAM MATERIAL WITH *VISCOELASTIC PROPERTIES, THE STRAIN ENERGY 
+          OUTPUT INCLUDES THE CONTRIBUTION OF VISCOUS DISSIPATION. SPECIAL CARE 
+          SHOULD BE EXERCISED WHEN INTERPRETING STRAIN ENERGY RESULTS.
+  *SOLID SECTION, ELSET=STRUT, MATERIAL=EPU45
+  *SOLID SECTION, ELSET=STRUT, MATERIAL=EPU45
+  *BOUNDARY
+  *BOUNDARY, AMPLITUDE=RAMP
+  *SOLID SECTION, ELSET=STRUT, MATERIAL=EPU45
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *BOUNDARY
+  *BOUNDARY, AMPLITUDE=RAMP
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *NODE OUTPUT, NSET=DRV
+  *NODE OUTPUT, NSET=BOT
+  *ENERGY OUTPUT
+  *END STEP
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *BOUNDARY
+
+ ***WARNING: THE OPTION *BOUNDARY,TYPE=DISPLACEMENT HAS BEEN USED; CHECK STATUS 
+             FILE BETWEEN STEPS FOR WARNINGS ON ANY JUMPS PRESCRIBED ACROSS THE 
+             STEPS IN DISPLACEMENT VALUES OF TRANSLATIONAL DOF. FOR ROTATIONAL 
+             DOF MAKE SURE THAT THERE ARE NO SUCH JUMPS. ALL JUMPS IN 
+             DISPLACEMENTS ACROSS STEPS ARE IGNORED
+  *BOUNDARY, AMPLITUDE=RAMP
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                  2208
+          NUMBER OF NODES IS                                     6021
+          NUMBER OF NODES DEFINED BY THE USER                    3813
+          NUMBER OF INTERNAL NODES GENERATED BY THE PROGRAM      2208
+          TOTAL NUMBER OF VARIABLES IN THE MODEL                18063
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =     0.10    
+       SYSTEM TIME (SEC)    =      0.0    
+       TOTAL CPU TIME (SEC) =     0.10    
+       WALLCLOCK TIME (SEC) =            0
