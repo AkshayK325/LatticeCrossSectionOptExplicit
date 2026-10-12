@@ -902,6 +902,14 @@ B1_CASES = {
                 title='B1g: as B1e with L 5.5 (L/r 5.5: shear part as BCC r 1.5 struts), tip 0.55 mm in 0.3 ms'),
     'B1e2': dict(B1, name='B1e2_strut_bend_fast_h020', mode='bend', L=11.0, amount=1.1, h=0.2, curv=48, n_el=11,
                  title='B1e2: B1e refined (h 0.2, 48 elements around): solid mesh convergence of the bending case'),
+    # linear-elastic twins (E0, nu 0.49; rate-independent): is the 5 / 9 % bending gap the 3D clamped-end effect
+    # (geometric, any material) or the EPU 45 law? (notes/15 "B1 results")
+    'B1f_lin': dict(B1, name='B1f_lin_strut_bend_slow_linE0', mode='bend', L=11.0, amount=1.1, h=0.4, n_el=11,
+                    t_ramp=3e-3, t_hold=1e-3, out_dt=1e-5, material='linear',
+                    title='B1f_lin: B1f with LINEAR elastic E0 = 342.9 MPa, nu 0.49 (geometric end-effect check)'),
+    'B1g_lin': dict(B1, name='B1g_lin_strut_bend_stubby_linE0', mode='bend', L=5.5, amount=0.55, h=0.25, n_el=6,
+                    t_ramp=3e-3, t_hold=1e-3, out_dt=1e-5, material='linear',
+                    title='B1g_lin: B1g (L 5.5) with LINEAR elastic E0, slow ramp (geometric end-effect check)'),
 }
 
 
@@ -979,9 +987,9 @@ TOP, 3, 3, {U:.10g}"""
 *NSET, NSET=RIMN
 {g['rim'] + 1}
 {drv}
-*SOLID SECTION, ELSET=STRUT, MATERIAL=EPU45
+*SOLID SECTION, ELSET=STRUT, MATERIAL={'EPU45_LIN' if c.get('material') == 'linear' else 'EPU45'}
 ,
-{material_block(material='epu45')}
+{material_block(material=None if c.get('material') == 'linear' else 'epu45')}
 *AMPLITUDE, NAME=RAMP, DEFINITION=SMOOTH STEP
 0., 0., {c['t_ramp']:.10g}, 1.
 *STEP, NAME=RAMPHOLD, NLGEOM=YES
@@ -1017,7 +1025,10 @@ def b1_ours(c=B1, relax='nominal'):
     fr = Frame(X, conn)
     A, I = circle_sections(torch.full((n,), c['r']), nu=NU)
     mat = epu45()
-    law = ViscoHyperLaw(fr, A, I, mat, relax=relax)
+    if c.get('material') == 'linear':                               # linear twin: E0, G0 (rate-independent)
+        law = lambda d: fr.elastic_law(d, A, I, mat['E0'], mat['G0'])
+    else:
+        law = ViscoHyperLaw(fr, A, I, mat, relax=relax)
     m, j = lumped_mass(fr, A, I, mat['rho'])
     top, bend = n, c['mode'] == 'bend'
     comp = 0 if bend else 2
@@ -1034,7 +1045,8 @@ def b1_ours(c=B1, relax='nominal'):
     nst = int(math.ceil(T_end / dt))
     dt = T_end / nst
     rec = max(1, int(round(c['out_dt'] / dt)))
-    law.reset()
+    if hasattr(law, 'reset'):
+        law.reset()
 
     def cb(k, t, state, fint):
         u, vv, R, w = state
@@ -1044,6 +1056,174 @@ def b1_ours(c=B1, relax='nominal'):
     with torch.no_grad():
         h = simulate(fr, law, m, j, dt, nst, fix_u=fix_u, fix_r=fix_r, record_every=rec, callback=cb, v_fixed=v_fixed)
     return _pack(h, ('Udrv', 'RFbot', 'ALLKE'), dt, nst)
+
+
+# ------------------------------------------------------------------------------------------------ B3
+# Joint specimen (notes/15 "B1 results"): the BCC r 1.0 cell's 8 diagonals only, meeting at the FHS centre node, ends
+# on the plates (single struts there: no plate corner joints), under PRESCRIBED top-plate motion (smooth step) instead
+# of the impactor; no contact. Same FHS / mesh / plate setup as H1e, so B3 vs H1e tells whether the excess stiffness
+# of the beam model on BCC with EPU 45 sits at the centre node or at the plate corner joints. Linear E0 (B3a) vs
+# EPU 45 (B3b fast, B3c slow) gives the joint stiffening per material; ours: bare beams and JOINT_FHS.
+B3 = dict(name='B3b_bcc_node_EPU45_fast', r=1.0, h=0.5, H=12.7, amount=1.0, t_ramp=3e-4, t_hold=7e-4,
+          material='epu45', elemSize=1.0, out_dt=2e-6, field_frames=20, distortion_control=True,
+          title='B3b: BCC centre node (8 diagonals r 1.0, FHS joint, ends on the plates), EPU 45, top plate down '
+                '1.0 mm (smooth step 0.3 ms), hold 0.7 ms; bottom plate clamped; no contact')
+B3_CASES = {
+    'B3a': dict(B3, name='B3a_bcc_node_linE0_fast', material='linear', t_hold=2e-4,
+                title='B3a: as B3b with LINEAR elastic E0 = 342.9 MPa, nu 0.49 (same wave speed), hold 0.2 ms'),
+    'B3b': B3,
+    'B3c': dict(B3, name='B3c_bcc_node_EPU45_slow', t_ramp=3e-3, t_hold=1e-3, out_dt=1e-5,
+                title='B3c: as B3b with a 3 ms ramp, hold 1 ms (near-relaxed, as the C4 crush)'),
+}
+_B3_cache = {}
+
+
+def b3_lattice(c=B3):
+    """The 8 BCC diagonals of a 12.7 mm cube: centre node 8 + corners 0-7, refined to elemSize beam elements."""
+    from mesher import MeshFrame
+    H = c['H']
+    X = np.array([[x, y, z] for z in (0.0, H) for x, y in ((0, 0), (H, 0), (H, H), (0, H))] + [[H / 2] * 3], float)
+    C = np.array([[8, k] for k in range(8)])
+    Xr, connr = MeshFrame().refineFrameMeshElemSize(X, C, c['elemSize'])
+    L = np.linalg.norm(X[C[:, 1]] - X[C[:, 0]], axis=1)
+    n_per = np.rint(L / c['elemSize']).astype(int)
+    return {'X': X, 'conn': C, 'Xr': Xr, 'connr': connr, 'elemSize': c['elemSize'],
+            'beam_of_elem': np.repeat(np.arange(len(C)), n_per)}
+
+
+def b3_mesh(c=B3):
+    """FHS solid of the B3 star (lattice_fhs, trimmed to the plates) -> C3D10M, as the F / H cells."""
+    key = (c['r'], c['h'], c['H'])
+    if key not in _B3_cache:
+        import nodeJoint as nj
+        import solid
+        lat = b3_lattice(c)
+        stl = ROOT.parent / 'STL' / 'abaqus_b3' / f"B3_bcc_node_r{c['r']:g}_h{c['h']:g}.stl"
+        stl.parent.mkdir(parents=True, exist_ok=True)
+        man, _ = nj.lattice_fhs(lat['X'], lat['conn'], np.full(8, c['r']), z_range=(0.0, c['H']))
+        nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
+        P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0, **F_MESH)
+        P, T, nsl = solid.remove_boundary_slivers(P, T, 0.25 * c['h'])
+        P10, T10 = solid.quadratic(P, T)
+        bot = np.nonzero(np.isclose(P10[:, 2], 0.0, atol=1e-6))[0]
+        top = np.nonzero(np.isclose(P10[:, 2], c['H'], atol=1e-6))[0]
+        _B3_cache[key] = dict(P=P10, T=T10, bot=bot, top=top, slivers=nsl, stl=str(stl.relative_to(ROOT.parent)))
+    return _B3_cache[key]
+
+
+def b3_inp(c=B3):
+    import solid as _solid
+    g = b3_mesh(c)
+    P, T = g['P'], g['T']
+    ref = len(P) + 1
+    T_end = c['t_ramp'] + c['t_hold']
+    lin = c['material'] == 'linear'
+    cd = np.sqrt(E0 * (1 - NU) / ((1 + NU) * (1 - 2 * NU)) / RHO)  # as the F / H cells: mass-scale tiny tets only
+    a_ref = 0.22 * c['h']
+    dt_ms = 0.308 * a_ref / cd
+    vol, alt = _solid.tet_quality(P, T[:, :4])
+    small = alt < a_ref
+    added = (RHO * vol[small] * ((a_ref / alt[small]) ** 2 - 1)).sum() / (RHO * vol.sum())
+    nodes = _fmt_rows([(i + 1, *map(float, x)) for i, x in enumerate(P)] + [(ref, c['H'] / 2, c['H'] / 2, c['H'] + 0.1)])
+    elems = _fmt_rows([(e + 1, *map(int, t + 1)) for e, t in enumerate(T)])
+    return f"""*HEADING
+{c['title']}
+** Generated by abaqus/cases.py (B3, notes/15): FHS geometry {g['stl']} ({g['slivers']} boundary slivers removed),
+** gmsh h {c['h']} mm, {len(T)} C3D10M, {len(P)} nodes. Units: mm, N, s, tonne, MPa. Top-face nodes tied to the rigid ref
+** node {ref}, which is driven down {c['amount']:g} mm by a smooth step over {c['t_ramp']:.3g} s, then held. Fixed mass
+** scaling BELOW MIN to DT {dt_ms:.3g} s: {int(small.sum())} elements, est. added mass {100 * added:.3g} %.
+*NODE
+{nodes}
+*ELEMENT, TYPE=C3D10M, ELSET=CELL
+{elems}
+*NSET, NSET=BOT
+{_wrap(', '.join(str(k + 1) for k in g['bot']))}
+*NSET, NSET=TOP
+{_wrap(', '.join(str(k + 1) for k in g['top']))}
+*NSET, NSET=REF
+{ref}
+*SOLID SECTION, ELSET=CELL, MATERIAL={'EPU45_LIN' if lin else 'EPU45'}{', CONTROLS=SCDIST' if c.get('distortion_control') else ''}
+,{chr(10) + '*SECTION CONTROLS, NAME=SCDIST, DISTORTION CONTROL=YES' if c.get('distortion_control') else ''}
+{material_block(material=None if lin else 'epu45')}
+*AMPLITUDE, NAME=RAMP, DEFINITION=SMOOTH STEP
+0., 0., {c['t_ramp']:.10g}, 1.
+*RIGID BODY, REF NODE={ref}, TIE NSET=TOP
+*BOUNDARY
+BOT, 1, 3
+REF, 1, 2
+REF, 4, 6
+*STEP, NAME=RAMPHOLD, NLGEOM=YES
+*DYNAMIC, EXPLICIT
+, {T_end:.10g}
+*FIXED MASS SCALING, DT={dt_ms:.6g}, TYPE=BELOW MIN
+*BOUNDARY, AMPLITUDE=RAMP
+REF, 3, 3, {-c['amount']:.10g}
+*OUTPUT, FIELD, NUMBER INTERVAL={c['field_frames']}
+*NODE OUTPUT
+U
+*OUTPUT, HISTORY, TIME INTERVAL={c['out_dt']:.10g}
+*NODE OUTPUT, NSET=REF
+U1, U2, U3, V3
+*NODE OUTPUT, NSET=BOT
+RF3
+*ENERGY OUTPUT
+ALLKE, ALLIE, ALLSE, ALLWK, ETOTAL, ALLAE, ALLVD, ALLCD
+*END STEP
+"""
+
+
+def b3_ours(c=B3, joint=None):
+    """Our beams for B3: bottom corners clamped, top corners driven down (smooth step) with rotations held, as the
+    rig's plate tie; EPU 45 ViscoHyperLaw or linear E0; joint None (bare) or e.g. JOINT_FHS."""
+    import torch
+    from explicitFE import Frame, ViscoHyperLaw, JointScaledLaw, lumped_mass, stable_dt
+    from explicitSolve import simulate
+    from latticeSetup import circle_sections
+    from material import epu45
+    import jointSection
+    torch.set_default_dtype(torch.float64)
+    lat = b3_lattice(c)
+    fr = Frame(lat['Xr'], lat['connr'])
+    r_e = torch.full((fr.ne,), c['r'])
+    A, I = circle_sections(r_e, nu=NU)
+    mat = epu45()
+    if c['material'] == 'linear':
+        law = lambda d: fr.elastic_law(d, A, I, mat['E0'], mat['G0'])
+    else:
+        law = ViscoHyperLaw(fr, A, I, mat)
+    if joint is not None:
+        se, _ = jointSection.element_factors_aniso(lat, np.full(8, c['r']), decay=joint.get('decay'),
+                                                   joint_shape=joint.get('shape', 'sphere'))
+        law = JointScaledLaw(law, torch.as_tensor(se, dtype=A.dtype))
+    m, j = lumped_mass(fr, A, I, mat['rho'])
+    z = fr.X[:, 2]
+    bot = torch.nonzero(torch.isclose(z, torch.tensor(0.0, dtype=z.dtype))).flatten()
+    top = torch.nonzero(torch.isclose(z, torch.tensor(c['H'], dtype=z.dtype))).flatten()
+    fix_u = torch.zeros(fr.N, 3, dtype=torch.bool)
+    fix_r = torch.zeros(fr.N, 3, dtype=torch.bool)
+    fix_u[bot] = fix_r[bot] = fix_u[top] = fix_r[top] = True
+    spec = dict(c, mode='axial', L=1.0, amount=-c['amount'])        # smooth-step rate of a -amount displacement
+
+    def v_fixed(t):
+        out = torch.zeros(fr.N, 3)
+        out[top, 2] = _smooth_step_rate(spec, t)
+        return out
+    dt, _ = stable_dt(fr, law, m, j, courant=0.8)
+    T_end = c['t_ramp'] + c['t_hold']
+    nst = int(math.ceil(T_end / dt))
+    dt = T_end / nst
+    rec = max(1, int(round(c['out_dt'] / dt)))
+    if hasattr(law, 'reset'):
+        law.reset()
+
+    def cb(k, t, state, fint):
+        u, vv, R, w = state
+        fu = fint[0]
+        ke = 0.5 * (m * (vv ** 2).sum(1)).sum() + 0.5 * (j * (w ** 2).sum(1)).sum()
+        return {'U3ref': u[top[0], 2].item(), 'RF3bot': fu[bot, 2].sum().item(), 'ALLKE': ke.item()}
+    with torch.no_grad():
+        h = simulate(fr, law, m, j, dt, nst, fix_u=fix_u, fix_r=fix_r, record_every=rec, callback=cb, v_fixed=v_fixed)
+    return _pack(h, ('U3ref', 'RF3bot', 'ALLKE'), dt, nst)
 
 
 # ------------------------------------------------------------------------------------------------ A3s
@@ -1277,6 +1457,8 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
             for k, v in (('B2e', B2e), ('B2f', B2f), ('B2g', B2g), ('B2h', B2h), ('B2i', B2i), ('B2j', B2j), ('B2k', B2k))},
          'B2af': dict(spec=B2a_f, inp=lambda: b2_inp(B2a_f), ours=lambda: a4_ours(B2a_f)),
          **{k: dict(spec=v, inp=(lambda v=v: b1_inp(v)), ours=(lambda v=v: b1_ours(v))) for k, v in B1_CASES.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b3_inp(v)), ours=(lambda v=v: b3_ours(v, JOINT_FHS)), joint=JOINT_FHS)
+            for k, v in B3_CASES.items()},
          # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape
          # is added to the joint model (notes/15)
          'F1a': dict(spec=F1a, inp=lambda: b2_inp(F1a), ours=lambda: a4_ours(dict(F1a, joint=JOINT_FHS)),

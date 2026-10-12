@@ -676,3 +676,43 @@ Ours (current law) vs Abaqus:
 - **Conclusion:** the strut material law is validated; the H-cell excess stiffness (BCC / C12) is at the joint /
   cell level.
 - Next: B3 joint specimen, linear and EPU 45 (notes/15 "B1 results").
+
+## Level B3: BCC joint specimen + linear B1 twins, new 2026-10-12
+
+Why: B1 validated the strut law (axial 0.5-2.1 %), so the BCC / C12 excess stiffness with EPU 45 sits at the joints.
+- **B3** is the BCC r 1.0 cell's 8 diagonals only: the FHS centre node, single struts meeting the plates, so no plate
+  corner joints. Same FHS geometry, h 0.5 mesh, mass scaling and plates as H1e.
+- The top plate is driven down 1.0 mm (smooth step) instead of being hit by the impactor; no contact.
+- B3 against H1e locates the excess (centre node or plate corner joints). Linear vs EPU 45 measures the joint
+  stiffening per material.
+
+| case (abaqus/inp) | test | mesh | T | est. wall time |
+|---|---|---|---|---|
+| B3a_bcc_node_linE0_fast | linear E0 = 342.9, ν 0.49; 1.0 mm in 0.3 ms + 0.2 ms hold | 21.4k C3D10M | 0.5 ms | ~5-10 min |
+| B3b_bcc_node_EPU45_fast | EPU 45; 1.0 mm in 0.3 ms + 0.7 ms hold | 21.4k | 1 ms | ~10-20 min |
+| B3c_bcc_node_EPU45_slow | EPU 45; 1.0 mm in 3 ms + 1 ms hold | 21.4k | 4 ms | ~40-80 min |
+| B1f_lin_strut_bend_slow_linE0 | B1f with linear E0 (end-effect check) | 10.2k | 4 ms | ~1 h |
+| B1g_lin_strut_bend_stubby_linE0 | B1g (L 5.5) with linear E0, 3 ms ramp | 5.4k | 4 ms | ~30-60 min |
+
+Order: B3a, B3b (they decide) → B3c → B1g_lin, B1f_lin. Run and extract as for B1.
+- Then: `PYTHONPATH=src:tests python abaqus/b3_predict.py` (adds the Abaqus rows and the solid's joint stiffening);
+- `abaqus/b1_predict.py B1f_lin B1g_lin`; `compare.py` for the overlays.
+
+**Blind predictions** (reaction at the end of the ramp; stiffening = JOINT_FHS / bare):
+
+| case | bare beams | JOINT_FHS | our joint stiffening |
+|---|---|---|---|
+| B3a linear | 62.3 N | 72.0 N | 1.156 |
+| B3b EPU 45 fast | 10.9 N | 12.1 N | 1.105 |
+| B3c EPU 45 slow | 2.71 N | 3.07 N | 1.132 |
+
+Linear twins (ours = Timoshenko fixed-guided within 0.7-0.9 %): B1f_lin -2.49 N, B1g_lin -8.10 N at the hold.
+
+**What decides what:**
+- **The Abaqus solid stiffening (B3 solid / ours bare) ≈ ours** (1.10-1.16) in both materials → the centre node is
+  modelled right. The H1e excess then sits at the plate corner joints (1 diagonal + 3 edges in the plates): check
+  their joint factors next (a B3-like corner specimen).
+- **The solid stiffening is lower with EPU 45 than with linear** → the joint stiffening is material-dependent. Look at
+  why (e.g. near-incompressibility once relaxed, or the joint zone's strain rate) before changing the joint model.
+- **B1f_lin / B1g_lin show the same -5 / -9 % as the EPU 45 B1f / B1g** → the bending gap is the geometric
+  clamped-end effect, not the material.
