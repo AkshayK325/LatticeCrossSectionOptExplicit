@@ -207,3 +207,6 @@ abaqus/**/*.env
 run_status.log
 run_status.log.json
 run_status.log.json.lock
+
+# personal summaries (not committed)
+summary/
