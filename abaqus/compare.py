@@ -154,7 +154,7 @@ def labels(case):
     if case in ('A3s', 'A3s1'):
         g = cases.a3s_mesh(cases.CASES[case]['spec'])
         return {'amid': g['midA'], 'bmid': g['midB'], 'b': g['labelsB']}
-    if case.startswith(('B2', 'B3', 'F', 'H')):    # F = B2 rig with FHS joints, H = F with EPU 45, B3 = joint
+    if case.startswith(('B2', 'B3', 'B4', 'F', 'H')):   # F = B2 rig with FHS joints, H = F with EPU 45, B3/4 driven
         return _rig_labels_from_inp(cases.CASES[case]['spec']['name'])
     if case in ('A4', 'A5a', 'A5b', 'A5as', 'A5aq', 'A5bs'):
         lat, rig = cases._a4_rig(cases.CASES[case]['spec'])
@@ -169,7 +169,7 @@ def signals(case, ours):
          ('strain energy', 'ALLSE', 'ALLSE', None, 'N mm', None)]
     if case.startswith('H'):                                     # EPU 45: viscous (Prony) dissipation
         E.append(('viscous dissipation', 'ALLCD', 'ALLCD', None, 'N mm', None))
-    if case.startswith('B3'):                                   # joint specimen, prescribed plate motion
+    if case.startswith(('B3', 'B4')):                           # joint specimen / cell, prescribed plate motion
         return [('plate U3 (driven)', 'U3ref', 'U3', ('node', L['ref']), 'mm', 0.01),
                 ('bottom reaction (sum RF3)', 'RF3bot', 'RF3', ('sum', L['bot']), 'N', 0.05),
                 ('kinetic energy', 'ALLKE', 'ALLKE', None, 'N mm', None)]

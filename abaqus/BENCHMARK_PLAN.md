@@ -725,3 +725,48 @@ Ours (JOINT_FHS) vs Abaqus on the BCC centre node alone:
 - Linear bending twins: -4.4 / -7.9 % (EPU 45: -5.3 / -9.4 %), so the B1 bending gap is the geometric end effect.
 - **Conclusion:** the centre node does not cause the H1e excess stiffness. Next: B4 (full BCC cell, prescribed
   motion; notes/15 "B3 results").
+
+## Level B4: full BCC cell under prescribed plate motion, new 2026-10-12
+
+Why: B3 cleared the BCC centre node; the H1e excess stiffness (ours -12.5 % stroke) sits at the plate corner joints
+or in the impactor-driven loading.
+- **B4 is the solid H1e actually ran:** nodes, elements, BOT / TOP sets and mass scaling are read from the H1e .inp,
+  and verified identical.
+- It is driven like B3 (top plate down 1.0 mm by a smooth step; no impactor, no contact).
+- B4 vs B3 isolates the plate corner joints (1 diagonal + 3 edges in the plates). B4 vs H1e isolates the impactor /
+  dynamics.
+
+| case (abaqus/inp) | test | mesh | T | est. wall time |
+|---|---|---|---|---|
+| B4a_bcc_cell_linE0_fast | linear E0, ν 0.49; 1.0 mm in 0.3 ms + 0.2 ms hold | 41.7k C3D10M (= H1e) | 0.5 ms | ~10 min |
+| B4b_bcc_cell_EPU45_fast | EPU 45; 1.0 mm in 0.3 ms + 0.7 ms hold | 41.7k | 1 ms | ~20 min |
+| B4c_bcc_cell_EPU45_slow | EPU 45; 1.0 mm in 3 ms + 1 ms hold | 41.7k | 4 ms | ~1-1.5 h |
+
+Order: B4a, B4b, then B4c. Then `PYTHONPATH=src:tests python abaqus/b4_predict.py`.
+
+**Geometry note:** the H1e solid predates the FHS fix of 2026-10-11 (notes/17 P3.4).
+- So ours gives JOINT_FHS with the joint factors sliced from that old geometry (like-for-like) and from the
+  current code.
+- They differ by ~1.5 % here. On H1e itself, old factors give -11.7 % instead of -12.6 % in stroke (peak
+  unchanged), so the H conclusions stand.
+
+**Blind predictions** (reaction at the end of the ramp; stiffening vs bare beams):
+
+| case | bare | JOINT_FHS old geometry | JOINT_FHS current | our stiffening (old / current) |
+|---|---|---|---|---|
+| B4a linear | 401 N | 494.8 N | 500.9 N | 1.234 / 1.249 |
+| B4b EPU 45 fast | 63.0 N | 76.7 N | 77.7 N | 1.218 / 1.233 |
+| B4c EPU 45 slow | 18.4 N | 22.6 N | 22.9 N | 1.231 / 1.248 |
+
+Our joint model adds +22-25 % on the full cell vs +10-16 % on the centre node alone (B3), so the plate corner
+joints + edges are ~10 points of it.
+
+**What decides what:**
+- **B4b: ours (old geometry) too stiff by ~10 % or more** (like H1e) → the cause is in the cell, not the impactor. As
+  B3 cleared the centre node, it is the plate corner joint factors (JOINT_FHS near the plates) with EPU 45; compare
+  B4a to see whether it is EPU-specific.
+- **B4b matches within a few % (as B3)** → the cell model is right under prescribed motion; the H1e error comes from
+  the impactor-driven loading (impactor / plate mass, contact start, dynamic loading rate). Check those against H1e
+  next.
+- **B4a vs B4b:** the material / rate dependence of the joint stiffening at cell level (B3 showed 1.25 linear vs 1.08
+  EPU fast at the centre node).
