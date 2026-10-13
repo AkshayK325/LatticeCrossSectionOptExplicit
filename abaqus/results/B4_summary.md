@@ -7,9 +7,12 @@ Reaction = sum RF3 at the bottom plate; work = |int RF dU| during the ramp; stif
 | B4a | ours, bare beams | 405 | 401 | 401.9 | 201.6 | 1.000 |
 | B4a | ours, JOINT_FHS (old geometry) | 496.2 | 494.8 | 486.7 | 247.2 | 1.234 |
 | B4a | ours, JOINT_FHS (current) | 502.1 | 500.9 | 492.3 | 250.2 | 1.249 |
+| B4a | **Abaqus solid** | 416.8 | 408.9 | 402.2 | 218.7 | 1.020 |
 | B4b | ours, bare beams | 133.1 | 62.98 | 18.23 | 89.5 | 1.000 |
 | B4b | ours, JOINT_FHS (old geometry) | 162.8 | 76.68 | 22.44 | 110.7 | 1.218 |
 | B4b | ours, JOINT_FHS (current) | 164.8 | 77.66 | 22.74 | 112.1 | 1.233 |
+| B4b | **Abaqus solid** | 133.2 | 59.23 | 17.61 | 93.92 | 0.940 |
 | B4c | ours, bare beams | 25.88 | 18.36 | 18.23 | 19.2 | 1.000 |
 | B4c | ours, JOINT_FHS (old geometry) | 31.89 | 22.6 | 22.45 | 23.64 | 1.231 |
 | B4c | ours, JOINT_FHS (current) | 32.32 | 22.91 | 22.75 | 23.95 | 1.248 |
+| B4c | **Abaqus solid** | 26.24 | 17.81 | 17.43 | 20.01 | 0.970 |

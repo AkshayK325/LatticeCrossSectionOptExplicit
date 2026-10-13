@@ -770,3 +770,14 @@ joints + edges are ~10 points of it.
   next.
 - **B4a vs B4b:** the material / rate dependence of the joint stiffening at cell level (B3 showed 1.25 linear vs 1.08
   EPU fast at the centre node).
+
+### Results 2026-10-13: Level B4 (all 3 runs)
+
+- **Full BCC cell under prescribed motion:** the solid ≈ bare beams (-1.9 / +6.3 / +3.1 %); JOINT_FHS +21 / +29.5 /
+  +27 % too stiff (linear / EPU fast / EPU slow).
+- ~3/4 of the excess is the joint factors of the 4 vertical edge columns at the plate corners. Likely the fused-section
+  slices there include the plate-bonded in-plate struts (double-counting the clamp).
+- Switching plate-end factors off fixes r 1.0 (B4a +0.4 %, H1e stroke +1.5 %, peak +5.5 %) but makes r 1.5 too soft
+  (H1f +17 %): rejected; fix the slicing at plates instead (notes/15 "B4 results").
+- JOINT_FHS's selection by the F-series energy-curve error hid a +28 % peak-force error (F1e). Joint-model checks now
+  need a prescribed-motion case and the peak force.
