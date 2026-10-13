@@ -1,0 +1,278 @@
+1
+
+   Abaqus 2024                                  Date 13-Oct-2026   Time 09:55:06
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          B5d: simple cubic 2 x 2 cells (r 1.0): plate joints with 3 (corner), 4 (edge), 5 (centre) struts                                                                                                                                                                                                                                                                                                                                                                                                                                
+  *ELEMENT, TYPE=C3D10M, ELSET=CELL
+  *MATERIAL, NAME=EPU45_LIN
+  *DENSITY
+  *ELASTIC
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *SECTION CONTROLS, NAME=SCDIST, DISTORTION CONTROL=YES
+
+ ***WARNING: THE PARAMETER DISTORTION CONTROL ON THE *SECTION CONTROLS OPTION 
+             IS RELEVANT FOR SOLID ELEMENTS WHEREVER APPLICABLE. THIS WARNING 
+             CAN BE IGNORED IF THE FEATURE IS APPLIED TO SOLID ELEMENTS ONLY.
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *RIGID BODY, REF NODE=101481, TIE NSET=TOP
+  *RIGID BODY, REF NODE=101481, TIE NSET=TOP
+  *RIGID BODY, REF NODE=101481, TIE NSET=TOP
+  *RIGID BODY, REF NODE=101481, TIE NSET=TOP
+  *RIGID BODY, REF NODE=101481, TIE NSET=TOP
+  *RIGID BODY, REF NODE=101481, TIE NSET=TOP
+  *RIGID BODY, REF NODE=101481, TIE NSET=TOP
+  *BOUNDARY
+  *BOUNDARY, AMPLITUDE=RAMP
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *RIGID BODY, REF NODE=101481, TIE NSET=TOP
+  
+                               E L E M E N T   Q U A L I T Y  C H E C K S        
+  
+  
+ ***NOTES: DISTORTED ISOPARAMETRIC ELEMENTS: ANGLE BETWEEN ISOPARAMETRIC LINES 
+           IS LESS THAN 45 DEGREES OR GREATER THAN 135 DEGREES.
+  
+           TETRAHEDRAL QUALITY MEASURE: VOLUME OF TETRAHEDRON DIVIDED BY THE 
+           VOLUME OF EQUILATERAL TETRAHEDRON WITH SAME CIRCUMSPHERE RADIUS; 
+           0 FOR DEGENERATE TETRAHEDRON AND 1 FOR EQUILATERIAL TETRAHEDRON. IT 
+           IS RECOMMENDED THAT THE TETRAHEDRAL QUALITY MEASURE BE GREATER THAN 
+           0.02, THE MIN INTERIOR (DIHEDRAL) ANGLE BE GREATER THAN 10 DEGREES, 
+           AND THE MAX INTERIOR (DIHEDRAL) ANGLE BE LESS THAN 160 DEGREES. 
+  
+           MODIFIED TETRAHEDRAL QUALITY MEASURE: ANGLES BETWEEN THE TWO LINE 
+           SEGMENTS ON EACH EDGE; THE EDGES OF MODIFIED TETRAHEDRAL SHOULD BE 
+           AS STRAIGHT AS POSSIBLE. IT IS RECOMMENDED THAT THE ANGLE BETWEEN 
+           THE TWO LINE SEGMENTS ON EACH EDGE IS BETWEEN 160 AND 180 DEGREES. 
+  
+           TRIANGULAR QUALITY MEASURE: AREA OF TRIANGLE DIVIDED BY THE AREA OF 
+           EQUILATERAL TRIANGLE WITH SAME CIRCUMCIRCLE RADIUS; 0 FOR DEGENERATE 
+           TRIANGLE AND 1 FOR EQUILATERAL TRIANGLE. IT IS RECOMMENDED THAT THE
+           TRIANGULAR QUALITY MEASURE BE GREATER THAN 0.01, THE MIN INTERIOR 
+           ANGLE BE GREATER THAN 10 DEGREES, AND THE MAX INTERIOR ANGLE BE LESS 
+           THAN 160 DEGREES. 
+  
+           NODAL ADJUSTMENTS ARISING FROM CONTACT INTERACTIONS AND/OR TIE 
+           CONSTRAINTS CAN CAUSE SEVERE ELEMENT DISTORTION. IT MAY BE NECESSARY 
+           TO REMESH IN ORDER TO REDUCE THE AMOUNT OF ADJUSTMENT. 
+
+ ***WARNING: 83 elements are distorted. Either the isoparametric angles are out 
+             of the suggested limits or the triangular or tetrahedral quality 
+             measure is bad. The elements have been identified in element set 
+             WarnElemDistorted.
+  
+ --------------------------------------------------------------------------------
+ Distorted tetrahedral elements
+  
+  Element  Quality measure     Min angle        Max angle     Adjusted nodes 
+ --------- ---------------- ---------------- ---------------- -------------- 
+      1267       0.00759004          8.26302          160.988       NO       
+      2218      0.000872029          7.19925          166.432       NO       
+      2977        0.0263067          4.40399          147.814       NO       
+      3520       0.00783061          12.7401           158.01       NO       
+      3664       0.00442304          10.1619          158.702       NO       
+      4866        0.0188882          20.7498          141.259       NO       
+      5072         0.019739          20.1499          140.326       NO       
+      5327        0.0176028          14.0012          147.968       NO       
+      5592        0.0147316          12.7428          155.264       NO       
+      5611        0.0148458          16.7357          154.455       NO       
+      6238      0.000641852          1.46975          160.689       NO       
+      6428        0.0187268           17.995          150.278       NO       
+      7600        0.0150485          12.3558           152.87       NO       
+      8058        0.0048172          13.0299          160.319       NO       
+      8160        0.0117671          9.69257          155.198       NO       
+      9071       0.00436269          11.1377          160.885       NO       
+     10350      0.000419828          1.25499          161.252       NO       
+     11880         0.018108          9.43753          155.353       NO       
+     13792        0.0028042          7.62661          162.824       NO       
+     14432        0.0118723          11.4672          154.021       NO       
+     16197      0.000798472          9.79647          166.054       NO       
+     16747        0.0192627          19.7236          145.385       NO       
+     17313       0.00407609          9.70681          161.549       NO       
+     21501        0.0127011          13.1091          149.395       NO       
+     21660        0.0114658          13.2242          155.665       NO       
+     21680        0.0038995          9.42558          164.311       NO       
+     21759        0.0103113          16.9638          152.479       NO       
+     22126       0.00555388           7.7556          158.286       NO       
+     22199        0.0155144          17.8363          151.763       NO       
+     22211       0.00907234          12.1515          158.911       NO       
+     22453        0.0181412           14.387          150.352       NO       
+     22693        0.0111143          15.0724          156.439       NO       
+     23875        0.0127608          18.1431           150.17       NO       
+     24946       0.00277712          7.68803          161.643       NO       
+     25015        0.0190558          15.5693          160.433       NO       
+     25089        0.0118709          20.1937          159.118       NO       
+     25774       0.00527337          15.9333          161.604       NO       
+     25795        0.0152903          10.4387          127.848       NO       
+     25829        0.0132189          12.7875          146.585       NO       
+     25836        0.0165872          16.4723          144.369       NO       
+     26231      8.25542E-07         0.988467          177.934       NO       
+     26371       0.00633632          11.0278          158.714       NO       
+     27940        0.0192669           18.354          150.577       NO       
+     30217       0.00800372          10.4371          159.313       NO       
+     31078        0.0760723          5.92896          99.4073       NO       
+     31183       0.00976009          11.0988          160.577       NO       
+     31635       0.00969518          11.3044          153.832       NO       
+     32295      0.000111294          3.90825          172.849       NO       
+     32527       0.00295851          6.68655          159.605       NO       
+     33136        0.0038716          7.72099          159.188       NO       
+     33729        0.0171391           9.5397          150.737       NO       
+     34073        0.0146746          20.2328          148.264       NO       
+     35817        0.0077388          9.65522          158.347       NO       
+     37103        0.0166313          14.4546            148.3       NO       
+     37587       0.00128963          19.1727          161.936       NO       
+     38603        0.0168571          15.9325          154.411       NO       
+     38741        0.0109197          14.3686          158.668       NO       
+     40183        0.0185949          8.92687          155.001       NO       
+     41318        0.0112848          14.8312          153.226       NO       
+     41513        0.0143996           12.147          147.467       NO       
+     42243        0.0110489          11.9421          155.253       NO       
+     42274        0.0176631          20.3451          148.901       NO       
+     42676       0.00637828          8.19868          161.003       NO       
+     42760       0.00684847          22.8352          151.936       NO       
+     42778       0.00144663          7.54643          162.432       NO       
+     43522        0.0018483          7.45043          163.917       NO       
+     43542         0.113566          9.37914          158.434       NO       
+     43563        0.0197115          7.93022          155.449       NO       
+     44073       0.00100544          1.74226          159.906       NO       
+     46050       0.00218434           7.3959          165.724       NO       
+     46060         0.011285          11.7229          155.687       NO       
+     46182       0.00327437          13.7225          158.432       NO       
+     47876       0.00214794          5.83967          162.517       NO       
+     47991        0.0288804          4.96832          143.435       NO       
+     47992        0.0240507          5.55863          138.398       NO       
+     47997        0.0144812          26.5711          136.074       NO       
+     48014       0.00203129          17.1283          161.705       NO       
+     49038       0.00286757          7.36061          162.349       NO       
+     50277       0.00530305          17.5374          146.364       NO       
+     50333       0.00907701          13.6037          156.433       NO       
+     51650        0.0171528          13.8334          153.897       NO       
+     52639        0.0117931           13.762          144.459       NO       
+     52652      1.68169E-05          1.42746          174.602       NO       
+  
+  
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *FIXED MASS SCALING, DT=1.43991e-08, TYPE=BELOW MIN
+  *BOUNDARY, AMPLITUDE=RAMP
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *NODE OUTPUT, NSET=REF
+  *NODE OUTPUT, NSET=BOT
+  *ENERGY OUTPUT
+  *END STEP
+  *BOUNDARY
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *BOUNDARY, AMPLITUDE=RAMP
+
+ ***WARNING: THE OPTION *BOUNDARY,TYPE=DISPLACEMENT HAS BEEN USED; CHECK STATUS 
+             FILE BETWEEN STEPS FOR WARNINGS ON ANY JUMPS PRESCRIBED ACROSS THE 
+             STEPS IN DISPLACEMENT VALUES OF TRANSLATIONAL DOF. FOR ROTATIONAL 
+             DOF MAKE SURE THAT THERE ARE NO SUCH JUMPS. ALL JUMPS IN 
+             DISPLACEMENTS ACROSS STEPS ARE IGNORED
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                 53980
+          NUMBER OF NODES IS                                   155461
+          NUMBER OF NODES DEFINED BY THE USER                  101481
+          NUMBER OF INTERNAL NODES GENERATED BY THE PROGRAM     53980
+          TOTAL NUMBER OF VARIABLES IN THE MODEL               486774
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =      1.2    
+       SYSTEM TIME (SEC)    =     0.10    
+       TOTAL CPU TIME (SEC) =      1.3    
+       WALLCLOCK TIME (SEC) =            2
