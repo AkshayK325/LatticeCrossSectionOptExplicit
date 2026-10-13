@@ -716,3 +716,12 @@ Linear twins (ours = Timoshenko fixed-guided within 0.7-0.9 %): B1f_lin -2.49 N,
   why (e.g. near-incompressibility once relaxed, or the joint zone's strain rate) before changing the joint model.
 - **B1f_lin / B1g_lin show the same -5 / -9 % as the EPU 45 B1f / B1g** → the bending gap is the geometric
   clamped-end effect, not the material.
+
+### Results 2026-10-12: Level B3 (all 5 runs)
+
+Ours (JOINT_FHS) vs Abaqus on the BCC centre node alone:
+- linear -7.8 %; EPU 45 fast +2.5 %; EPU 45 slow -4.2 % (reaction at the end of the ramp); ours slightly soft.
+- The solid joint stiffening is material / rate dependent: 1.25 / 1.08 / 1.18 against ours 1.16 / 1.11 / 1.13.
+- Linear bending twins: -4.4 / -7.9 % (EPU 45: -5.3 / -9.4 %), so the B1 bending gap is the geometric end effect.
+- **Conclusion:** the centre node does not cause the H1e excess stiffness. Next: B4 (full BCC cell, prescribed
+  motion; notes/15 "B3 results").

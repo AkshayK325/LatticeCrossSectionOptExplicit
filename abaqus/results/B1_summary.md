@@ -28,3 +28,7 @@ Ours with the Prony branches relaxing the nominal axial force (current) or the K
 | B1e2 | ours, nominal | 1.037 | -0.5877 | -0.1051 | -0.5073 |
 | B1e2 | ours, kirchhoff | 1.037 | -0.5877 | -0.1051 | -0.5073 |
 | B1e2 | **Abaqus** | 1.058 | -0.6009 | -0.1113 | -0.5448 |
+| B1f_lin | ours (linear E0) | 2.491 | -2.491 | -2.49 | -1.364 |
+| B1f_lin | **Abaqus** | 2.605 | -2.605 | -2.604 | -1.427 |
+| B1g_lin | ours (linear E0) | 8.096 | -8.096 | -8.096 | -2.219 |
+| B1g_lin | **Abaqus** | 8.788 | -8.788 | -8.788 | -2.414 |
