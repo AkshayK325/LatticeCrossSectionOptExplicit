@@ -848,7 +848,7 @@ def mirror_at_plates(X, conn, radii, z_range, tol=1e-9):
 
 def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, anchor=10.0, n_min=16,
                 limit=True, mid=3.0, mirror=False, ball=True, contain=True, tol=0.02, strong=1e1, sections=None,
-                corner_radius=CORNER_RADIUS, corner_radius_abs=0.0):
+                corner_radius=CORNER_RADIUS, corner_radius_abs=0.0, plate_push='own'):
     """FHS (Faired Hull-Subdivision) node joints for a whole lattice (algorithm: notes/13_FHS_NodeAlgorithm.md). Every node of degree >= 2 gets a node
     patch (convex hull of its node rings + core rings, ring caps removed); every strut a control tube between the
     node rings at its two ends; the whole control mesh is Loop-subdivided, the node regions are faired in one
@@ -1075,11 +1075,15 @@ def lattice_fhs(X, conn, radii, z_range=None, levels=2, lead=1.0, free_len=1.0, 
         # cleanly instead of having vertices exactly on the symmetry plane
         cuts = [z_range[0] + 2 * PLATE_GAP, z_range[1] - 2 * PLATE_GAP] if mirror else list(z_range)
         # keep vertices >= PLATE_GAP off the cut planes (pushed away on their own side): the trim then never cuts
-        # within 5 um of a vertex, so it leaves no micro-edges (they made gmsh's surface reparametrisation hang)
-        for z0 in cuts:
+        # within 5 um of a vertex, so it leaves no micro-edges (they made gmsh's surface reparametrisation hang).
+        # plate_push='out' sends them to the trimmed-off side instead: with a ring row lying in the plate (struts in
+        # the plate plane) 'own' can leave a 5 um strip of needle triangles that gmsh cannot parametrise (B5c r 1.5,
+        # 2026-10-13); neither rule passes gmsh for every cell, so callers retry with the other one
+        for z0, side in zip(cuts, (-1.0, 1.0)):
             d = Vn[:, 2] - z0
             near = np.abs(d) < PLATE_GAP
-            Vn[near, 2] = z0 + np.where(d[near] >= 0, PLATE_GAP, -PLATE_GAP)
+            out = np.full(near.sum(), side) if plate_push == 'out' else np.where(d[near] >= 0, 1.0, -1.0)
+            Vn[near, 2] = z0 + out * PLATE_GAP
     man = m3.Manifold(m3.Mesh(np.ascontiguousarray(Vn, np.float32), np.ascontiguousarray(F2, np.uint32)))
     if man.status() != m3.Error.NoError:
         raise RuntimeError(f'faired lattice is not a manifold: {man.status()}')

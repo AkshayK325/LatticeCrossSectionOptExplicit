@@ -207,10 +207,15 @@ def _fhs_slicer(lat, r_beam, z_lo, z_hi):
 
 
 def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0, decay=None, joint_shape='sphere',
-                          extension=0.0, rounded=False):
+                          extension=0.0, rounded=False, plate_layer=False):
     """joint_shape: 'sphere' (gmsh/Abaqus validation solids: sphere of the largest radius at each node), 'hull'
     (beamBuild print STLs: convex hull of the strut end caps, which always lies inside that sphere) or 'fhs' (the
-    FHS print joints, nodeJoint.lattice_fhs: exact slices of the FHS solid)."""
+    FHS print joints, nodeJoint.lattice_fhs: exact slices of the FHS solid).
+    plate_layer ('fhs'): at a strut end on a plate, the slice material within the plate-bonded layer (height = the
+    radius of the struts lying in that plate at that node) counts only inside the strut's own circle. That layer is
+    clamped by the plate already; counting it in the strut's fused section double-counted the clamp: the BCC cell's
+    vertical columns made JOINT_FHS 21-30 % too stiff vs the Abaqus solid under prescribed motion (notes/15 B4).
+    No strut in the plate -> no layer, no change."""
     """Per-element (ne, 6) factors for the resultants [N, T, My1, Mz1, My2, Mz2]: series averages over each
     element of the fused-section ratios in the element's own local axes (explicitFE.Frame rule)."""
     X, C, Xr, connr = lat['X'], lat['conn'], lat['Xr'], lat['connr']
@@ -222,6 +227,12 @@ def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0,
     prof = []
     node_hulls = _node_hulls(X, C, r_beam, extension=extension, rounded=rounded) if joint_shape == 'hull' else {}
     fhs = _fhs_slicer(lat, r_beam, z_lo, z_hi) if joint_shape == 'fhs' else None
+    layer = np.zeros(len(X))                                 # plate-bonded layer height per node (0: none)
+    if joint_shape == 'fhs' and plate_layer:
+        for b, (i, j) in enumerate(C):
+            for zp in (z_lo, z_hi):
+                if np.isclose(X[i, 2], zp) and np.isclose(X[j, 2], zp):     # strut lying in the plate
+                    layer[i], layer[j] = max(layer[i], r_beam[b]), max(layer[j], r_beam[b])
     ext_l = -min(extension, 0.0) if joint_shape == 'hull' else 0.0      # print struts stop this fraction short
     for b, (i, j) in enumerate(C):
         p, q = X[i], X[j]
@@ -247,8 +258,18 @@ def element_factors_aniso(lat, r_beam, ds_frac=0.05, n_grid=81, half_factor=3.0,
         if fhs is not None:                                  # exact FHS slices (the strut itself is part of the solid)
             u = np.linspace(-half, half, n_grid)
             Y, Z = np.meshgrid(u, u, indexing='ij')
-            R = np.array([_moments(fhs(b, p, x, y, z, min(max(sv, 1e-6), L - 1e-6), Y, Z), Y, Z, u, ra, n_grid, decay)
-                          for sv in sgrid])
+            own = Y ** 2 + Z ** 2 <= ra ** 2
+            ends = [(X[n, 2], layer[n]) for n in (i, j) if layer[n] > 0 and (np.isclose(X[n, 2], z_lo) or
+                                                                                np.isclose(X[n, 2], z_hi))]
+
+            def sliced(sv):
+                sv = min(max(sv, 1e-6), L - 1e-6)
+                m = fhs(b, p, x, y, z, sv, Y, Z)
+                for zp, hl in ends:                          # drop the plate-bonded layer outside the own circle
+                    zw = p[2] + sv * x[2] + Y * y[2] + Z * z[2]
+                    m = m & ~((np.abs(zw - zp) < hl) & ~own)
+                return m
+            R = np.array([_moments(sliced(sv), Y, Z, u, ra, n_grid, decay) for sv in sgrid])
         else:
             R = np.array([_slice_moments(p + sv * x, y, z, ra, cyl, sph, z_lo, z_hi, n_grid, half, decay, hl,
                                          own=ext_l == 0.0) for sv in sgrid])

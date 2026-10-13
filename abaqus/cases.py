@@ -1091,18 +1091,30 @@ def b3_lattice(c=B3):
             'beam_of_elem': np.repeat(np.arange(len(C)), n_per)}
 
 
-def b3_mesh(c=B3):
-    """FHS solid of the B3 star (lattice_fhs, trimmed to the plates) -> C3D10M, as the F / H cells."""
-    key = (c['r'], c['h'], c['H'])
+def b3_mesh(c=B3, lat=None, tag='B3_bcc_node'):
+    """FHS solid of the B3 star, or of the lattice `lat` (lattice_fhs, trimmed to the plates) -> C3D10M, as the F / H
+    cells."""
+    key = (tag, c.get('nx', 1), c.get('ny', 1), c['r'], c['h'], c['H'])
     if key not in _B3_cache:
         import nodeJoint as nj
         import solid
-        lat = b3_lattice(c)
-        stl = ROOT.parent / 'STL' / 'abaqus_b3' / f"B3_bcc_node_r{c['r']:g}_h{c['h']:g}.stl"
+        lat = b3_lattice(c) if lat is None else lat
+        stl = ROOT.parent / 'STL' / 'abaqus_b3' / f"{tag}_{c.get('nx', 1)}x{c.get('ny', 1)}_r{c['r']:g}_h{c['h']:g}.stl"
         stl.parent.mkdir(parents=True, exist_ok=True)
-        man, _ = nj.lattice_fhs(lat['X'], lat['conn'], np.full(8, c['r']), z_range=(0.0, c['H']))
-        nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
-        P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0, **F_MESH)
+        # nodeJoint plate_push and the 2D mesher: no single setting meshes every cell (B5, 2026-10-13), so try in turn
+        tries = [('own', F_MESH), ('out', F_MESH), ('out', dict(algo2d=6, smooth2d=0))]
+        for k, (push, fm) in enumerate(tries):
+            if k == 0 or push != tries[k - 1][0]:
+                man, _ = nj.lattice_fhs(lat['X'], lat['conn'], np.full(len(lat['conn']), c['r']),
+                                        z_range=(0.0, c['H']), plate_push=push)
+                nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
+            try:
+                P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0, **fm)
+                break
+            except Exception as e:
+                if k == len(tries) - 1:
+                    raise
+                print(f'{stl.name}: gmsh failed with plate_push {push}, {fm} ({e}); next: {tries[k + 1]}')
         P, T, nsl = solid.remove_boundary_slivers(P, T, 0.25 * c['h'])
         P10, T10 = solid.quadratic(P, T)
         bot = np.nonzero(np.isclose(P10[:, 2], 0.0, atol=1e-6))[0]
@@ -1194,7 +1206,8 @@ def b3_ours(c=B3, joint=None, lat=None):
         law = ViscoHyperLaw(fr, A, I, mat)
     if joint is not None:
         se, _ = jointSection.element_factors_aniso(lat, np.full(len(lat['conn']), c['r']), decay=joint.get('decay'),
-                                                   joint_shape=joint.get('shape', 'sphere'))
+                                                   joint_shape=joint.get('shape', 'sphere'),
+                                                   plate_layer=joint.get('plate_layer', False))
         law = JointScaledLaw(law, torch.as_tensor(se, dtype=A.dtype))
     m, j = lumped_mass(fr, A, I, mat['rho'])
     z = fr.X[:, 2]
@@ -1277,6 +1290,63 @@ def b4_inp(c):
 
 def b4_ours(c, joint=None):
     return b3_ours(c, joint, lat=b4_lattice(c))
+
+
+# ------------------------------------------------------------------------------------------------ B5
+# Simple cubic (SC) cells (notes/15 "B4 results"): no internal joint; one cell = 4 vertical columns ending in plate
+# corner joints (the 8 other edges lie in the plates, bonded); 2 x 2 cells add plate joints with 3 / 4 / 5 struts.
+# Prescribed plate motion as B3 / B4, 0.5 mm (3.9 %: an r 1.0 clamped column buckles at ~6 %). Current FHS geometry
+# for the solid and ours (consistent). Tests the plate-corner joint factors (jointSection plate_layer) without the
+# BCC diagonals, and how the stiffening changes with the joint type.
+B5 = dict(B3, name='B5a_sc_1x1_r10_linE0', cell='SC', nx=1, ny=1, r=1.0, amount=0.5, material='linear', t_hold=2e-4,
+          title='B5a: simple cubic 1 x 1 cell (12 edges r 1.0, FHS joints), LINEAR E0 = 342.9 MPa, nu 0.49; top plate '
+                'down 0.5 mm (smooth step 0.3 ms), hold 0.2 ms; bottom plate clamped; no contact')
+B5_CASES = {
+    'B5a': B5,
+    'B5b': dict(B5, name='B5b_sc_1x1_r10_EPU45_fast', material='epu45', t_hold=7e-4,
+                title='B5b: as B5a with EPU 45, hold 0.7 ms'),
+    'B5c': dict(B5, name='B5c_sc_1x1_r15_linE0', r=1.5, h=0.75,
+                title='B5c: as B5a with r 1.5 (h 0.75): thick struts at the plate corners'),
+    'B5d': dict(B5, name='B5d_sc_2x2_r10_linE0', nx=2, ny=2,
+                title='B5d: simple cubic 2 x 2 cells (r 1.0): plate joints with 3 (corner), 4 (edge), 5 (centre) struts'),
+}
+
+
+def b5_lattice(c):
+    """Simple cubic nx x ny x 1 cells of side H: edges along x and y in both plates + the vertical columns."""
+    from mesher import MeshFrame
+    H, nx, ny = c['H'], c['nx'], c['ny']
+    idx = {}
+    X = []
+    for k, z in enumerate((0.0, H)):
+        for jy in range(ny + 1):
+            for ix in range(nx + 1):
+                idx[ix, jy, k] = len(X)
+                X.append((ix * H, jy * H, z))
+    C = []
+    for k in (0, 1):
+        for jy in range(ny + 1):
+            for ix in range(nx + 1):
+                if ix < nx:
+                    C.append((idx[ix, jy, k], idx[ix + 1, jy, k]))
+                if jy < ny:
+                    C.append((idx[ix, jy, k], idx[ix, jy + 1, k]))
+    for jy in range(ny + 1):
+        for ix in range(nx + 1):
+            C.append((idx[ix, jy, 0], idx[ix, jy, 1]))
+    X, C = np.array(X, float), np.array(C)
+    Xr, connr = MeshFrame().refineFrameMeshElemSize(X, C, c['elemSize'])
+    L = np.linalg.norm(X[C[:, 1]] - X[C[:, 0]], axis=1)
+    return {'X': X, 'conn': C, 'Xr': Xr, 'connr': connr, 'elemSize': c['elemSize'],
+            'beam_of_elem': np.repeat(np.arange(len(C)), np.rint(L / c['elemSize']).astype(int))}
+
+
+def b5_inp(c):
+    return b3_inp(c, g=b3_mesh(c, lat=b5_lattice(c), tag='B5_sc'))
+
+
+def b5_ours(c, joint=None):
+    return b3_ours(c, joint, lat=b5_lattice(c))
 
 
 # ------------------------------------------------------------------------------------------------ A3s
@@ -1514,6 +1584,8 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
             for k, v in B3_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b4_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B4_CASES.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b5_inp(v)), ours=(lambda v=v: b5_ours(v, JOINT_FHS)), joint=JOINT_FHS)
+            for k, v in B5_CASES.items()},
          # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape
          # is added to the joint model (notes/15)
          'F1a': dict(spec=F1a, inp=lambda: b2_inp(F1a), ours=lambda: a4_ours(dict(F1a, joint=JOINT_FHS)),

@@ -781,3 +781,73 @@ joints + edges are ~10 points of it.
   (H1f +17 %): rejected; fix the slicing at plates instead (notes/15 "B4 results").
 - JOINT_FHS's selection by the F-series energy-curve error hid a +28 % peak-force error (F1e). Joint-model checks now
   need a prescribed-motion case and the peak force.
+
+## Level B5: simple cubic cells (no internal joint), new 2026-10-13
+
+Why: B4 put ~3/4 of the JOINT_FHS excess on the plate corner joints of the vertical columns. A simple cubic (SC) cell
+has **no internal joint at all**: 4 vertical columns (plate to plate, axial) and 8 edges lying in the plates (cut in
+half, bonded). Every joint is a plate joint, so SC isolates the plate-end factors with no BCC centre node or
+diagonals. 2 × 2 cells add plate joints with 4 struts (edge) and 5 struts (centre) next to the 3-strut corners: does
+the stiffening change with the joint type?
+
+Setup as B3 / B4: top plate (rigid body REF) down 0.5 mm by a smooth step in 0.3 ms, then hold; bottom plate clamped;
+no impactor, no contact. 0.5 mm = 3.9 % strain, because an r 1.0 clamped column buckles at ~6 %. Solid and joint
+factors both use the **current** FHS geometry.
+
+| case (abaqus/inp) | test | mesh | T | est. wall time |
+|---|---|---|---|---|
+| B5a_sc_1x1_r10_linE0 | 1 × 1 SC, r 1.0, linear E0, ν 0.49 | 21.8k C3D10M, h 0.5 | 0.5 ms | ~5 min |
+| B5b_sc_1x1_r10_EPU45_fast | as B5a, EPU 45, hold 0.7 ms | 21.8k | 1 ms | ~10 min |
+| B5c_sc_1x1_r15_linE0 | 1 × 1 SC, r 1.5 (L/r 8.5), linear | 15.1k, h 0.75 | 0.5 ms | ~5 min |
+| B5d_sc_2x2_r10_linE0 | 2 × 2 SC, r 1.0, linear: plate joints with 3 / 4 / 5 struts | 54.0k, h 0.5 | 0.5 ms | ~15 min |
+
+Order: B5a, B5c, B5d (linear: geometry only), then B5b. Then
+`PYTHONPATH=src:tests python abaqus/b5_predict.py`. Outputs as B3 / B4 (RF3 summed on BOT, U3 / V3 of REF, energies).
+
+**Meshing note:** the in-plate struts put a ring row of the FHS surface on the plate plane. Depending on the cell,
+gmsh failed on the trimmed STL, either "wrong topology for parametrization" (B5c, a 5 µm strip of needle triangles)
+or "overlapping facets" (B5d). Fix: `nodeJoint.lattice_fhs(plate_push='own' | 'out')` chooses the side the
+near-plane vertices are pushed to. `b3_mesh` tries own, then out, then out with algo2d 6. Used: B5a own, B5c out,
+B5d out + algo2d 6. The default stays 'own', so earlier geometries are unchanged.
+
+**Blind predictions** (reaction at the end of the ramp; stiffening vs bare beams):
+
+| case | bare | JOINT_FHS | JOINT_FHS + plate_layer | stiffening JOINT_FHS / + plate_layer |
+|---|---|---|---|---|
+| B5a 1×1 r 1.0 linear | 169.4 N | 187.5 N | 171.7 N | 1.107 / 1.014 |
+| B5b 1×1 r 1.0 EPU 45 fast | 24.4 N | 27.0 N | 24.8 N | 1.107 / 1.014 |
+| B5c 1×1 r 1.5 linear | 381.1 N | 444.1 N | 389.5 N | 1.165 / 1.022 |
+| B5d 2×2 r 1.0 linear | 381.1 N | 428.1 N | 388.3 N | 1.123 / 1.019 |
+
+(B5c and B5d bare are equal by construction: the columns carry the load axially, and 4 × 1.5² = 9 × 1.0² in area.)
+
+**What decides what:**
+- **Solid ≈ bare (≤ ~3 %)** → the plate-bonded layer adds no stiffening (the B4 reading). plate_layer is right in
+  kind, and what is left of the B4 / H excess is elsewhere (diagonals at the plate corners).
+- **Solid ≈ JOINT_FHS (+11-17 %)** → the plate-end factors are right for columns alone, so the B4 excess comes from how
+  the diagonal and the columns interact at the BCC corner.
+- **B5c vs B5a:** the radius trend of the plate-end stiffening (the crude "off" rule failed at r 1.5).
+- **B5d vs B5a:** the joint-type trend. 4- and 5-strut plate joints have more in-plate material around each
+  column; JOINT_FHS predicts +1.6 points more than B5a, plate_layer +0.5.
+
+### plate_layer test (ours only, 2026-10-13): fails the targets, kept as an option (default off)
+
+`jointSection.element_factors_aniso(plate_layer=True)`: at a strut end on a plate, remove from each slice the
+material within the plate-bonded layer (height = radius of the in-plate struts at that node), except the strut's
+own circle. Errors vs Abaqus, off → on:
+
+| case | metric | off | plate_layer on |
+|---|---|---|---|
+| B4a linear (prescribed) | end of ramp / ramp work | +21.0 / +13.0 % | +11.1 / +3.5 % |
+| B4b EPU fast (prescribed) | end of ramp / ramp work | +29.5 / +17.9 % | +18.6 / +7.5 % |
+| B3a / B3b (no plate joints) | end of ramp | -7.8 / +2.5 % | unchanged ✔ |
+| H1e BCC r 1.0 | stroke / E75 / peak | -11.7 / +10.8 / +26.3 % | -5.6 / +3.3 / +14.9 % |
+| H1f BCC r 1.5 | stroke / E75 / peak | -5.6 / +5.0 / +4.1 % | +5.0 / -7.0 / -1.2 % |
+| F1e BCC r 1.0 (lin) | stroke / E75 / peak | -1.6 / -5.4 / +28.2 % | +2.6 / -13.0 / +27.2 % |
+| F1f BCC r 1.5 (lin) | stroke / E75 / peak | -1.1 / -6.8 / -4.5 % | +5.9 / -16.8 / +0.2 % |
+| H1c C4 | stroke / E75 / peak | +3.4 / -3.5 / -10.3 % | +3.5 / -3.5 / -10.1 % |
+| H1d C12 | stroke / E75 / peak | -3.5 / +3.2 / -11.3 % | -2.3 / +2.0 / -18.2 % |
+| H1a C4 | stroke / E75 / peak | -1.5 / -0.4 / -3.3 % | -1.6 / -0.4 / -2.4 % |
+
+- Halves the B4 / H1e excess but does not reach ±5 %; makes r 1.5 (H1f, F1f) and F1e too soft in energy, C12 peak
+  worse. **Not adopted**: plate_layer=False stays the default; the B5 runs decide the plate-end factor directly.
