@@ -1292,6 +1292,24 @@ def b4_ours(c, joint=None):
     return b3_ours(c, joint, lat=b4_lattice(c))
 
 
+# ------------------------------------------------------------------------------------------------ B6
+# B4 again with the CURRENT FHS geometry (B4 / H1e used the one before 2026-10-11): is the B4 anomaly (solid ~ bare
+# beams, while the simple cubic solids are +12-19 %) the old geometry or the model? Same lattice, loading and
+# prescribed motion as B4a / B4b; the solid is built here (b3_mesh) instead of read from H1e's .inp.
+B6_CASES = {
+    'B6a': dict(B4_CASES['B4a'], name='B6a_bcc_cell_newgeom_linE0_fast',
+                title='B6a: as B4a with the current FHS geometry (new solid mesh), LINEAR E0 = 342.9 MPa, nu 0.49; top plate '
+                      'down 1.0 mm (smooth step 0.3 ms), hold 0.2 ms; bottom plate clamped; no contact'),
+    'B6b': dict(B4_CASES['B4b'], name='B6b_bcc_cell_newgeom_EPU45_fast',
+                title='B6b: as B4b with the current FHS geometry (new solid mesh), EPU 45; top plate down 1.0 mm '
+                      '(smooth step 0.3 ms), hold 0.7 ms; bottom plate clamped; no contact'),
+}
+
+
+def b6_inp(c):
+    return b3_inp(c, g=b3_mesh(c, lat=b4_lattice(c), tag='B6_bcc'))
+
+
 # ------------------------------------------------------------------------------------------------ B5
 # Simple cubic (SC) cells (notes/15 "B4 results"): no internal joint; one cell = 4 vertical columns ending in plate
 # corner joints (the 8 other edges lie in the plates, bonded); 2 x 2 cells add plate joints with 3 / 4 / 5 struts.
@@ -1584,6 +1602,8 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
             for k, v in B3_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b4_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B4_CASES.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b6_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
+            for k, v in B6_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b5_inp(v)), ours=(lambda v=v: b5_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B5_CASES.items()},
          # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape
