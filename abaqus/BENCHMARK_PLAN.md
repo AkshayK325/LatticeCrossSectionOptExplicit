@@ -984,3 +984,41 @@ sin^p weight, near 1.2-1.4 means acute neighbours do stiffen (the geometric zone
 ### Data housekeeping (2026-10-16)
 The 188 `*_field_U*.csv` frame dumps (7.0 GB; nothing reads them) were removed from the tree and git-ignored; they stay in git history and can be re-extracted
 from the odb. `abaqus/README.md` updated (copy only the history CSV).
+
+### Results 2026-10-17: B8 valid; B7 invalid and redesigned (supersedes the B7 definition and predictions above)
+
+**B7 (first version) was invalid and its outputs were deleted.** The solid reaction was 24.5 / 16.0 / 5.9 N against 70 / 57 / 48 N for bare beams, i.e. the
+oblique strut alone. Cause: in the .inp, the vertical column ended 5 um short of BOTH plates (nodes at z = 6.345 instead of 6.350), so neither end was in the BOT /
+TOP sets and the column was neither clamped nor tied. A strut end lying exactly ON the plate plane gets its end ring pushed 5 um to the wrong side by
+`nodeJoint.PLATE_GAP`; in B3 / B5 / B6 / B8 it never mattered (oblique ends are cut at an angle; B5 / B6 columns have in-plate struts). Audit of all other prescribed-motion
+solids (B3a-c, B4a, B5a-d, B6a-b, B8a-b): every plate end reaches its plate. Safeguards added: `cases._check_plate_ends` (raises if a plate strut end has < 6 mesh nodes
+on its plate) and `extend_ends` (single-strut plate ends are moved outward along the strut before the trim, so the cut face is full).
+
+**New B7a-c (inputs regenerated, to be re-run):** a vertical column (r 1.0, H 12.7) with a T-joint at mid height and ONE oblique strut from that node up to the top plate,
+at 30 / 45 / 60 deg to the column; 0.5 mm, linear; 4.2k / 3.9k / 5.4k C3D10M; each plate end has a full 80-node face. Blind predictions (hold value / bare beams):
+
+| case | JOINT_FHS | rule M3 | rule without angle weight (p = 0) |
+|---|---|---|---|
+| B7a 30 deg | 1.191 | **1.002** | 1.159 |
+| B7b 45 deg | 1.133 | **1.016** | 1.141 |
+| B7c 60 deg | 1.097 | **1.044** | 1.111 |
+
+(The earlier numbers 1.00 / 1.39 were for the invalid geometry.) The discriminating run is B7a: the angle-weighted rule predicts no stiffening from an acute neighbour,
+the others 16-19 %.
+
+**B8 (valid, blind):** solid reaction vs the models. The linear solid RINGS after the ramp (hold: +-5.5 % B3a, +-5.8 % B8a, +-6.1 % B8b, +-2.7 % B6a, +-0.6 % B5a; the beam
+model does not ring), so a single ramp-end or end-of-hold sample of the solid carries that noise. The static value is the MEAN over the hold window:
+
+| case | n | solid ramp-end | solid hold mean | solid hold / bare | JOINT_FHS | rule M3 | no angle weight |
+|---|---|---|---|---|---|---|---|
+| B8a | 4 | 36.20 | 34.67 | 1.112 | 1.053 (-5.3 %) | 1.038 (-6.6 %) | 1.056 (-5.0 %) |
+| B8b | 6 | 56.45 | 54.18 | 1.158 | 1.094 (-5.6 %) | **1.153 (-0.5 %)** | 1.091 (-5.8 %) |
+| B3a | 8 | 78.08 | 75.90 | 1.217 | 1.119 (-8.0 %) | 1.193 (-1.9 %) | - |
+
+- **The stiffening of an interior node grows steadily with its valence in the solid:** 1.112, 1.158, 1.217 for n = 4, 6, 8 (about +0.03 per extra strut).
+- **JOINT_FHS under-predicts by 5-8 % at every valence;** the rule without angle weight likewise.
+- **M3's valence growth is supported at n = 6 (blind, -0.5 %) and n = 8 (-1.9 %), but not at n = 4 (-6.6 %):** the solid is already 11 % stiffer than bare beams
+  with only 4 diagonals, while the rule gives 4 %. M3's growth is convex in n; the data are close to linear. So M3 is neither validated nor refuted: one blind hit, one miss.
+- **Methodology correction:** the B3 / B8 centre-node errors quoted so far (e.g. B3a -12.6 % for the old rule, -7.8 % for JOINT_FHS at the ramp end) included the solid's ringing
+  (+-5-6 %); with the hold mean they are -8.0 % (JOINT_FHS) and -1.9 % (M3). All earlier fits used single samples (ramp end, hold end) of the solid. They should be redone with the
+  hold-window mean (and with B7 / B8 added) before any parameter value is trusted.

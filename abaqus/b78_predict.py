@@ -27,9 +27,10 @@ def main(fit='M3'):
     models = (('bare beams', None), ('JOINT_FHS', cases.JOINT_FHS),
               (f'rule {fit} (p = {pa["p"]:.2f}, zl = {pa["zl"]:.2f}, b = {pa["b"]:.2f})', dict(mode='rule', **dict(pa, mu=1.0))),
               (f'rule without angle weight (p = 0, a = {pb["a"]:.2f})', dict(mode='rule', **dict(pb, mu=1.0))))
+    # the linear-elastic solid rings (+-6 % in B3 / B8, undamped), so its static value is the MEAN over the hold window
     L = ['# B7 / B8: column + oblique strut, centre node valence 4 / 6 (current FHS geometry, linear, prescribed motion)', '',
-         'Reaction = sum RF3 at the bottom plate, end of the ramp [N]; stiffening = / bare beams (ours).', '',
-         '| case | model | end of ramp [N] | end of hold [N] | stiffening vs bare |', '|---|---|---|---|---|']
+         'Reaction = sum RF3 at the bottom plate [N]. For the Abaqus rows the hold column is the MEAN over the last 70 % of the hold (the linear solid rings by +-6 % after the ramp); stiffening = hold value / bare beams hold value.', '',
+         '| case | model | end of ramp [N] | hold [N] (solid: mean) | stiffening vs bare (hold) |', '|---|---|---|---|---|']
     for case in ('B7a', 'B7b', 'B7c', 'B8a', 'B8b'):
         sp = cases.CASES[case]['spec']
         res = {}
@@ -44,9 +45,12 @@ def main(fit='M3'):
             lb = compare.labels(case)
             rf, ud = compare.pick(ab, 'RF3', ('sum', lb['bot'])), compare.pick(ab, 'U3', ('node', lb['ref']))
             res['**Abaqus solid**'] = stats(rf[0], np.interp(rf[0], *ud), rf[1], sp)
-        b = res['bare beams']['ramp_end']
+            tr, te = sp['t_ramp'], sp['t_ramp'] + sp['t_hold']
+            w = (rf[0] > tr + 0.3 * (te - tr)) & (rf[0] <= te)
+            res['**Abaqus solid**']['hold_end'] = float(np.mean(rf[1][w]))
+        bh = res['bare beams']['hold_end']
         for lab, s in res.items():
-            L.append(f"| {case} | {lab} | {s['ramp_end']:.4g} | {s['hold_end']:.4g} | {s['ramp_end'] / b:.3f} |")
+            L.append(f"| {case} | {lab} | {s['ramp_end']:.4g} | {s['hold_end']:.4g} | {s['hold_end'] / bh:.3f} |")
         print(chr(10).join(L[-len(res):]), flush=True)
     (ROOT / 'results' / 'B78_summary.md').write_text(chr(10).join(L) + chr(10))
 

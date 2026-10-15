@@ -1,26 +1,28 @@
 # B7 / B8: column + oblique strut, centre node valence 4 / 6 (current FHS geometry, linear, prescribed motion)
 
-Reaction = sum RF3 at the bottom plate, end of the ramp [N]; stiffening = / bare beams (ours).
+Reaction = sum RF3 at the bottom plate [N]. For the Abaqus rows the hold column is the MEAN over the last 70 % of the hold (the linear solid rings by +-6 % after the ramp); stiffening = hold value / bare beams hold value.
 
-| case | model | end of ramp [N] | end of hold [N] | stiffening vs bare |
+| case | model | end of ramp [N] | hold [N] (solid: mean) | stiffening vs bare (hold) |
 |---|---|---|---|---|
-| B7a | bare beams | 69.93 | 69.95 | 1.000 |
-| B7a | JOINT_FHS | 85.61 | 85.59 | 1.224 |
-| B7a | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 70.16 | 70.17 | 1.003 |
-| B7a | rule without angle weight (p = 0, a = 1.30) | 97.5 | 97.51 | 1.394 |
-| B7b | bare beams | 57.4 | 57.39 | 1.000 |
-| B7b | JOINT_FHS | 66.43 | 66.42 | 1.157 |
-| B7b | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 58.85 | 58.86 | 1.025 |
-| B7b | rule without angle weight (p = 0, a = 1.30) | 71.78 | 71.74 | 1.250 |
-| B7c | bare beams | 47.7 | 47.71 | 1.000 |
-| B7c | JOINT_FHS | 53.54 | 53.51 | 1.122 |
-| B7c | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 50.88 | 50.85 | 1.067 |
-| B7c | rule without angle weight (p = 0, a = 1.30) | 55.89 | 55.86 | 1.172 |
+| B7a | bare beams | 43.91 | 44.45 | 1.000 |
+| B7a | JOINT_FHS | 52.3 | 52.89 | 1.190 |
+| B7a | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 44 | 44.53 | 1.002 |
+| B7a | rule without angle weight (p = 0, a = 1.30) | 50.9 | 51.52 | 1.159 |
+| B7b | bare beams | 42.9 | 43.08 | 1.000 |
+| B7b | JOINT_FHS | 48.62 | 48.64 | 1.129 |
+| B7b | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 43.57 | 43.75 | 1.016 |
+| B7b | rule without angle weight (p = 0, a = 1.30) | 48.94 | 48.94 | 1.136 |
+| B7c | bare beams | 42.58 | 42.76 | 1.000 |
+| B7c | JOINT_FHS | 46.7 | 46.64 | 1.091 |
+| B7c | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 44.46 | 44.66 | 1.045 |
+| B7c | rule without angle weight (p = 0, a = 1.30) | 47.3 | 47.39 | 1.108 |
 | B8a | bare beams | 31.14 | 31.18 | 1.000 |
-| B8a | JOINT_FHS | 32.6 | 32.84 | 1.047 |
-| B8a | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 32.22 | 32.38 | 1.035 |
-| B8a | rule without angle weight (p = 0, a = 1.30) | 32.68 | 32.93 | 1.050 |
+| B8a | JOINT_FHS | 32.6 | 32.84 | 1.053 |
+| B8a | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 32.22 | 32.38 | 1.038 |
+| B8a | rule without angle weight (p = 0, a = 1.30) | 32.68 | 32.93 | 1.056 |
+| B8a | **Abaqus solid** | 36.2 | 34.67 | 1.112 |
 | B8b | bare beams | 46.7 | 46.77 | 1.000 |
-| B8b | JOINT_FHS | 51.49 | 51.16 | 1.102 |
-| B8b | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 54.73 | 53.93 | 1.172 |
-| B8b | rule without angle weight (p = 0, a = 1.30) | 50.8 | 51.05 | 1.088 |
+| B8b | JOINT_FHS | 51.49 | 51.16 | 1.094 |
+| B8b | rule M3 (p = 4.10, zl = 0.71, b = 0.53) | 54.73 | 53.93 | 1.153 |
+| B8b | rule without angle weight (p = 0, a = 1.30) | 50.8 | 51.05 | 1.091 |
+| B8b | **Abaqus solid** | 56.45 | 54.18 | 1.158 |

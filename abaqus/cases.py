@@ -1091,6 +1091,19 @@ def b3_lattice(c=B3):
             'beam_of_elem': np.repeat(np.arange(len(C)), n_per)}
 
 
+def _check_plate_ends(lat, P, c):
+    """Raise if a strut end lying on a plate has no mesh node ON that plate near it (B7, 2026-10-16: a vertical column ending
+    exactly on the plane stopped 5 um short of both plates, so the solid column was neither clamped nor tied: reaction = the
+    oblique strut only). Plate sets are found with atol 1e-6, so a face 5 um off the plane silently drops out."""
+    X, deg = lat['X'], np.bincount(np.asarray(lat['conn']).ravel(), minlength=len(lat['X']))
+    for n, x in enumerate(X):
+        for z in (0.0, c['H']):
+            if abs(x[2] - z) < 1e-9 and deg[n] > 0:
+                on = P[np.abs(P[:, 2] - z) < 1e-6]
+                if int((np.hypot(on[:, 0] - x[0], on[:, 1] - x[1]) < c['r']).sum()) < 6:
+                    raise RuntimeError(f'strut end at node {n} {np.round(x, 3).tolist()} does not reach the plate z = {z}')
+
+
 def b3_mesh(c=B3, lat=None, tag='B3_bcc_node'):
     """FHS solid of the B3 star, or of the lattice `lat` (lattice_fhs, trimmed to the plates) -> C3D10M, as the F / H
     cells."""
@@ -1103,13 +1116,25 @@ def b3_mesh(c=B3, lat=None, tag='B3_bcc_node'):
         stl.parent.mkdir(parents=True, exist_ok=True)
         # nodeJoint plate_push and the 2D mesher: no single setting meshes every cell (B5, 2026-10-13), so try in turn
         tries = [('own', F_MESH), ('out', F_MESH), ('out', dict(algo2d=6, smooth2d=0))]
+        if c.get('plate_push'):                                    # B7: a vertical strut ending ON the plate needs 'out'
+            tries = [(c['plate_push'], F_MESH), ('out', dict(algo2d=6, smooth2d=0))]
+        Xf, Cf = lat['X'], lat['conn']
+        if c.get('extend_ends'):          # B7: move single-strut ends ON a plate outward along the strut, so the trim leaves a full flat face
+            deg = np.bincount(np.asarray(Cf).ravel(), minlength=len(Xf))
+            Xf = np.array(Xf, float)
+            for n in range(len(Xf)):
+                if deg[n] == 1 and (abs(Xf[n][2]) < 1e-9 or abs(Xf[n][2] - c['H']) < 1e-9):
+                    e = next(e for e in Cf if n in e)
+                    d = Xf[n] - Xf[e[1] if e[0] == n else e[0]]
+                    Xf[n] = Xf[n] + c['extend_ends'] * c['r'] * d / np.linalg.norm(d)
         for k, (push, fm) in enumerate(tries):
             if k == 0 or push != tries[k - 1][0]:
-                man, _ = nj.lattice_fhs(lat['X'], lat['conn'], np.full(len(lat['conn']), c['r']),
-                                        z_range=(0.0, c['H']), plate_push=push)
+                man, _ = nj.lattice_fhs(Xf, Cf, np.full(len(Cf), c['r']), z_range=(0.0, c['H']), plate_push=push,
+                                         mirror=bool(c.get('mirror')))
                 nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
             try:
                 P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0, **fm)
+                _check_plate_ends(lat, P, c)                       # every strut end on a plate must reach the plate
                 break
             except Exception as e:
                 if k == len(tries) - 1:
@@ -1374,17 +1399,18 @@ def b5_ours(c, joint=None):
 # ------------------------------------------------------------------------------------------------ B7 / B8
 # Two small specimens to constrain the angle and valence dependence of the joint rule (notes/18), current FHS geometry,
 # prescribed plate motion, linear E0, as B3 / B5 / B6.
-#  B7a-c: a vertical column plus ONE oblique strut from the same bottom plate node (angle theta to the column 30 / 45 / 60
-#         deg); the top ends are separate. Short struts (H = 6.35, L/r = 6.4) so that the end effect is a visible fraction
-#         of the stiffness. Tests how the column's end stiffening depends on the angle of ONE neighbour (rule weight
-#         sin^p theta); 30 deg is where the geometric zone is longest (3.7 r) and the rule says almost nothing.
+#  B7a-c: a vertical column with a T-joint at mid height and ONE oblique strut from that node up to the top plate (angle theta
+#         to the column 30 / 45 / 60 deg), r 1.0, H 12.7. (First version, with the oblique starting at the bottom plate node,
+#         was invalid: the solid column ends stopped 5 um short of both plates, so the column was neither clamped nor tied.)
+#         Tests how the column's joint stiffening depends on the angle of ONE neighbour (rule weight sin^p theta); 30 deg is
+#         where the geometric zone is longest (3.7 r) and the rule says almost nothing.
 #  B8a/b: a centre node with n = 4 / 6 diagonals (half up, half down, alternating azimuth, no collinear pairs), ends on
 #         the plates; B3 is n = 8 (4 collinear pairs). Tests the valence trend at an interior node (B3a is the case the
 #         rule underestimates by 12 %).
-B7 = dict(B3, name='B7b_column_oblique45_linE0', cell='T', r=1.0, h=0.5, H=6.35, amount=0.25, material='linear', t_hold=2e-4,
-          theta=45.0, elemSize=0.5,
-          title='B7b: column + one oblique strut (45 deg) from the bottom plate node, r 1.0, H 6.35, FHS joint, LINEAR E0, top '
-                'plate down 0.25 mm (smooth step 0.3 ms), hold 0.2 ms; bottom plate clamped; no contact')
+B7 = dict(B3, name='B7b_column_oblique45_linE0', cell='T', r=1.0, h=0.5, H=12.7, amount=0.5, material='linear', t_hold=2e-4,
+          theta=45.0, elemSize=0.5, plate_push='out', extend_ends=2.0,
+          title='B7b: column with a T-joint at mid height and one oblique strut (45 deg to the column) up to the top plate, r 1.0, H 12.7, '
+                'FHS joint, LINEAR E0, top plate down 0.5 mm (smooth step 0.3 ms), hold 0.2 ms; bottom plate clamped; no contact')
 B8 = dict(B3, name='B8a_bcc_node_n4_linE0', cell='N', n=4, material='linear', t_hold=2e-4, elemSize=1.0,
           title='B8a: centre node with 4 diagonals (r 1.0, FHS joint, ends on the plates), LINEAR E0, top plate down 1.0 mm '
                 '(smooth step 0.3 ms), hold 0.2 ms; bottom plate clamped; no contact')
@@ -1403,8 +1429,10 @@ def b78_lattice(c):
     from mesher import MeshFrame
     H = c['H']
     if c['cell'] == 'T':
-        X = np.array([[0, 0, 0], [0, 0, H], [H * np.tan(np.radians(c['theta'])), 0, H]], float)
-        C = np.array([[0, 1], [0, 2]])
+        # T-joint at mid height: column (0,0,0)-(0,0,H) split at (0,0,H/2), oblique from there up to the top plate at angle theta to
+        # the column. Every plate end is a single-strut end (no plate-node degeneracy), the joint is an interior FHS node.
+        X = np.array([[0, 0, 0], [0, 0, H / 2], [0, 0, H], [H / 2 * np.tan(np.radians(c['theta'])), 0, H]], float)
+        C = np.array([[0, 1], [1, 2], [1, 3]])
     else:
         d = 6.35 * np.sqrt(2.0)                                     # BCC diagonal: horizontal offset 8.98, half height 6.35
         n = c['n']
