@@ -1022,3 +1022,50 @@ model does not ring), so a single ramp-end or end-of-hold sample of the solid ca
 - **Methodology correction:** the B3 / B8 centre-node errors quoted so far (e.g. B3a -12.6 % for the old rule, -7.8 % for JOINT_FHS at the ramp end) included the solid's ringing
   (+-5-6 %); with the hold mean they are -8.0 % (JOINT_FHS) and -1.9 % (M3). All earlier fits used single samples (ramp end, hold end) of the solid. They should be redone with the
   hold-window mean (and with B7 / B8 added) before any parameter value is trusted.
+
+### Results 2026-10-17: B7 (valid) and the second fit (hold-window mean, 10 linear specimens, leave-one-group-out)
+
+**B7a-c (T-joint at mid height + one oblique strut, solid hold mean / bare beams):** 30 deg **1.292**, 45 deg **1.231**, 60 deg **1.160** (ringing only 0.2-0.4 %).
+Predictions: JOINT_FHS 1.190 / 1.129 / 1.091 (8-9 % low, right trend), first rule M3 1.002 / 1.016 / 1.045 (**refuted**: it said an acute neighbour adds nothing),
+rule without angle weight 1.159 / 1.136 / 1.108 (flat in angle). **The more acute the neighbour, the stiffer the joint** (geometric zone 3.7 r at 30 deg, 1.6 r at 60 deg):
+the sin^p weighting of the first fit was wrong in sign; the original geometric zone length was right. One oblique neighbour at mid height raises the column's reaction by
++35 % at 30 deg (the joint region is a stiff truss-like fused web, not only a shortened end).
+
+**Second fit** (`abaqus/fit_rule2.py`; data B3a, B5a/c/d, B6a, B7a-c, B8a/b; residual = hold-window mean of ours / solid - 1; groups SC, STAR, TJOINT, CELL left out in turn):
+
+| model (free) | in-sample rms / max | held-out per group (SC / STAR / TJOINT / CELL) | fitted |
+|---|---|---|---|
+| zone k = 3.5 (old, 1 constant) | 6.1 / 11.5 | - | - |
+| JOINT_FHS (no fit) | 6.1 / 8.5 | - | - |
+| R0 (a, zl) | 6.1 / 11.9 | 1.8 / 7.5 / 12.9 / 18.6 | a 5.94 (bound 6), zl 0.76 |
+| R1 (+ gamma) | 4.1 / 7.1 | 5.5 / 6.4 / 14.6 / 3.9 | a 5.9, zl 0.89, gamma 0.0 |
+| R2 (+ b) | 3.0 / 4.0 | 3.4 / 6.3 / 12.6 / 16.2 | a 5.27, zl 0.85, gamma 0.01, b 0.16 |
+| **R3 (+ p)** | **2.3 / 4.7** | **1.0 / 5.1 / 17.0 / 4.0** | a 5.69, zl 0.74, gamma 0.0, b 0.19, **p = -0.81** |
+
+- **Every fit pushes the gain a to its bound and gamma to 0:** the rule becomes a **rigid end zone** of length ~0.75-0.9 x the geometric zone, with in-plate-vs-oblique pairs at plates
+  ignored (gamma = 0) and a small growth with valence (b ~ 0.2). The standard "rigid extremity" model of the literature, with a geometric, radius-dependent, differentiable length.
+- **R3's negative angle exponent (more weight to acute neighbours) is cross-validated:** trained on SC + STAR + TJOINT it predicts the held-out BCC cell within +4.0 % (the first rule
+  needed the BCC cell itself to get p; R0 / R2 miss it by 16-19 %), and held-out SC within 1.3 %, STAR within 6.1 %.
+- **TJOINT held out fails for every model (13-17 %):** B7 is the only acute-angle data, so without it the fit cannot know; this is a data limit, not a model failure.
+- Parameters are stable across folds except in the TJOINT fold (which drops to a ~ 0.5 and p > 0, the old optimum).
+
+**Impact hold-out of R3 (never fitted on impact; `results/rule_fit2/impact_holdout_R3.md`), mean |error| stroke / E50 / E75 / peak:**
+
+| cells | recorded models | R3 |
+|---|---|---|
+| C4 and BCC (12: B2a/c/e/f, F1a/c/e/f, H1a/c/e/f) | 3.5 / 6.8 / 4.1 / 10.5 | **3.1 / 6.2 / 4.1 / 12.6** |
+| C12 and octet (5: B2d/g/h, F1d, H1d) | 3.4 / 5.3 / 5.6 / 4.3 | **16.3 / 25.5 / 23.2 / 28.3** |
+
+- **On C4 and BCC R3 is at least as good as JOINT_FHS in stroke and energy** (the C4 design lattice: B2a stroke -2.4, E50 +0.7 vs +2.1, -6.7) **but over-stiff by 10-28 % on C12 and octet**
+  (B2h octet r 1.5: stroke -28 %, peak +69 %).
+- Bounding the gain does not help (a = 1.5: prescribed 4.1 %, B2h -16 %; a = 3: 2.7 %, B2h -24 %): the over-stiffening comes from the zone LENGTH and the number of acute neighbours at
+  valence 6-12 nodes (zones overlap and cover most of a short strut), not from the gain. No prescribed-motion specimen has short struts or valence > 8 with acute angles,
+  so the fit never saw this.
+
+### Conclusions and status
+1. The B4 / B7 / B3 anomalies were specimen or measurement defects (old geometry, floating column, solid ringing); with correct data the physics is consistent: the joint stiffens more the
+   more acute the neighbour and the higher the valence, and the stiffening is additive over struts.
+2. **R3 is a validated differentiable joint model for the C4 design lattice and BCC-type cells** (held-out specimens within 1-6 %, impact within the accuracy of JOINT_FHS) with the exact adjoint gradient
+   (`tests/test_joint_rule_adjoint.py`); **it must NOT be used for C12 / octet / valence > 8 until constrained.** JOINT_FHS stays the reference where the lattice has short struts or many acute neighbours.
+3. Not done / next: a prescribed-motion specimen with short struts and high valence (a C12 cell and an octet cell, linear, 0.5 mm; B9) to constrain zone length and cap at high valence, then a refit
+   with leave-one-group-out including them; the EPU 45 factor (still unresolved, mu does not transfer); a derivative of the reaction w.r.t. the rule parameters through the solver (the fits are gradient-free).

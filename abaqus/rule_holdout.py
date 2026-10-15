@@ -1,7 +1,7 @@
 """Hold-out check of the joint rule on the IMPACT solids (not used for the fit): B2a-h (cylinder + sphere joints, linear), F1 (FHS,
 linear), H1 (FHS, EPU 45). Metrics as the H / F series: max stroke, energy absorbed at 50 / 75 % of the crush, peak force.
 Ours is run energy-matched to the solid (impactor KE at t = 0). `bare` = no joint model; `base` = the joint model recorded for the case (JOINT_SV for B2,
-JOINT_FHS for F / H); `rule:<fit.json>` = the fitted closed-form rule.
+JOINT_FHS for F / H); `rule:<fit.json>` = the first fitted rule (fit_rule.py), `rule2:<fit.json>` = fit_rule2.py rules (hold-window mean fits).
 NOTE: the F1e/f, H1e/f (BCC) and the other F / H solids were built with the pre-2026-10-11 FHS geometry; the BCC ones are
 known to be unreliable for stiffness (B4 vs B6), so they are reported but not used to judge.
     PYTHONPATH=src:tests python abaqus/rule_holdout.py <case> base|rule:<fit.json>      (one line, appended to results/rule_fit/holdout.log)"""
@@ -26,6 +26,9 @@ if model == 'bare':
     joint = None
 elif model == 'base':                                # the joint model recorded for the case: JOINT_SV (B2, sphere joints), JOINT_FHS (F / H)
     joint = cases.JOINT_SV if case.startswith('B2') else c.get('joint', spec.get('joint'))
+elif model.startswith('rule2:'):                    # fit_rule2 parameters (mu = 1, linear fit; pz = p, gamma)
+    import fit_rule2
+    joint = fit_rule2.joint_of(json.loads(pathlib.Path(model[6:]).read_text())['params'])
 else:
     par = json.loads(pathlib.Path(model[5:]).read_text())['params']
     epu = spec.get('material', 'epu45') == 'epu45' and case.startswith('H')

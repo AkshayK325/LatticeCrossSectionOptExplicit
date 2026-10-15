@@ -81,3 +81,20 @@ def test_rule_factors_basic_and_gradient():
     d = torch.zeros_like(r); d[::7] = 1.0; h = 1e-6
     fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
     assert abs(float((g * d).sum()) - float(fd)) < 1e-6 * max(1.0, abs(float(fd)))
+
+
+def test_rule_factors_new_parameters():
+    """pz (zone exponent), negative p and gamma (pairs leaving a plate) keep factors >= 1 and the radii gradient exact."""
+    import jointRule
+    lat = example3(elemSize=1.0, nx=1, ny=1)
+    r = torch.full((len(lat['connr']),), 0.6, dtype=torch.float64, requires_grad=True)
+    f = lambda rr: jointRule.rule_factors(lat, rr, a=1.1, p=-1.0, zl=1.2, b=0.2, pz=0.0, gamma=0.4).sum()
+    s = jointRule.rule_factors(lat, r.detach(), a=1.1, p=-1.0, zl=1.2, b=0.2, pz=0.0, gamma=0.4)
+    assert float(s.min()) >= 1.0 - 1e-12
+    s1 = jointRule.rule_factors(lat, r.detach(), a=1.1, p=-1.0, zl=1.2, gamma=1.0)
+    s0 = jointRule.rule_factors(lat, r.detach(), a=1.1, p=-1.0, zl=1.2, gamma=0.0)
+    assert float(s0.sum()) <= float(s1.sum()) + 1e-9
+    g, = torch.autograd.grad(f(r), r)
+    d = torch.zeros_like(r); d[::5] = 1.0; h = 1e-6
+    fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
+    assert abs(float((g * d).sum()) - float(fd)) < 1e-6 * max(1.0, abs(float(fd)))

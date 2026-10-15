@@ -14,11 +14,14 @@ change moves the stiffening. Parameters (a, p, zl, b) are fitted in abaqus/fit_r
 import numpy as np
 import torch
 
-DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0)
+DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0)
 
 
-def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, tau=0.02):
-    """Per-element stiffness factors (ne,) >= 1, differentiable in r_elem (ne,) and in (a, p, zl, b, mu) if tensors."""
+def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, tau=0.02):
+    """Per-element stiffness factors (ne,) >= 1, differentiable in r_elem (ne,) and in (a, p, zl, b, mu, pz, gamma) if tensors.
+    p: angle exponent of the stiffness weight sin^p; pz: of the zone-length weight (default = p); a negative exponent weights
+    ACUTE neighbours more (B7: the solid stiffens more the more acute the neighbour). gamma in [0, 1]: weight of a pair of struts
+    that both LEAVE a plate at a plate node (B6: the oblique diagonal at a plate corner adds less than in-plate struts do)."""
     X, C = lat['X'], lat['conn']
     Xr, connr = lat['Xr'], lat['connr']
     boe_np = np.asarray(lat['beam_of_elem'])
@@ -28,7 +31,8 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, tau=0.02):
     cnt = torch.zeros(nb, dtype=dt).index_add(0, boe, torch.ones_like(r_elem))
     rb = torch.zeros(nb, dtype=dt).index_add(0, boe, r_elem) / cnt
     Lb = np.linalg.norm(X[C[:, 1]] - X[C[:, 0]], axis=1)
-    ends, nbrs, cs, sn = [], [], [], []
+    ends, nbrs, cs, sn, gm = [], [], [], [], []
+    zlo, zhi = float(X[:, 2].min()), float(X[:, 2].max())
     for b_, (i, j) in enumerate(C):
         for side, (node, other) in enumerate(((i, j), (j, i))):
             ta = (X[other] - X[node]) / Lb[b_]
@@ -41,16 +45,23 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, tau=0.02):
                 st = float(np.sqrt(max(1.0 - ct * ct, 0.0)))
                 if st < 1e-6:                                       # collinear: the same strut continuing
                     continue
-                ends.append(2 * b_ + side); nbrs.append(c); cs.append(ct); sn.append(st)
+                at_plate = abs(X[node, 2] - zlo) < 1e-9 or abs(X[node, 2] - zhi) < 1e-9
+                in_plane = lambda u: abs(u[2]) < 1e-9 * max(np.linalg.norm(u), 1.0)         # strut lies in the plate plane
+                both_out = at_plate and not in_plane(X[other] - X[node]) and not in_plane(X[o] - X[node])
+                ends.append(2 * b_ + side); nbrs.append(c); cs.append(ct); sn.append(st); gm.append(both_out)
     if not ends:
         return torch.ones(len(connr), dtype=dt)
     ends, nbrs = torch.as_tensor(ends), torch.as_tensor(nbrs)
     cs, sn = torch.tensor(cs, dtype=dt), torch.tensor(sn, dtype=dt)
     ra = rb[ends // 2]
-    w = sn ** p
+    pz = p if pz is None else pz
+    gmt = torch.as_tensor(gm)
+    gfac = torch.where(gmt, torch.as_tensor(gamma, dtype=dt), torch.ones((), dtype=dt))
+    w = sn ** p * gfac
+    wz = sn ** pz * gfac
     q = rb[nbrs] / ra
     W = torch.zeros(2 * nb, dtype=dt).index_add(0, ends, q * q * w)                   # per strut end
-    li = zl * w * torch.clamp((rb[nbrs] + ra * cs) / sn, min=0.0)
+    li = zl * wz * torch.clamp((rb[nbrs] + ra * cs) / sn, min=0.0)
     wt = tau * ra
     m0 = torch.full((2 * nb,), -torch.inf, dtype=dt).scatter_reduce(0, ends, li.detach(), 'amax')
     lse = torch.zeros(2 * nb, dtype=dt).index_add(0, ends, torch.exp((li - m0[ends]) / wt))
