@@ -1204,7 +1204,11 @@ def b3_ours(c=B3, joint=None, lat=None):
         law = lambda d: fr.elastic_law(d, A, I, mat['E0'], mat['G0'])
     else:
         law = ViscoHyperLaw(fr, A, I, mat)
-    if joint is not None:
+    if joint is not None and joint.get('mode') == 'rule':
+        import jointRule
+        se = jointRule.rule_factors(lat, r_e, **{k_: v for k_, v in joint.items() if k_ in jointRule.DEFAULT})
+        law = JointScaledLaw(law, se)
+    elif joint is not None:
         se, _ = jointSection.element_factors_aniso(lat, np.full(len(lat['conn']), c['r']), decay=joint.get('decay'),
                                                    joint_shape=joint.get('shape', 'sphere'),
                                                    plate_layer=joint.get('plate_layer', False))
@@ -1365,6 +1369,66 @@ def b5_inp(c):
 
 def b5_ours(c, joint=None):
     return b3_ours(c, joint, lat=b5_lattice(c))
+
+
+# ------------------------------------------------------------------------------------------------ B7 / B8
+# Two small specimens to constrain the angle and valence dependence of the joint rule (notes/18), current FHS geometry,
+# prescribed plate motion, linear E0, as B3 / B5 / B6.
+#  B7a-c: a vertical column plus ONE oblique strut from the same bottom plate node (angle theta to the column 30 / 45 / 60
+#         deg); the top ends are separate. Short struts (H = 6.35, L/r = 6.4) so that the end effect is a visible fraction
+#         of the stiffness. Tests how the column's end stiffening depends on the angle of ONE neighbour (rule weight
+#         sin^p theta); 30 deg is where the geometric zone is longest (3.7 r) and the rule says almost nothing.
+#  B8a/b: a centre node with n = 4 / 6 diagonals (half up, half down, alternating azimuth, no collinear pairs), ends on
+#         the plates; B3 is n = 8 (4 collinear pairs). Tests the valence trend at an interior node (B3a is the case the
+#         rule underestimates by 12 %).
+B7 = dict(B3, name='B7b_column_oblique45_linE0', cell='T', r=1.0, h=0.5, H=6.35, amount=0.25, material='linear', t_hold=2e-4,
+          theta=45.0, elemSize=0.5,
+          title='B7b: column + one oblique strut (45 deg) from the bottom plate node, r 1.0, H 6.35, FHS joint, LINEAR E0, top '
+                'plate down 0.25 mm (smooth step 0.3 ms), hold 0.2 ms; bottom plate clamped; no contact')
+B8 = dict(B3, name='B8a_bcc_node_n4_linE0', cell='N', n=4, material='linear', t_hold=2e-4, elemSize=1.0,
+          title='B8a: centre node with 4 diagonals (r 1.0, FHS joint, ends on the plates), LINEAR E0, top plate down 1.0 mm '
+                '(smooth step 0.3 ms), hold 0.2 ms; bottom plate clamped; no contact')
+B7_CASES = {'B7a': dict(B7, name='B7a_column_oblique30_linE0', theta=30.0,
+                        title=B7['title'].replace('B7b', 'B7a').replace('45 deg', '30 deg')),
+            'B7b': B7,
+            'B7c': dict(B7, name='B7c_column_oblique60_linE0', theta=60.0,
+                        title=B7['title'].replace('B7b', 'B7c').replace('45 deg', '60 deg'))}
+B8_CASES = {'B8a': B8,
+            'B8b': dict(B8, name='B8b_bcc_node_n6_linE0', n=6,
+                        title=B8['title'].replace('B8a', 'B8b').replace('4 diagonals', '6 diagonals'))}
+
+
+def b78_lattice(c):
+    """B7: nodes (0,0,0), (0,0,H), (H tan theta, 0, H); B8: centre node (0,0,H/2) + n ends on the plates (BCC diagonal angle)."""
+    from mesher import MeshFrame
+    H = c['H']
+    if c['cell'] == 'T':
+        X = np.array([[0, 0, 0], [0, 0, H], [H * np.tan(np.radians(c['theta'])), 0, H]], float)
+        C = np.array([[0, 1], [0, 2]])
+    else:
+        d = 6.35 * np.sqrt(2.0)                                     # BCC diagonal: horizontal offset 8.98, half height 6.35
+        n = c['n']
+        X = [[0, 0, H / 2]]
+        C = []
+        az = {4: ([45, 225], [135, 315]), 6: ([45, 165, 285], [105, 225, 345])}[n]
+        for z, angles in ((H, az[0]), (0.0, az[1])):
+            for a in angles:
+                X.append([d * np.cos(np.radians(a)), d * np.sin(np.radians(a)), z])
+                C.append([0, len(X) - 1])
+        X, C = np.array(X, float), np.array(C)
+    Xr, connr = MeshFrame().refineFrameMeshElemSize(X, C, c['elemSize'])
+    L = np.linalg.norm(X[C[:, 1]] - X[C[:, 0]], axis=1)
+    return {'X': X, 'conn': C, 'Xr': Xr, 'connr': connr, 'elemSize': c['elemSize'],
+            'beam_of_elem': np.repeat(np.arange(len(C)), np.rint(L / c['elemSize']).astype(int))}
+
+
+def b78_inp(c):
+    tag = f"B7_T{c.get('theta', 0):g}" if c['cell'] == 'T' else f"B8_N{c['n']}"
+    return b3_inp(c, g=b3_mesh(c, lat=b78_lattice(c), tag=tag))
+
+
+def b78_ours(c, joint=None):
+    return b3_ours(c, joint, lat=b78_lattice(c))
 
 
 # ------------------------------------------------------------------------------------------------ A3s
@@ -1604,6 +1668,8 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
             for k, v in B4_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b6_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B6_CASES.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b78_inp(v)), ours=(lambda v=v: b78_ours(v, JOINT_FHS)), joint=JOINT_FHS)
+            for k, v in {**B7_CASES, **B8_CASES}.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b5_inp(v)), ours=(lambda v=v: b5_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B5_CASES.items()},
          # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape

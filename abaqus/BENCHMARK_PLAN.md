@@ -925,3 +925,62 @@ Without the angle weight (p = 0, valence only) B6a is +15 %; weighting only k bu
 (+11-13 %); weighting both fixes it. Fitted in sample on 8 cells with 2 numbers (a, p): **needs a hold-out** (impact cases F / H,
 graded radii, octet) before use. Open: the centre node (B3a, linear) stays 12 % too soft for any a (needs a longer
 zone); the material factor (a_EPU ~ 0.5 a_lin) is one more fitted constant.
+
+## Level B7 / B8 and the closed-form joint rule (2026-10-16)
+
+Why: after B6 the stiffening of all new-geometry solids (B3, B5, B6) is consistent and additive, but no simple rule had been
+validated out of sample. `src/jointRule.py` is a closed-form, differentiable rule (k_end = 1 + mu a W, W = sum (r_b/r_a)^2 sin^p theta;
+zone length l_end = zl * smooth-max sin^p theta (r_b + r_a cos theta)/sin theta * (1 + b max(W-2, 0))). Fitted on B3 + B5 + B6 with
+`abaqus/fit_rule.py`, cross-validated by leaving a whole topology group out (`results/rule_fit/model_table.md`):
+
+| model | parameters | in sample rms | held out: SC / centre node / BCC cell | pooled held-out |
+|---|---|---|---|---|
+| bare | - | 12.9 % | - | - |
+| zone k = 3.5 (old, differentiable) | 1 (fitted on B2a) | 9.2 % | - | - |
+| JOINT_FHS (slicing, not differentiable in r) | 0 | 6.8 % | - | - |
+| rule M0 (a) | 1 + mu | 6.0 % | 5.2 / 9.1 / 17.0 % | 10.2 % |
+| rule M1 (a, p) | 2 + mu | 4.7 % | 2.8 / 8.7 / 16.9 % | 9.6 % |
+| **rule M3 (a, p, zl, b)** | 4 + mu | **1.9 %** | **4.4 / 6.6 / 4.3 %** | **5.2 %** |
+
+- **Honest reading:** only M3 survives the held-out BCC cell (4.3 %); M0 / M1 drop the angle weight (p = 0) when the cell is left out and miss it by +17 %.
+  M3's parameters are not identifiable across folds (a 0.4-3.9, zl 0.5-1.5, b 0.2-0.8, mu 0.16-0.41) although its predictions are; the pooled
+  5.2 % beats JOINT_FHS (6.8 %, no fit) only modestly, with 5 fitted numbers on 9 cases.
+- **The EPU factor mu is not a material constant:** fitted 0.17-0.41 on the fast prescribed ramps, but with it the C4 H cells are 14-16 % too soft
+  in stroke; mu = 1 is comparable to JOINT_FHS. Not used for impact.
+- **Impact hold-out** (`results/rule_fit/impact_holdout.md`, B2 / F / H solids, never fitted; mu = 1): mean |error| stroke 3.7 % vs 3.5 % for the recorded
+  models, energy at 50 % crush 9.7 % vs 6.4 %, peak force 11.1 % vs 8.7 %. **At parity on stroke, worse on the energy curve and peak, especially the
+  bending-dominated C4 cells (E50 -12 to -18 %)**: the rule was fitted on axial-dominated prescribed-motion cells; a separate bending stiffening
+  was never tested on bending cells.
+- **What the rule does give:** the exact design gradient with the joint in the loop (adjoint = unrolled AD 1e-9, = finite differences 1e-6;
+  `tests/test_joint_rule_adjoint.py`), no FHS rebuild or slicing per design (milliseconds), and stroke accuracy at the level of JOINT_FHS.
+  It does NOT yet beat JOINT_FHS in accuracy.
+
+### New Abaqus runs (inputs written, run in this order; est. wall time, small meshes)
+
+| case (abaqus/inp) | specimen | mesh | est. time |
+|---|---|---|---|
+| B7a_column_oblique30_linE0 | column + one oblique strut from the same plate node, 30 deg, r 1.0, H 6.35, linear, 0.25 mm | 3.5k C3D10M | ~3 min |
+| B7b_column_oblique45_linE0 | same, 45 deg | 3.0k | ~3 min |
+| B7c_column_oblique60_linE0 | same, 60 deg | 3.6k | ~3 min |
+| B8a_bcc_node_n4_linE0 | centre node with 4 diagonals (2 up, 2 down), as B3a otherwise | 11.2k | ~5 min |
+| B8b_bcc_node_n6_linE0 | centre node with 6 diagonals | 13.7k | ~5 min |
+
+Then `PYTHONPATH=src:tests python abaqus/b78_predict.py` (predictions are already in `results/B78_summary.md`, recorded before the runs).
+
+**Blind predictions** (reaction at the end of the ramp / bare beams):
+
+| case | JOINT_FHS | rule M3 | rule without angle weight (p = 0) |
+|---|---|---|---|
+| B7a 30 deg | 1.224 | **1.003** | 1.394 |
+| B7b 45 deg | 1.157 | **1.025** | 1.250 |
+| B7c 60 deg | 1.122 | **1.067** | 1.172 |
+| B8a n = 4 | 1.047 | 1.035 | 1.050 |
+| B8b n = 6 | 1.102 | 1.172 | 1.088 |
+
+**What decides what:** B7a separates the angle hypotheses by 40 points (M3 1.00, JOINT_FHS 1.22, no angle weight 1.39): a solid near 1.0 confirms the
+sin^p weight, near 1.2-1.4 means acute neighbours do stiffen (the geometric zone is 3.7 r at 30 deg) and p must drop. B8a/b test the valence growth b
+(M3 and the others differ by up to 8 points at n = 6).
+
+### Data housekeeping (2026-10-16)
+The 188 `*_field_U*.csv` frame dumps (7.0 GB; nothing reads them) were removed from the tree and git-ignored; they stay in git history and can be re-extracted
+from the odb. `abaqus/README.md` updated (copy only the history CSV).

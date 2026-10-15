@@ -197,7 +197,10 @@ def drop_rig(lat, r_elem, law, mat, energy_J=0.75, v0_ms=6.0, plate_mass=7.8e-6,
         beam_law = lambda d: fr.elastic_law(d, A, I, E, G)
     if joint is not None:                                        # stiffness only: mass and contact use true radii
         from explicitFE import JointScaledLaw
-        if joint.get('mode', 'zone') == 'section':               # fused-section geometry, no fitted constant
+        if joint.get('mode', 'zone') == 'rule':                  # closed-form angle / radius rule (jointRule), differentiable
+            import jointRule
+            sj = jointRule.rule_factors(lat, r_elem, **{k_: v for k_, v in joint.items() if k_ in jointRule.DEFAULT})
+        elif joint.get('mode', 'zone') == 'section':             # fused-section geometry, no fitted constant
             import jointSection
             boe_np = np.asarray(lat['beam_of_elem'])
             rb = np.zeros(len(lat['conn']))

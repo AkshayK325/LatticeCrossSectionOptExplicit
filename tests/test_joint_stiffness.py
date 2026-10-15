@@ -60,3 +60,24 @@ def test_fused_section_factors_basic():
         Le = np.linalg.norm(lat['Xr'][lat['connr'][:, 1]] - lat['Xr'][lat['connr'][:, 0]], axis=1)
         comps.append((Le / F[:, 2]).sum())
     assert comps[0] == pytest.approx(comps[1], rel=2e-3)
+
+
+def test_rule_factors_basic_and_gradient():
+    """Angle / radius rule (jointRule): >= 1, 1 far from nodes, mesh independent, radii-gradient == finite differences."""
+    import jointRule
+    lat = example3(elemSize=0.5, nx=1, ny=1)
+    r = torch.full((len(lat['connr']),), 0.6)
+    s = jointRule.rule_factors(lat, r, a=1.0, p=4.0)
+    assert float(s.min()) >= 1.0 - 1e-12 and float(s.max()) > 1.5
+    lat2 = example3(elemSize=0.25, nx=1, ny=1)
+    s2 = jointRule.rule_factors(lat2, torch.full((len(lat2['connr']),), 0.6), a=1.0, p=4.0)
+    # element-length-weighted mean factor per strut is mesh independent (the compliance average)
+    assert abs(float(s.mean()) - float(s2.mean())) < 0.01 * float(s.mean())
+    torch.manual_seed(0)
+    w = torch.rand(len(lat['connr']), dtype=torch.float64)
+    r = torch.full((len(lat['connr']),), 0.6, dtype=torch.float64, requires_grad=True)
+    f = lambda rr: (w * jointRule.rule_factors(lat, rr, a=1.2, p=4.0, zl=1.1, b=0.3, mu=0.8)).sum()
+    g, = torch.autograd.grad(f(r), r)
+    d = torch.zeros_like(r); d[::7] = 1.0; h = 1e-6
+    fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
+    assert abs(float((g * d).sum()) - float(fd)) < 1e-6 * max(1.0, abs(float(fd)))

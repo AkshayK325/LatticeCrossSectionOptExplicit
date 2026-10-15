@@ -211,3 +211,4 @@ run_status.log.json.lock
 # personal summaries (not committed)
 summary/
 /graphify-out
+abaqus/csv/*_field_U*.csv
