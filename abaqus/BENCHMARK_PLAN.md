@@ -888,3 +888,40 @@ nRMSE of the reaction history (ours JOINT_FHS in compare.py): 1.3 % (B5c), 2.6 %
 2. If it works, confirm with one new Abaqus case that separates the hypothesis from alternatives: BCC with thin
    diagonals (r_d 0.5, columns r 1.0, linear, same prescribed motion). Hypothesis predicts the excess scales with
    the diagonal area; plate-corner "clamp" or centre-node explanations do not.
+
+### Results 2026-10-15: Level B6 (B4 re-run with the current FHS geometry; both runs completed)
+
+Reaction at the end of the ramp, ours vs the Abaqus solids (error = ours / solid − 1):
+
+| case | solid, current geometry [N] | solid / bare | solid, old geometry (B4) | bare | JOINT_FHS | + plate_layer | simple valence rule a = 1 |
+|---|---|---|---|---|---|---|---|
+| B6a linear | 456.0 | 1.137 | 408.9 (1.020) | -12.1 % | +9.8 % | **0.0 %** | +15.2 % |
+| B6b EPU 45 fast | 66.93 | 1.063 | 59.23 (0.940) | -5.9 % | +16.0 % (peak +11.7 %) | +5.4 % (peak +1.6 %) | +23.3 % |
+
+- **The B4 anomaly was mostly the old-geometry solid.** The same BCC cell with the current FHS geometry is 11.5 % (linear)
+  and 13 % (EPU) stiffer than the old one; the old solid sat at bare beams (1.02), the new one at 1.14 like the simple
+  cubic cells. Every stiffness conclusion drawn from the old BCC solids (B4, H1e, H1f, F1e, F1f) is therefore suspect.
+  The old and new geometry have the same connected column section (1.0 pi r^2 at 2.5-4 mm) and JOINT_FHS slicing sees
+  only ~1.5 % difference, so the slicing is blind to what changed (corner / plate region).
+- **With the new geometry the solid is additive:** SC columns 1.118 x 339 = 379 N/mm + B3 diagonals 1.25 x 62 = 78 N/mm =
+  457 N/mm against 456 measured. (The "10 % non-additivity" noted earlier came from the old solid.)
+- **Why the models overshoot on BCC:** the oblique diagonal at the corner lengthens the geometric zone of the
+  column from 1.0 r (90 deg plate edges) to 1.93 r (54.7 deg diagonal) and adds area, but the solid shows the column's
+  stiffening is that of the simple cubic corner. JOINT_FHS and the zone model both over-count oblique neighbours.
+- **EPU: the stiffening is smaller than linear in all three cells (B3 1.25 → 1.08, B5 1.118 → 1.064, B6 1.137 →
+  1.063), ours barely moves (1.249 → 1.233):** a second, separate error source (material / rate), +16 % in B6b.
+
+**Simple angle-weighted rule (offline, `notes/18` section 6):** k_end = 1 + a * sum_nb (r_b/r_a)^2 sin^p(theta_ab), zone
+length l_end = max_nb sin^p(theta) * (r_b + r_a cos theta)/sin theta (capped L/2). p = 4, a = 1 (linear), a = 0.5 (EPU 45):
+
+| case | a = 1 | a = 0.5 |
+|---|---|---|
+| B5a / B5c / B5d (SC) | +0.1 / 0.0 / -2.7 % | -2.7 / -4.5 / -5.2 % |
+| B6a (BCC, new geometry) | **-0.2 %** | -3.0 % |
+| B3a centre node, linear | **-12.6 %** | -14.3 % |
+| B5b / B3b / B6b (EPU) | +5.4 / -0.6 / +6.5 % | **+2.3 / -1.8 / +3.2 %** |
+
+Without the angle weight (p = 0, valence only) B6a is +15 %; weighting only k but not the zone length helps little
+(+11-13 %); weighting both fixes it. Fitted in sample on 8 cells with 2 numbers (a, p): **needs a hold-out** (impact cases F / H,
+graded radii, octet) before use. Open: the centre node (B3a, linear) stays 12 % too soft for any a (needs a longer
+zone); the material factor (a_EPU ~ 0.5 a_lin) is one more fitted constant.
