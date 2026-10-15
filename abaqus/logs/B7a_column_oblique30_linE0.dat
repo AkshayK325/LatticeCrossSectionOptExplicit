@@ -1,0 +1,153 @@
+1
+
+   Abaqus 2024                                  Date 15-Oct-2026   Time 15:50:02
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          B7a: column + one oblique strut (30 deg) from the bottom plate node, r 1.0, H 6.35, FHS joint, LINEAR E0, top plate down 0.25 mm (smooth step 0.3 ms), hold 0.2 ms; bottom plate clamped; no contact                                                                                                                                                                                                                                                                                                                            
+  *ELEMENT, TYPE=C3D10M, ELSET=CELL
+  *MATERIAL, NAME=EPU45_LIN
+  *DENSITY
+  *ELASTIC
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *SECTION CONTROLS, NAME=SCDIST, DISTORTION CONTROL=YES
+
+ ***WARNING: THE PARAMETER DISTORTION CONTROL ON THE *SECTION CONTROLS OPTION 
+             IS RELEVANT FOR SOLID ELEMENTS WHEREVER APPLICABLE. THIS WARNING 
+             CAN BE IGNORED IF THE FEATURE IS APPLIED TO SOLID ELEMENTS ONLY.
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *RIGID BODY, REF NODE=6018, TIE NSET=TOP
+  *RIGID BODY, REF NODE=6018, TIE NSET=TOP
+  *RIGID BODY, REF NODE=6018, TIE NSET=TOP
+  *RIGID BODY, REF NODE=6018, TIE NSET=TOP
+  *RIGID BODY, REF NODE=6018, TIE NSET=TOP
+  *RIGID BODY, REF NODE=6018, TIE NSET=TOP
+  *RIGID BODY, REF NODE=6018, TIE NSET=TOP
+  *BOUNDARY
+  *BOUNDARY, AMPLITUDE=RAMP
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *RIGID BODY, REF NODE=6018, TIE NSET=TOP
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *FIXED MASS SCALING, DT=1.43991e-08, TYPE=BELOW MIN
+  *BOUNDARY, AMPLITUDE=RAMP
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *NODE OUTPUT, NSET=REF
+  *NODE OUTPUT, NSET=BOT
+  *ENERGY OUTPUT
+  *END STEP
+  *BOUNDARY
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *BOUNDARY, AMPLITUDE=RAMP
+
+ ***WARNING: THE OPTION *BOUNDARY,TYPE=DISPLACEMENT HAS BEEN USED; CHECK STATUS 
+             FILE BETWEEN STEPS FOR WARNINGS ON ANY JUMPS PRESCRIBED ACROSS THE 
+             STEPS IN DISPLACEMENT VALUES OF TRANSLATIONAL DOF. FOR ROTATIONAL 
+             DOF MAKE SURE THAT THERE ARE NO SUCH JUMPS. ALL JUMPS IN 
+             DISPLACEMENTS ACROSS STEPS ARE IGNORED
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                  3492
+          NUMBER OF NODES IS                                     9510
+          NUMBER OF NODES DEFINED BY THE USER                    6018
+          NUMBER OF INTERNAL NODES GENERATED BY THE PROGRAM      3492
+          TOTAL NUMBER OF VARIABLES IN THE MODEL                28689
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =     0.10    
+       SYSTEM TIME (SEC)    =     0.10    
+       TOTAL CPU TIME (SEC) =     0.20    
+       WALLCLOCK TIME (SEC) =            0
