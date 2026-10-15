@@ -851,3 +851,40 @@ own circle. Errors vs Abaqus, off → on:
 
 - Halves the B4 / H1e excess but does not reach ±5 %; makes r 1.5 (H1f, F1f) and F1e too soft in energy, C12 peak
   worse. **Not adopted**: plate_layer=False stays the default; the B5 runs decide the plate-end factor directly.
+
+### Results 2026-10-15: Level B5 (all 4 runs; Abaqus completed, ETOTAL drift ≤ 0.01 % of max KE)
+
+Reaction at the end of the ramp, ours vs the Abaqus solid (error = ours / solid − 1):
+
+| case | solid [N] | solid / bare | bare | JOINT_FHS | JOINT_FHS + plate_layer |
+|---|---|---|---|---|---|
+| B5a 1×1 r 1.0 linear | 189.4 | 1.118 | -10.6 % | **-1.0 %** | -9.3 % |
+| B5b 1×1 r 1.0 EPU 45 fast | 25.99 | 1.064 | -6.0 % | **+4.0 %** (peak +3.8 %) | -4.7 % |
+| B5c 1×1 r 1.5 linear | 452.9 | 1.188 | -15.9 % | **-1.9 %** | -14.0 % |
+| B5d 2×2 r 1.0 linear | 442.1 | 1.160 | -13.8 % | **-3.2 %** | -12.2 % |
+
+nRMSE of the reaction history (ours JOINT_FHS in compare.py): 1.3 % (B5c), 2.6 % (B5d); driven-plate U3 ≤ 1.4e-5.
+
+- **The plate-end joint factors are right for columns alone.** On cells with no internal joint the solid is 6-19 %
+  stiffer than bare beams and JOINT_FHS reproduces it within -3.2 / +4.0 %, at both radii (r 1.5: -1.9 %), and with
+  3 / 4 / 5 struts at the plate joint (B5d, -3.2 %). Bare beams are 6-16 % too soft.
+- **`plate_layer` is rejected for good:** it removes the stiffening the solid really has (-9 to -14 %). It stays in
+  the code as a documented option, default off. The B4 "double counting the clamp" hypothesis is wrong.
+- **Joint-type trend is small and in the right direction:** solid stiffening 1.118 (1×1) → 1.160 (2×2), JOINT_FHS
+  1.107 → 1.123; the model catches about a third of the rise (-1.0 % → -3.2 %).
+- **EPU 45 (B5b):** solid stiffening is 1.064 against 1.118 linear (rate dependence, as in B3); ours stays at 1.107 and
+  is +4 % too stiff. Same direction as B3, much smaller than the B4 error.
+- **So the B4 / H1e excess (+21-30 %) is not a plate-corner effect.** B3 (centre node + one diagonal per corner) and B5
+  (columns at the corners) are each right, but the full BCC cell (B4) is not: the solid shows no stiffening over bare
+  beams (1.02), JOINT_FHS +23 %. The error appears only when a column and a diagonal meet at the same plate corner.
+- **Working hypothesis (not tested):** the fused-section slice perpendicular to a column counts the area and second
+  moment of the oblique diagonal cut as if it carried the column's load; the inclined diagonal is only partly in the
+  column's load path. Alone (B3, B5) there is nothing to over-count.
+
+**Next (B6, cheap, before any code change):**
+1. Offline: split JOINT_FHS's B4 factors by which neighbour strut contributes to each slice, then weight inclined
+   neighbours by their load-path alignment (cos² to the strut axis) and see whether B4a / B4b / H1e / H1f / F1e / F1f /
+   B5a-d all fall within ±5 % together (the B5 cases must not move).
+2. If it works, confirm with one new Abaqus case that separates the hypothesis from alternatives: BCC with thin
+   diagonals (r_d 0.5, columns r 1.0, linear, same prescribed motion). Hypothesis predicts the excess scales with
+   the diagonal area; plate-corner "clamp" or centre-node explanations do not.
