@@ -210,3 +210,4 @@ run_status.log.json.lock
 
 # personal summaries (not committed)
 summary/
+/graphify-out
