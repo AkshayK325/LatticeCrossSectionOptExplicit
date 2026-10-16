@@ -98,3 +98,22 @@ def test_rule_factors_new_parameters():
     d = torch.zeros_like(r); d[::5] = 1.0; h = 1e-6
     fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
     assert abs(float((g * d).sum()) - float(fd)) < 1e-6 * max(1.0, abs(float(fd)))
+
+
+def test_rule_factors_cap_and_saturation():
+    """cap (zone length <= cap * strut length) and wsat (smooth saturation of the neighbour sum) only reduce the stiffening
+    and keep the radii gradient exact."""
+    import jointRule
+    lat = example3(elemSize=1.0, nx=1, ny=1)
+    r = torch.full((len(lat['connr']),), 0.6, dtype=torch.float64, requires_grad=True)
+    kw = dict(a=5.0, p=-0.8, zl=0.8, b=0.2, gamma=0.0)
+    s_full = jointRule.rule_factors(lat, r.detach(), **kw)
+    s_cap = jointRule.rule_factors(lat, r.detach(), cap=0.25, **kw)
+    s_sat = jointRule.rule_factors(lat, r.detach(), wsat=1.0, **kw)
+    assert float(s_cap.sum()) <= float(s_full.sum()) + 1e-9 and float(s_sat.sum()) <= float(s_full.sum()) + 1e-9
+    assert float(s_cap.min()) >= 1.0 - 1e-12 and float(s_sat.min()) >= 1.0 - 1e-12
+    f = lambda rr: jointRule.rule_factors(lat, rr, cap=0.3, wsat=2.0, **kw).sum()
+    g, = torch.autograd.grad(f(r), r)
+    d = torch.zeros_like(r); d[::4] = 1.0; h = 1e-6
+    fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
+    assert abs(float((g * d).sum()) - float(fd)) < 1e-6 * max(1.0, abs(float(fd)))

@@ -1069,3 +1069,32 @@ the sin^p weighting of the first fit was wrong in sign; the original geometric z
    (`tests/test_joint_rule_adjoint.py`); **it must NOT be used for C12 / octet / valence > 8 until constrained.** JOINT_FHS stays the reference where the lattice has short struts or many acute neighbours.
 3. Not done / next: a prescribed-motion specimen with short struts and high valence (a C12 cell and an octet cell, linear, 0.5 mm; B9) to constrain zone length and cap at high valence, then a refit
    with leave-one-group-out including them; the EPU 45 factor (still unresolved, mu does not transfer); a derivative of the reaction w.r.t. the rule parameters through the solver (the fits are gradient-free).
+
+## Level B9: short-strut and high-valence unit cells under prescribed plate motion (2026-10-16)
+
+Why: the rule R3 (rigid zone ~0.74 x geometric length, p = -0.81) is held-out accurate on the long-strut specimens and on C4 / BCC impact, but over-stiffens the C12 and octet
+IMPACT solids by 10-28 % (notes/18 section 11); no prescribed-motion specimen has short struts or the octet's valence-6/8 acute nodes. B9 supplies them cleanly: one unit cell
+each, current FHS geometry, linear E0, top plate down 0.5 mm in 0.3 ms then hold 0.2 ms, bottom clamped, no contact (as B6). Plate-end audit passed (every plate node has a full face).
+
+| case (abaqus/inp) | cell | mesh | est. wall time |
+|---|---|---|---|
+| B9b_octet_r15_linE0 | octet r 1.5 (L 8.98, L/r 6.0, valence 3/6/8) | 45.8k C3D10M, h 0.75 | ~25 min |
+| B9a_octet_r10_linE0 | octet r 1.0 (L/r 9.0) | 54.7k, h 0.5 | ~30 min |
+| B9c_C12_r05_linE0 | C12 r 0.5 (96 struts, L 2.3-2.9, L/r 4.6-5.7, valence 2/3) | 102.6k, h 0.25 | ~1-1.5 h |
+
+Order: B9b, B9a, B9c. Then `PYTHONPATH=src:tests python abaqus/b9_predict.py` (blind predictions already in `results/B9_summary.md`). Compare the solid's HOLD-WINDOW MEAN (the linear solid rings).
+
+**Blind predictions** (hold value / bare beams; the stiffening is large: these cells are joint dominated):
+
+| model | B9a octet r 1.0 | B9b octet r 1.5 | B9c C12 r 0.5 |
+|---|---|---|---|
+| bare beams | 1.000 (127.5 N) | 1.000 (324 N) | 1.000 (0.81 N) |
+| zone k = 3.5 | 1.454 | 1.839 | 3.128 |
+| JOINT_FHS | 1.480 | 1.908 | 2.289 |
+| rule R1 | 1.567 | 2.173 | 3.737 |
+| rule R2 | 1.727 | 2.691 | 3.547 |
+| rule R3 | 1.812 | 3.012 | 3.484 |
+
+**What decides what:** the models differ by up to 1.6x on these cells. A solid near JOINT_FHS (1.5 / 1.9 / 2.3) confirms that the rule's rigid-zone saturation is the cause (and that
+the impact over-stiffening was real); a solid near R3 would instead point at the impact solids / dynamic effects. The two new options in `jointRule` (zone cap `cap`, saturation of the neighbour
+sum `wsat`; models R4 / R5 in `fit_rule2.py`) are fitted only AFTER B9, with the impact cells kept as the hold-out.

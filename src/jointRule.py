@@ -14,14 +14,16 @@ change moves the stiffening. Parameters (a, p, zl, b) are fitted in abaqus/fit_r
 import numpy as np
 import torch
 
-DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0)
+DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None)
 
 
-def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, tau=0.02):
+def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, tau=0.02):
     """Per-element stiffness factors (ne,) >= 1, differentiable in r_elem (ne,) and in (a, p, zl, b, mu, pz, gamma) if tensors.
     p: angle exponent of the stiffness weight sin^p; pz: of the zone-length weight (default = p); a negative exponent weights
     ACUTE neighbours more (B7: the solid stiffens more the more acute the neighbour). gamma in [0, 1]: weight of a pair of struts
-    that both LEAVE a plate at a plate node (B6: the oblique diagonal at a plate corner adds less than in-plate struts do)."""
+    that both LEAVE a plate at a plate node (B6: the oblique diagonal at a plate corner adds less than in-plate struts do).
+    cap: largest zone length as a fraction of the strut length (0.5 = the zones of the two ends just touch). wsat: if given, the
+    neighbour sum W saturates smoothly at wsat (wsat tanh(W / wsat)), so that valence-6-12 nodes do not become ever stiffer (B9)."""
     X, C = lat['X'], lat['conn']
     Xr, connr = lat['Xr'], lat['connr']
     boe_np = np.asarray(lat['beam_of_elem'])
@@ -69,7 +71,9 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamm
     ell = m0 + wb * torch.log(lse.clamp_min(1e-300))                                  # smooth max over neighbours
     ell = torch.where(torch.isfinite(m0), ell, torch.zeros_like(ell))
     ell = ell * (1.0 + b * torch.clamp(W - 2.0, min=0.0))
-    ell = torch.minimum(ell, torch.as_tensor(np.repeat(0.5 * Lb, 2), dtype=dt))
+    ell = torch.minimum(ell, torch.as_tensor(np.repeat(cap * Lb, 2), dtype=dt))
+    if wsat is not None:
+        W = wsat * torch.tanh(W / wsat)
     k = 1.0 + mu * a * W
     P0, tb_ = X[C[boe_np, 0]], (X[C[boe_np, 1]] - X[C[boe_np, 0]]) / Lb[boe_np, None]
     s1 = ((Xr[connr[:, 0]] - P0) * tb_).sum(1)

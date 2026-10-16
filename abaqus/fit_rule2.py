@@ -19,11 +19,12 @@ import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parent
 GROUPS = {'SC': ['B5a', 'B5c', 'B5d'], 'STAR': ['B3a', 'B8a', 'B8b'], 'TJOINT': ['B7a', 'B7b', 'B7c'], 'CELL': ['B6a']}
 CASES = [c for g in GROUPS.values() for c in g]
-FREE = {'R0': ['a', 'zl'], 'R1': ['a', 'zl', 'gamma'], 'R2': ['a', 'zl', 'gamma', 'b'], 'R3': ['a', 'zl', 'gamma', 'b', 'p']}
-START = dict(a=1.0, zl=1.0, gamma=0.5, b=0.2, p=0.0)
-LO = dict(a=0.0, zl=0.3, gamma=0.0, b=0.0, p=-4.0)
-HI = dict(a=6.0, zl=3.0, gamma=1.0, b=2.0, p=10.0)
-BASE = dict(a=1.0, p=0.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0)
+FREE = {'R0': ['a', 'zl'], 'R1': ['a', 'zl', 'gamma'], 'R2': ['a', 'zl', 'gamma', 'b'], 'R3': ['a', 'zl', 'gamma', 'b', 'p'],
+        'R4': ['a', 'zl', 'gamma', 'b', 'p', 'cap'], 'R5': ['a', 'zl', 'gamma', 'b', 'p', 'wsat']}   # R4 / R5: after B9 (notes/18 11)
+START = dict(a=1.0, zl=1.0, gamma=0.5, b=0.2, p=0.0, cap=0.4, wsat=3.0)
+LO = dict(a=0.0, zl=0.3, gamma=0.0, b=0.0, p=-4.0, cap=0.1, wsat=0.5)
+HI = dict(a=6.0, zl=3.0, gamma=1.0, b=2.0, p=10.0, cap=0.5, wsat=20.0)
+BASE = dict(a=1.0, p=0.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None)
 RUNNER = {'B3': 'b3_ours', 'B5': 'b5_ours', 'B6': 'b4_ours', 'B7': 'b78_ours', 'B8': 'b78_ours'}
 
 

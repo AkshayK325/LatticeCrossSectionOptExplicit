@@ -1459,6 +1459,29 @@ def b78_ours(c, joint=None):
     return b3_ours(c, joint, lat=b78_lattice(c))
 
 
+# ------------------------------------------------------------------------------------------------ B9
+# Short-strut / high-valence specimens (notes/18 section 11): the rule R3 fitted on B3 / B5 / B6 / B7 / B8 over-stiffens C12 and octet
+# impact solids by 10-28 %, but no prescribed-motion specimen had short struts or the octet's valence 6 / 8 acute nodes. One unit
+# cell each (current FHS geometry, linear E0, small prescribed plate motion like B6): octet r 1.0 (L/r 9.0), octet r 1.5 (L/r 6.0),
+# C12 r 0.5 (L/r 4.6-5.7, valence 2-3).
+B9_CASES = {
+    'B9a': dict(B3, name='B9a_octet_r10_linE0', cell=dict(cell='O', elemSize=1.0, nx=1, ny=1), r=1.0, h=0.5, H=12.7, amount=0.5,
+                material='linear', t_hold=2e-4,
+                title='B9a: octet unit cell r 1.0 (FHS joints), LINEAR E0 = 342.9 MPa, nu 0.49; top plate down 0.5 mm (smooth step '
+                      '0.3 ms), hold 0.2 ms; bottom plate clamped; no contact'),
+    'B9b': dict(B3, name='B9b_octet_r15_linE0', cell=dict(cell='O', elemSize=1.5, nx=1, ny=1), r=1.5, h=0.75, H=12.7, amount=0.5,
+                material='linear', t_hold=2e-4,
+                title='B9b: octet unit cell r 1.5 (FHS joints), LINEAR E0, top plate down 0.5 mm, hold 0.2 ms; no contact'),
+    'B9c': dict(B3, name='B9c_C12_r05_linE0', cell=dict(cell='C12', elemSize=0.5, nx=1, ny=1), r=0.5, h=0.25, H=12.7, amount=0.5,
+                material='linear', t_hold=2e-4,
+                title='B9c: C12 unit cell r 0.5 (FHS joints), LINEAR E0, top plate down 0.5 mm, hold 0.2 ms; no contact'),
+}
+
+
+def b9_inp(c):
+    return b3_inp(c, g=b3_mesh(dict(c, nx=1, ny=1), lat=b4_lattice(c), tag=f"B9_{c['cell']['cell']}"))
+
+
 # ------------------------------------------------------------------------------------------------ A3s
 A3s = dict(A3, name='A3s2_crossed_solid_cylinders_fine', n_sq=16, n_rad=5, rbias=1.6, ds=0.25, ds_min=0.03, growth=1.15,
            T=1e-3, hourglass='ENHANCED', field_frames=20, ball_dt=1e-4,
@@ -1698,6 +1721,8 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
             for k, v in B6_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b78_inp(v)), ours=(lambda v=v: b78_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in {**B7_CASES, **B8_CASES}.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b9_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
+            for k, v in B9_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b5_inp(v)), ours=(lambda v=v: b5_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B5_CASES.items()},
          # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape
