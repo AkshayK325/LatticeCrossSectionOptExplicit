@@ -51,7 +51,8 @@ def main():
               ('JOINT_FHS+plate_layer', 'fhs_layer', None, None)]
     first = json.loads((ROOT / 'results' / 'rule_fit' / 'M3.json').read_text())['params']
     models.append(('first rule M3 (B3/B5/B6 fit)', 'rule1', first, None))
-    for f in sorted((ROOT / 'results' / 'rule_fit2').glob('R*.json')):
+    out = ROOT / 'results' / ('rule_fit2' if fr.SET == '2' else 'rule_fit3')
+    for f in sorted(out.glob('R*.json')):
         d = json.loads(f.read_text())
         models.append((f.stem + (' (all, in sample)' if not d['hold'] else ' (held out)'), 'rule', d['params'], d['hold']))
     jobs, meta = [], []
@@ -63,13 +64,12 @@ def main():
     tab = {}
     for name, (c, v) in zip(meta, res):
         tab.setdefault(name, {})[c] = v / ref[c] - 1
-    L = ['# Joint models on the linear new-geometry prescribed-motion solids (hold-window mean of the reaction)', '',
+    L = ['# Joint models on the linear new-geometry prescribed-motion solids (hold-window mean of the reaction; fit set ' + fr.SET + ')', '',
          'error = ours / Abaqus solid - 1 [%]; rms over the scored cases; leave-one-group-out rows are scored only on the group left out of that fit.', '',
          '| model | ' + ' | '.join(fr.CASES) + ' | rms | max |', '|---|' + '---|' * (len(fr.CASES) + 2)]
     for name, row in tab.items():
         v = np.array(list(row.values())) * 100
         L.append(f"| {name} | " + ' | '.join(f"{100 * row[c]:+.1f}" if c in row else '' for c in fr.CASES) + f" | {np.sqrt(np.mean(v ** 2)):.1f} | {np.abs(v).max():.1f} |")
-    out = ROOT / 'results' / 'rule_fit2'
     (out / 'model_table.md').write_text('\n'.join(L) + '\n')
     print('\n'.join(L))
 

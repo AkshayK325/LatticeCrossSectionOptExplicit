@@ -1098,3 +1098,60 @@ Order: B9b, B9a, B9c. Then `PYTHONPATH=src:tests python abaqus/b9_predict.py` (b
 **What decides what:** the models differ by up to 1.6x on these cells. A solid near JOINT_FHS (1.5 / 1.9 / 2.3) confirms that the rule's rigid-zone saturation is the cause (and that
 the impact over-stiffening was real); a solid near R3 would instead point at the impact solids / dynamic effects. The two new options in `jointRule` (zone cap `cap`, saturation of the neighbour
 sum `wsat`; models R4 / R5 in `fit_rule2.py`) are fitted only AFTER B9, with the impact cells kept as the hold-out.
+
+
+### Results 2026-10-16: B9 (octet r 1.0, octet r 1.5, C12 r 0.5; all runs completed, solid hold-window mean)
+
+| model | B9a octet r 1.0 | B9b octet r 1.5 | B9c C12 r 0.5 |
+|---|---|---|---|
+| **Abaqus solid (hold mean / bare)** | **1.592** (203.0 N) | **2.431** (787.5 N) | **3.276** (2.653 N) |
+| zone k = 3.5 | -8.7 % | -24.3 % | **-4.5 %** |
+| JOINT_FHS | -7.1 % | -21.5 % | -30.1 % |
+| rule R1 | **-1.6 %** | -10.6 % | +14.1 % |
+| rule R2 | +8.4 % | +10.7 % | +8.3 % |
+| rule R3 | +13.8 % | +23.9 % | +6.4 % |
+
+- **No existing model is within +-5 % on all three cells.** JOINT_FHS, the zone model and R1 under-predict the octet (r 1.5: -22 / -24 / -11 %); R2 and R3 over-predict it; the truth (2.43 x bare) lies between R1 (2.17) and R2 (2.69).
+  JOINT_FHS under-predicts C12 by 30 % (stiffening 2.29 vs 3.28 for the solid).
+- **Ringing:** the octet solids ring by only 0.3-0.9 %; the C12 solid rings by 64 % of its mean with a period (~0.2 ms) equal to the hold window, so the C12 static value is uncertain by ~ +-5 %
+  (the window means 2.65 / 2.93 depending on whether the first 30 % of the hold is skipped; ours R3 2.82 / 3.20). B9c should be re-run with a long hold (1 ms) before it is trusted below ~ 5 %.
+- **Correction of the impact hold-out (notes/18 11):** the B2 solids (B2a-h) use cylinder + sphere joints, NOT the FHS joints the rule was fitted on, and the FHS octet impact solids (F1g/h) were never run, so the claim that
+  R3 over-stiffens the OCTET in impact was a comparison with sphere-joint solids and is not a valid hold-out. The valid FHS impact solids are F1a/c/d/e/f and H1a/c/d/e/f only (stroke, R3 vs recorded model):
+  F1a -6.5 / -7.3, F1c +0.7 / -0.4, F1d -10.3 / -5.1, F1e +0.3 / -2.2, F1f +0.2 / -2.0; H1a -2.6 / -5.1, H1c +3.7 / +0.7, H1d -13.7 / -6.6, H1e -9.9 / -12.6, H1f -4.7 / -7.1. R3 is better on 6 of 10, worse on the two C12 cells (F1d, H1d).
+  (The BCC ones use the old geometry.) Impact stroke is also a weak test of the joint: the static B9 shows JOINT_FHS 21-30 % too soft on B9b / B9c while its impact strokes are within a few %.
+- **Cost:** the rigid-zone rule needs 1.6-5.6 x more explicit steps than bare beams (B6a 5.5 x, B9b 5.6 x, C12 2.0 x); JOINT_FHS needs 1.8-3.4 x.
+
+### Results 2026-10-16: refit with B9 (13 linear specimens, 21 fits: R3, R4, R5 each with 6 groups left out), selected model R5
+
+Data: B3a, B5a/c/d, B6a, B7a-c, B8a/b, B9a-c (C12 weighted 0.5, its solid rings with a period ~ the hold window). Groups left out in turn: SC, STAR, TJOINT, CELL, OCT (B9a/b), C12 (B9c).
+
+| model (free parameters) | in sample rms / max | held-out per group (SC / STAR / TJOINT / CELL / OCT / C12), max |abs| | pooled held-out rms / max |
+|---|---|---|---|
+| zone k = 3.5 (1 constant) | 9.0 / 24.3 | - | - |
+| JOINT_FHS (none) | 11.7 / 30.1 | - | - |
+| R3 (a, zl, gamma, b, p) | 2.7 / 5.7 | 2.9 / 6.2 / 15.6 / 1.7 / 21.1 / 2.3 | 9.1 / 21.1 |
+| R4 (R3 + zone cap) | 2.9 / 5.7 | 2.7 / 6.2 / 13.5 / 1.8 / 13.0 / 2.4 | 7.1 / 13.5 |
+| **R5 (R3 + saturation wsat of the neighbour sum)** | **2.7 / 5.5** | **3.0 / 6.2 / 9.7 / 2.0 / 7.8 / 1.5** | **5.0 / 9.7** |
+
+**R5 = the selected rule:** k_end = 1 + a wsat tanh(W / wsat), W = sum (r_b/r_a)^2 sin^p(theta); zone length = zl x geometric (r_b + r_a cos theta)/sin theta x sin^p, x (1 + b (W - 2)+), cap L/2;
+a = 3.45, zl = 0.77, gamma = 0, b = 0.15, p = -0.77, wsat = 2.47 (k_end <= ~9.5). Held-out errors (ours / solid - 1): SC -1.3, -1.1, -3.0; STAR -4.6, -4.5, -6.2; TJOINT -9.7, -6.9, -4.0;
+CELL +2.0; OCT +7.8, +2.7; C12 -1.5 %. The in-sample fit is within 5.5 % on all 13 cases (B9a +4.0, B9b -0.5, B9c +0.7).
+
+- **The octet failure of R3 was a calibration problem, not a model-form one:** refitting R3 with B9 brings the gain from 5.7 to 4.5 and the octet to +3 / 0 % in sample; but held out R3 still misses the octet by +12.6 / +21.1 %
+  (a neighbour sum that grows without bound at valence 6-8), and saturating the neighbour sum (R5) fixes it (+7.8 / +2.7 %). The zone cap is not needed (R4's cap stays at its 0.5 bound).
+- **Remaining weakness: the T-joint group** (B7, held out -9.7 / -6.9 / -4.0 %): B7 is the only acute-angle data; the angle exponent (p = -0.77) and the zone growth at acute angles rest on it.
+- **Parameters are not tightly identified** (6 numbers on 13 cases; leave-out values of a range 1.3-5.6, wsat 2.8-11.6) but the predictions are stable; the held-out error is the honest accuracy: ~5 % rms, 10 % worst.
+- **Differentiable and tested:** `tests/test_joint_rule_adjoint.py` passes for the first-rule parameters and for R5 (adjoint = unrolled AD to 1e-9, = finite differences to 1e-6).
+- **Cost:** R5 needs 1.5-2.9 x the explicit steps of bare beams (JOINT_FHS 1.8-3.4 x); the element factors reach 9.4.
+- **Impact check on the FHS solids** (`results/rule_fit3/impact_check_R5.md`; the F / H solids are OLD geometry, the BCC ones 11-13 % too soft): mean |error| stroke / E50 / E75 / peak, JOINT_FHS vs R5: C4 3.4 / 3.8 / 2.9 / 10.8 vs 3.2 / 6.7 / 3.6 / 14.3;
+  BCC 6.0 / 8.4 / 6.6 / 15.5 vs 3.4 / 9.2 / 8.1 / 12.9; C12 5.8 / 5.1 / 7.5 / 4.4 vs 10.4 / 11.6 / 12.9 / 25.2. Because those solids are the soft old-geometry ones and impact stroke is a weak stiffness test (JOINT_FHS is 21-30 % too soft on the static B9b / B9c but within a few % in impact), this is
+  only a consistency check; it is not evidence against R5 on C12.
+
+### What is still missing (plan, in priority order)
+1. **A prescribed-motion C4 cell (B10: r 0.8 and r 0.6, linear, current geometry).** C4 is the design lattice, and R5 has no static C4 data at all (the only C4 evidence is impact vs old-geometry solids). Cheap (42k / 62k elements, ~0.5 h).
+2. **Unequal radii (B11).** The design variables are radii, but every specimen has equal radii: the (r_b / r_a)^2 dependence of the neighbour sum, hence the sign and size of dk/dr that the adjoint returns, is untested. T-joint (B7-type) with r 1.0 / 0.6 in both orders and a graded C4 cell.
+3. **Impact solids with the CURRENT FHS geometry.** All F / H solids are old geometry (soft by 11-13 % in BCC). Regenerate F1d (C12) and F1e (BCC, 3 min) first, then F1a / H1a (hours); octet F1g / h can now be meshed with the route used for B9. Needed to validate contact + dynamics + densification with the new joint model.
+4. **B9c with a long hold (1 ms)**, because its static value is uncertain by ~5 %; and an EPU 45 prescribed series (the joint stiffening in the fast EPU ramps is 6-17 % lower than the linear one and no constant transfers to impact).
+5. **Section shape.** The rule uses the radius only; non-circular (VAE) sections are untested (back burner).
+6. **Design-loop integration.** Use R5 in the plateau-design optimisation (notes/9) instead of k = 3.5 and compare designs; then verify the optimised design with an FHS solid.
+7. **Fit through the solver** (derivative of the reaction w.r.t. the 6 parameters) instead of the gradient-free fit, to tighten the parameters (low priority).

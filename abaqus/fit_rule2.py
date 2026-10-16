@@ -17,7 +17,12 @@ import sys
 import numpy as np
 
 ROOT = pathlib.Path(__file__).resolve().parent
+import os
+SET = os.environ.get('RULE_FIT_SET', '2')           # '3': + B9 (octet, C12) after the B9 runs, results in rule_fit3/
 GROUPS = {'SC': ['B5a', 'B5c', 'B5d'], 'STAR': ['B3a', 'B8a', 'B8b'], 'TJOINT': ['B7a', 'B7b', 'B7c'], 'CELL': ['B6a']}
+if SET == '3':
+    GROUPS.update({'OCT': ['B9a', 'B9b'], 'C12': ['B9c']})
+WEIGHT = {'B9c': 0.5}                                # the C12 solid rings with a period ~ the hold window: static value uncertain ~ +-5 %
 CASES = [c for g in GROUPS.values() for c in g]
 FREE = {'R0': ['a', 'zl'], 'R1': ['a', 'zl', 'gamma'], 'R2': ['a', 'zl', 'gamma', 'b'], 'R3': ['a', 'zl', 'gamma', 'b', 'p'],
         'R4': ['a', 'zl', 'gamma', 'b', 'p', 'cap'], 'R5': ['a', 'zl', 'gamma', 'b', 'p', 'wsat']}   # R4 / R5: after B9 (notes/18 11)
@@ -25,7 +30,7 @@ START = dict(a=1.0, zl=1.0, gamma=0.5, b=0.2, p=0.0, cap=0.4, wsat=3.0)
 LO = dict(a=0.0, zl=0.3, gamma=0.0, b=0.0, p=-4.0, cap=0.1, wsat=0.5)
 HI = dict(a=6.0, zl=3.0, gamma=1.0, b=2.0, p=10.0, cap=0.5, wsat=20.0)
 BASE = dict(a=1.0, p=0.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None)
-RUNNER = {'B3': 'b3_ours', 'B5': 'b5_ours', 'B6': 'b4_ours', 'B7': 'b78_ours', 'B8': 'b78_ours'}
+RUNNER = {'B3': 'b3_ours', 'B5': 'b5_ours', 'B6': 'b4_ours', 'B7': 'b78_ours', 'B8': 'b78_ours', 'B9': 'b4_ours'}
 
 
 def _init():
@@ -88,7 +93,9 @@ class Fit:
     def resid(self, x):
         pr = self.predict(x, self.train)
         self.n += 1
-        r = np.array([pr[c] / self.ref[c] - 1 for c in self.train])
+        import runStatus as rs                       # progress in <repo>/run_status.log (est. total = 12 iterations x (n + 1) evaluations)
+        rs.update(f'eval {self.n}', min(self.n, 12 * (len(self.free) + 1)), 12 * (len(self.free) + 1))
+        r = np.array([(pr[c] / self.ref[c] - 1) * WEIGHT.get(c, 1.0) for c in self.train])
         print(f'  eval {self.n}: x={np.round(x, 3).tolist()} rms={np.sqrt(np.mean(r ** 2)) * 100:.2f} %', flush=True)
         return r
 
@@ -103,12 +110,14 @@ class Fit:
 def main():
     model = sys.argv[1]
     hold = sys.argv[2] if len(sys.argv) > 2 else None
+    import runStatus as rs
+    rs.start(f"joint-rule fit {model}" + (f" hold={hold}" if hold else ' (all data)'))
     f = Fit(model, hold)
     x = f.fit()
     pr = f.predict(x, CASES)
     err = {c: pr[c] / f.ref[c] - 1 for c in CASES}
     out = dict(model=model, hold=hold, params=f.params(x), err=err, train=f.train, ref=f.ref)
-    d = ROOT / 'results' / 'rule_fit2'
+    d = ROOT / 'results' / ('rule_fit2' if SET == '2' else 'rule_fit3')
     d.mkdir(exist_ok=True)
     (d / f"{model}{'_' + hold if hold else ''}.json").write_text(json.dumps(out, indent=1))
     print(json.dumps(out['params']), {c: round(100 * e, 1) for c, e in err.items()}, flush=True)
