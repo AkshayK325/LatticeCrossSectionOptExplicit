@@ -1155,3 +1155,64 @@ CELL +2.0; OCT +7.8, +2.7; C12 -1.5 %. The in-sample fit is within 5.5 % on all 
 5. **Section shape.** The rule uses the radius only; non-circular (VAE) sections are untested (back burner).
 6. **Design-loop integration.** Use R5 in the plateau-design optimisation (notes/9) instead of k = 3.5 and compare designs; then verify the optimised design with an FHS solid.
 7. **Fit through the solver** (derivative of the reaction w.r.t. the 6 parameters) instead of the gradient-free fit, to tighten the parameters (low priority).
+
+## Run list 2026-10-17: B10, B11, B9d and the impact solids in the CURRENT FHS geometry (F2 / H2)
+
+Why (notes/18 section 13): the selected rule R5 has no static C4 data (the design lattice), no unequal-radius data (the design variables), and every F / H impact solid is old geometry
+(BCC 11-13 % too soft), so there is no valid impact validation. All inputs are written (`abaqus/inp/`), every plate end audited (`cases._check_plate_ends`), blind predictions recorded
+(`results/B10_B11_summary.md`, `results/F2H2_summary.md`). Copy back as before: the history CSV into `abaqus/csv/`, `.sta` / `.dat` / `.msg` into `abaqus/logs/` (no `_field_U` files needed).
+Then `PYTHONPATH=src:tests python abaqus/bx_predict.py` / `abaqus/impact_predict.py` and `abaqus/compare.py <case>`. Compare linear solids by the HOLD-WINDOW MEAN.
+
+| group | case (abaqus/inp) | what | elements | est. wall time |
+|---|---|---|---|---|
+| A (minutes) | B11a_T45_col10_obl06_linE0 | T-joint 45 deg, column r 1.0, oblique r 0.6 | 13.1k | ~5 min |
+| | B11b_T45_col06_obl10_linE0 | 45 deg, column 0.6, oblique 1.0 | 11.5k | ~5 min |
+| | B11c_T30_col10_obl06_linE0 | 30 deg, column 1.0, oblique 0.6 | 14.8k | ~5 min |
+| | B11d_T30_col06_obl10_linE0 | 30 deg, column 0.6, oblique 1.0 | 9.7k | ~5 min |
+| | F2e_unit_cell_BCC_FHS_solid_r100_h050 | BCC r 1.0 impact (linear E = 40), 0.5 ms | 42.9k | ~3-5 min |
+| | F2f_unit_cell_BCC_FHS_solid_r150_h075 | BCC r 1.5 impact | ~27k | ~2 min |
+| | F2g_unit_cell_octet_FHS_solid_r100_h050 | octet r 1.0 impact (first FHS octet impact solid) | ~55k | ~5 min |
+| | F2h_unit_cell_octet_FHS_solid_r150_h075 | octet r 1.5 impact | ~46k | ~5 min |
+| | H2e_unit_cell_BCC_FHS_EPU45_solid_r100_h050 | BCC r 1.0 impact, EPU 45 | 42.9k | ~5 min |
+| B (~1-1.5 h) | B10a_C4_r08_linE0 | C4 cell r 0.8, prescribed motion, hold 0.5 ms | 45.4k | ~50 min |
+| | B10b_C4_r06_linE0 | C4 cell r 0.6, hold 0.5 ms | 58.9k | ~65 min |
+| | B10c_C4_graded_top10_bot06_linE0 | graded C4 (top 1.0, bottom 0.6, mid 0.8), hold 0.3 ms | 102.9k | ~80 min |
+| | B10d_C4_graded_top06_bot10_linE0 | graded C4 (top 0.6, bottom 1.0), hold 0.3 ms | 98.3k | ~80 min |
+| C (long) | B9d_C12_r05_linE0_longhold | C12 as B9c with a 1.2 ms hold (static value) | 102.6k | ~1.6 h |
+| | F2d_unit_cell_C12_FHS_solid_r050_h025 | C12 impact, 3 ms | 102.6k | ~1.8 h |
+| | H2d_unit_cell_C12_FHS_EPU45_solid_r050_h025 | C12 impact, EPU 45, 4 ms | 102.6k | ~2 h |
+| | F2a_unit_cell_C4_FHS_solid_r080_h040 | C4 r 0.8 impact (the design lattice), 3 ms | 45.4k | ~4.7 h |
+| | H2a_unit_cell_C4_FHS_EPU45_solid_r080_h040 | C4 r 0.8 impact, EPU 45, 4 ms | 45.4k | ~4-5 h |
+
+Run order: A, then B10a / B10b, then B10c / d, then B9d and F2d, then F2a (and the EPU C and H cases last). If time is short: A + B10a + B10b + B9d already answer the static C4, radius and C12 questions.
+
+**Blind predictions, prescribed motion** (hold value / bare beams; JOINT_FHS | zone k = 3.5 | rule R5):
+
+| case | JOINT_FHS | zone k = 3.5 | rule R5 | what decides |
+|---|---|---|---|---|
+| B10a C4 r 0.8 | 1.582 | 1.536 | 1.514 | static C4: models within 5 %; a solid outside 1.45-1.65 means the C4 joints (valence 3, L 2.6-6.4) are not captured |
+| B10b C4 r 0.6 | 1.418 | 1.321 | 1.306 | thinner struts: models differ by 8 % |
+| B10c graded 1.0 / 0.6 | 1.575 | 1.479 | 1.574 | unequal radii at every joint; R5 = JOINT_FHS here |
+| B10d graded 0.6 / 1.0 | 1.577 | 1.483 | 1.576 | the reverse orientation |
+| B11a 45 deg, col 1.0 / obl 0.6 | 1.068 | 1.117 | 1.101 | radius-ratio dependence (r_b / r_a)^2 |
+| B11b 45 deg, col 0.6 / obl 1.0 | 1.198 | 1.179 | **1.313** | R5 +10 % above JOINT_FHS: the thin column feels the thick oblique strut |
+| B11c 30 deg, col 1.0 / obl 0.6 | 1.108 | 1.188 | 1.192 | |
+| B11d 30 deg, col 0.6 / obl 1.0 | 1.334 | 1.258 | **1.474** | R5 +10 % above JOINT_FHS |
+| B9d C12 (long hold) | 1.367 | 1.437 | 1.472 | replaces B9c's uncertain static value |
+
+If B11b / B11d come out near 1.2 / 1.33 the neighbour sum should use a weaker radius ratio than (r_b / r_a)^2 (this directly changes the design gradient d k / d r); near 1.3 / 1.47, the quadratic ratio is right.
+
+**Blind predictions, impact** (max stroke [mm] / peak force [N]; bare | JOINT_FHS | rule R5; ours energy as in the input; full table with times and energies in `results/F2H2_summary.md`):
+
+| case | bare | JOINT_FHS | R5 |
+|---|---|---|---|
+| F2e BCC r 1.0 | 0.843 / 57.9 | 0.753 / 67.5 | 0.776 / 68.4 |
+| F2f BCC r 1.5 | 0.834 / 134.9 | 0.706 / 152.1 | 0.735 / 157.9 |
+| F2g octet r 1.0 | 0.887 / 36.7 | 0.747 / 48.5 | 0.700 / 51.0 |
+| F2h octet r 1.5 | 1.002 / 97.8 | 0.727 / 151.2 | 0.639 / 174.9 |
+| H2e BCC r 1.0 EPU | 1.023 / 122.3 | 0.869 / 156.5 | 0.906 / 146.8 |
+| F2d C12 r 0.5 | 9.529 / 4.8 | 8.183 / 5.7 | 7.851 / 7.7 |
+| F2a C4 r 0.8 | 10.232 / 16.7 | 8.110 / 19.6 | 8.285 / 21.6 |
+(H2d, H2a in the table once the prediction job has finished.)
+
+**Bookkeeping added the same day:** `CLAUDE.md` (repo rules: every background / long job reports to `run_status.log`), `tests/run_logged.py` (wrapper / watcher for any command), run_status reporting inside every long script.

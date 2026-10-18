@@ -20,6 +20,9 @@ import compare                                                   # noqa: E402
 import h_series_analysis as ha                                   # noqa: E402
 
 case, model = sys.argv[1], sys.argv[2]
+sys.path.insert(0, str(ROOT.parent / 'tests'))
+import runStatus as rs                                           # repo rule: every long job reports to run_status.log
+rs.start(f'impact check {case} {model[:40]}')
 c = cases.CASES[case]
 spec = c['spec']
 if model == 'bare':

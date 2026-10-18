@@ -23,6 +23,8 @@ def load(name):
 
 
 def main(fit='M3'):
+    import runStatus as rs                                       # repo rule: every long job reports to run_status.log
+    rs.start('B7/B8 predictions')
     pa, pb = load(fit), load('M1_CELL')
     models = (('bare beams', None), ('JOINT_FHS', cases.JOINT_FHS),
               (f'rule {fit} (p = {pa["p"]:.2f}, zl = {pa["zl"]:.2f}, b = {pa["b"]:.2f})', dict(mode='rule', **dict(pa, mu=1.0))),
@@ -31,7 +33,8 @@ def main(fit='M3'):
     L = ['# B7 / B8: column + oblique strut, centre node valence 4 / 6 (current FHS geometry, linear, prescribed motion)', '',
          'Reaction = sum RF3 at the bottom plate [N]. For the Abaqus rows the hold column is the MEAN over the last 70 % of the hold (the linear solid rings by +-6 % after the ramp); stiffening = hold value / bare beams hold value.', '',
          '| case | model | end of ramp [N] | hold [N] (solid: mean) | stiffening vs bare (hold) |', '|---|---|---|---|---|']
-    for case in ('B7a', 'B7b', 'B7c', 'B8a', 'B8b'):
+    for ci, case in enumerate(('B7a', 'B7b', 'B7c', 'B8a', 'B8b')):
+        rs.update(case, ci, 5)
         sp = cases.CASES[case]['spec']
         res = {}
         for lab, jm in models:

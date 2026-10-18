@@ -53,6 +53,8 @@ def run_model(args):
 
 
 def main():
+    import runStatus as rs                                       # repo rule: every long job reports to run_status.log
+    rs.start('joint model table ')
     ref = fr.solid_ref()
     models = [('bare', 'bare', None), ('zone k=3.5', 'zone', None), ('JOINT_FHS', 'fhs', None),
               ('JOINT_FHS+plate_layer', 'fhs_layer', None)]
@@ -67,7 +69,10 @@ def main():
             jobs.append((c, kind, None if d is None else d['params']))
             meta.append(name)
     with cf.ProcessPoolExecutor(max_workers=10, mp_context=mp.get_context('spawn')) as pool:
-        res = list(pool.map(run_model, jobs))
+        futs = [pool.submit(run_model, j) for j in jobs]
+        for k, fut in enumerate(cf.as_completed(futs)):
+            rs.update('model x case jobs', k + 1, len(jobs))
+        res = [fut.result() for fut in futs]
     tab = {}
     for name, (c, kind, r, h) in zip(meta, res):
         tab.setdefault(name, {})[c] = (r / ref[c][0] - 1, h / ref[c][1] - 1)

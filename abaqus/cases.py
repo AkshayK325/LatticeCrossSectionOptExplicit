@@ -774,10 +774,23 @@ def b2_mesh(c=B2a):
             import nodeJoint as nj
             stl = ROOT.parent / 'STL' / 'abaqus_fhs' / f"{c['name']}.stl"
             stl.parent.mkdir(parents=True, exist_ok=True)
-            man, _ = nj.lattice_fhs(X, C, strut_radii(c, lat), z_range=(0.0, H), mirror=c.get('mirror', False))
-            nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
+            rads = strut_radii(c, lat)
             pr = (0.0, H, c['h'] * c['plate_refine'], 1.0) if c.get('plate_refine') else None
-            P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0, plate_refine=pr, **c.get('fmesh', F_MESH))
+            # 'own' + the case's mesher first (= every F1 / H1 input as generated before); then, only if gmsh fails or a plate
+            # end does not reach its plate (B7: nodes 5 um off the plane), the other trim side and the robust 2D mesher
+            tries = [('own', c.get('fmesh', F_MESH)), ('out', c.get('fmesh', F_MESH)), ('out', dict(algo2d=6, smooth2d=0))]
+            for k, (push, fm) in enumerate(tries):
+                if k == 0 or push != tries[k - 1][0]:
+                    man, _ = nj.lattice_fhs(X, C, rads, z_range=(0.0, H), mirror=c.get('mirror', False), plate_push=push)
+                    nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
+                try:
+                    P, T = solid.gmsh_from_stl(stl, c['h'], curvature=0, plate_refine=pr, **fm)
+                    _check_plate_ends(lat, P, dict(H=H, r=float(rads.max()), rmin=float(rads.min())))
+                    break
+                except Exception as e:
+                    if k == len(tries) - 1:
+                        raise
+                    print(f"{c['name']}: {push}, {fm} failed ({str(e)[:90]}); next: {tries[k + 1]}")
             P, T, info['slivers_removed'] = solid.remove_boundary_slivers(P, T, 0.25 * c['h'])
             info['stl'] = str(stl.relative_to(ROOT.parent))
         else:
@@ -1091,6 +1104,13 @@ def b3_lattice(c=B3):
             'beam_of_elem': np.repeat(np.arange(len(C)), n_per)}
 
 
+def _b3_radii(c, lat):
+    """Per-strut radii for the prescribed-motion pipeline: c['strut_r'] (one per lattice strut), Midplane groups c['rg'], or uniform c['r']."""
+    if 'strut_r' in c:
+        return np.asarray(c['strut_r'], float)
+    return strut_radii(c, lat)
+
+
 def _check_plate_ends(lat, P, c):
     """Raise if a strut end lying on a plate has no mesh node ON that plate near it (B7, 2026-10-16: a vertical column ending
     exactly on the plane stopped 5 um short of both plates, so the solid column was neither clamped nor tied: reaction = the
@@ -1100,14 +1120,14 @@ def _check_plate_ends(lat, P, c):
         for z in (0.0, c['H']):
             if abs(x[2] - z) < 1e-9 and deg[n] > 0:
                 on = P[np.abs(P[:, 2] - z) < 1e-6]
-                if int((np.hypot(on[:, 0] - x[0], on[:, 1] - x[1]) < c['r']).sum()) < 6:
+                if int((np.hypot(on[:, 0] - x[0], on[:, 1] - x[1]) < c.get('rmin', c['r'])).sum()) < 6:
                     raise RuntimeError(f'strut end at node {n} {np.round(x, 3).tolist()} does not reach the plate z = {z}')
 
 
 def b3_mesh(c=B3, lat=None, tag='B3_bcc_node'):
     """FHS solid of the B3 star, or of the lattice `lat` (lattice_fhs, trimmed to the plates) -> C3D10M, as the F / H
     cells."""
-    key = (tag, c.get('nx', 1), c.get('ny', 1), c['r'], c['h'], c['H'])
+    key = (tag, c.get('nx', 1), c.get('ny', 1), c['r'], c['h'], c['H'], tuple(c.get('strut_r', ())), tuple(c.get('rg', ())))
     if key not in _B3_cache:
         import nodeJoint as nj
         import solid
@@ -1129,7 +1149,7 @@ def b3_mesh(c=B3, lat=None, tag='B3_bcc_node'):
                     Xf[n] = Xf[n] + c['extend_ends'] * c['r'] * d / np.linalg.norm(d)
         for k, (push, fm) in enumerate(tries):
             if k == 0 or push != tries[k - 1][0]:
-                man, _ = nj.lattice_fhs(Xf, Cf, np.full(len(Cf), c['r']), z_range=(0.0, c['H']), plate_push=push,
+                man, _ = nj.lattice_fhs(Xf, Cf, _b3_radii(c, lat), z_range=(0.0, c['H']), plate_push=push,
                                          mirror=bool(c.get('mirror')))
                 nj.export(nj.to_stl_mesh(man), str(stl.with_suffix('')))
             try:
@@ -1222,7 +1242,7 @@ def b3_ours(c=B3, joint=None, lat=None):
     torch.set_default_dtype(torch.float64)
     lat = b3_lattice(c) if lat is None else lat
     fr = Frame(lat['Xr'], lat['connr'])
-    r_e = torch.full((fr.ne,), c['r'])
+    r_e = torch.as_tensor(_b3_radii(c, lat)[np.asarray(lat['beam_of_elem'])], dtype=torch.float64)
     A, I = circle_sections(r_e, nu=NU)
     mat = epu45()
     if c['material'] == 'linear':
@@ -1234,7 +1254,7 @@ def b3_ours(c=B3, joint=None, lat=None):
         se = jointRule.rule_factors(lat, r_e, **{k_: v for k_, v in joint.items() if k_ in jointRule.DEFAULT})
         law = JointScaledLaw(law, se)
     elif joint is not None:
-        se, _ = jointSection.element_factors_aniso(lat, np.full(len(lat['conn']), c['r']), decay=joint.get('decay'),
+        se, _ = jointSection.element_factors_aniso(lat, _b3_radii(c, lat), decay=joint.get('decay'),
                                                    joint_shape=joint.get('shape', 'sphere'),
                                                    plate_layer=joint.get('plate_layer', False))
         law = JointScaledLaw(law, torch.as_tensor(se, dtype=A.dtype))
@@ -1451,7 +1471,7 @@ def b78_lattice(c):
 
 
 def b78_inp(c):
-    tag = f"B7_T{c.get('theta', 0):g}" if c['cell'] == 'T' else f"B8_N{c['n']}"
+    tag = (f"B7_T{c.get('theta', 0):g}" + ''.join(f'_{v:g}' for v in c.get('strut_r', ()))) if c['cell'] == 'T' else f"B8_N{c['n']}"
     return b3_inp(c, g=b3_mesh(c, lat=b78_lattice(c), tag=tag))
 
 
@@ -1480,6 +1500,60 @@ B9_CASES = {
 
 def b9_inp(c):
     return b3_inp(c, g=b3_mesh(dict(c, nx=1, ny=1), lat=b4_lattice(c), tag=f"B9_{c['cell']['cell']}"))
+
+
+# ------------------------------------------------------------------------------------------------ B10 / B11 / B9d / F2 / H2
+# Set up 2026-10-17 from the plan in notes/18 section 13:
+#  B10a/b  C4 unit cell r 0.8 / r 0.6 (the DESIGN lattice) under prescribed plate motion, linear, current FHS geometry, long hold
+#  B10c/d  graded C4 (Midplane: top 1.0 / bottom 0.6 / mid 0.8, and the reverse): unequal radii at every joint
+#  B11a-d  the B7 T-joint with UNEQUAL radii (column 1.0 / oblique 0.6 and the reverse, at 45 and 30 deg)
+#  B9d     B9c (C12) with a 1.2 ms hold: the C12 solid rings with a ~0.2 ms period, so B9c's static value is uncertain
+#  F2*/H2* the F1 / H1 impact solids RE-GENERATED with the current FHS geometry (F1 / H1 were built before 2026-10-11)
+B10_CASES = {
+    'B10a': dict(B3, name='B10a_C4_r08_linE0', cell=dict(cell='C4', elemSize=0.8, nx=1, ny=1), r=0.8, h=0.4, H=12.7, amount=0.5,
+                 material='linear', t_ramp=3e-4, t_hold=5e-4,
+                 title='B10a: C4 unit cell r 0.8 (FHS joints, current geometry), LINEAR E0 = 342.9 MPa, nu 0.49; top plate down 0.5 mm '
+                       '(smooth step 0.3 ms), hold 0.5 ms; bottom plate clamped; no contact'),
+    'B10b': dict(B3, name='B10b_C4_r06_linE0', cell=dict(cell='C4', elemSize=0.6, nx=1, ny=1), r=0.6, h=0.3, H=12.7, amount=0.5,
+                 material='linear', t_ramp=3e-4, t_hold=5e-4,
+                 title='B10b: C4 unit cell r 0.6 (FHS joints), LINEAR E0, top plate down 0.5 mm, hold 0.5 ms; no contact'),
+    'B10c': dict(B3, name='B10c_C4_graded_top10_bot06_linE0', cell=dict(cell='C4', elemSize=0.6, nx=1, ny=1), rg=(1.0, 0.6, 0.8), r=1.0,
+                 rmin=0.6, h=0.3, H=12.7, amount=0.5, material='linear', t_ramp=3e-4, t_hold=3e-4,
+                 title='B10c: graded C4 cell (Midplane radii top 1.0, bottom 0.6, mid 0.8; FHS joints), LINEAR E0, top plate down 0.5 mm, '
+                       'hold 0.3 ms; no contact'),
+    'B10d': dict(B3, name='B10d_C4_graded_top06_bot10_linE0', cell=dict(cell='C4', elemSize=0.6, nx=1, ny=1), rg=(0.6, 1.0, 0.8), r=1.0,
+                 rmin=0.6, h=0.3, H=12.7, amount=0.5, material='linear', t_ramp=3e-4, t_hold=3e-4,
+                 title='B10d: graded C4 cell (top 0.6, bottom 1.0, mid 0.8; FHS joints), LINEAR E0, top plate down 0.5 mm, hold 0.3 ms; no contact'),
+}
+B9d = dict(B9_CASES['B9c'], name='B9d_C12_r05_linE0_longhold', t_hold=1.2e-3, out_dt=4e-6,
+           title='B9d: as B9c (C12 unit cell r 0.5, FHS, LINEAR E0, top plate down 0.5 mm in 0.3 ms) with a 1.2 ms hold (the C12 solid '
+                 'rings with a ~0.2 ms period: the static value is the mean over several periods)')
+
+
+def _b11(tag, theta, r_col, r_obl):
+    return dict(B7, name=f"B11{tag}_T{theta:g}_col{int(round(10 * r_col)):02d}_obl{int(round(10 * r_obl)):02d}_linE0", theta=float(theta),
+                strut_r=(r_col, r_col, r_obl), r=max(r_col, r_obl), rmin=min(r_col, r_obl), h=0.5 * min(r_col, r_obl),
+                title=f"B11{tag}: T-joint at mid height, column r {r_col:g} (both halves), oblique strut r {r_obl:g} up to the top plate "
+                      f"at {theta:g} deg to the column, H 12.7, FHS joint, LINEAR E0, top plate down 0.5 mm (smooth step 0.3 ms), hold 0.2 ms; "
+                      f"bottom plate clamped; no contact")
+
+
+B11_CASES = {'B11a': _b11('a', 45, 1.0, 0.6), 'B11b': _b11('b', 45, 0.6, 1.0), 'B11c': _b11('c', 30, 1.0, 0.6), 'B11d': _b11('d', 30, 0.6, 1.0)}
+
+
+def _renew(spec, old, new):
+    """The same case under a new name (F1 -> F2, H1 -> H2): regenerated with the current FHS geometry."""
+    return dict(spec, name=spec['name'].replace(old, new, 1), title=spec['title'].replace(old, new, 1) + ' [current FHS geometry, regenerated 2026-10-17]')
+
+
+F2_CASES = {'F2a': _renew(dict(F1a, fmesh=F_MESH, **F_RUN), 'F1a', 'F2a'), 'F2d': _renew(F1d, 'F1d', 'F2d'), 'F2e': _renew(F1e, 'F1e', 'F2e'),
+            'F2f': _renew(F1f, 'F1f', 'F2f'), 'F2g': _renew(F1g, 'F1g', 'F2g'), 'F2h': _renew(F1h, 'F1h', 'F2h')}
+H2_CASES = {'H2a': _renew(H1a, 'H1a', 'H2a'), 'H2d': _renew(H1d, 'H1d', 'H2d'), 'H2e': _renew(H1e, 'H1e', 'H2e')}
+
+
+def b10_inp(c):
+    cell = c['cell']
+    return b3_inp(c, g=b3_mesh(dict(c, nx=1, ny=1), lat=b4_lattice(c), tag=f"B10_{cell['cell']}"))
 
 
 # ------------------------------------------------------------------------------------------------ A3s
@@ -1723,6 +1797,12 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
             for k, v in {**B7_CASES, **B8_CASES}.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b9_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B9_CASES.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b10_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
+            for k, v in {**B10_CASES, 'B9d': B9d}.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b78_inp(v)), ours=(lambda v=v: b78_ours(v, JOINT_FHS)), joint=JOINT_FHS)
+            for k, v in B11_CASES.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b2_inp(v)), ours=(lambda v=v: a4_ours(dict(v, joint=JOINT_FHS))), joint=JOINT_FHS)
+            for k, v in {**F2_CASES, **H2_CASES}.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b5_inp(v)), ours=(lambda v=v: b5_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B5_CASES.items()},
          # provisional beam prediction: fused-section joint model of the B2 (sphere) joint, until the FHS joint shape
@@ -1749,5 +1829,10 @@ def write_inp(case):
 
 
 if __name__ == '__main__':
-    for case in (sys.argv[1:] or list(CASES)):
+    sys.path.insert(0, str(ROOT.parent / 'tests'))
+    import runStatus as rs                                       # repo rule: every long job reports to run_status.log
+    names = sys.argv[1:] or list(CASES)
+    rs.start('write Abaqus inputs ' + ' '.join(names[:6]) + (' ...' if len(names) > 6 else ''))
+    for ci, case in enumerate(names):
+        rs.update(case, ci, len(names))
         print('wrote', write_inp(case))

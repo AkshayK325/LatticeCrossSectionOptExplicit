@@ -35,11 +35,14 @@ def zone_model(sp):
 
 
 def main(names):
+    import runStatus as rs                                       # repo rule: every long job reports to run_status.log
+    rs.start('B9 predictions ' + ' '.join(names))
     pars = {m: json.loads((ROOT / 'results' / 'rule_fit2' / f'{m}.json').read_text())['params'] for m in ('R1', 'R2', 'R3')}
     L = ['# B9: octet r 1.0 / 1.5 and C12 r 0.5 unit cells, prescribed plate motion (current FHS geometry, linear)', '',
          'Reaction = sum RF3 at the bottom plate, hold value [N] (solid: mean over the last 70 % of the hold); stiffening = / bare beams.', '',
          '| case | model | end of ramp [N] | hold [N] | vs bare | error vs solid |', '|---|---|---|---|---|---|']
-    for case in names:
+    for ci, case in enumerate(names):
+        rs.update(case, ci, len(names))
         sp = cases.CASES[case]['spec']
         runs = [('bare beams', lambda: cases.b4_ours(sp, None)), ('zone k = 3.5', lambda: zone_model(sp)),
                 ('JOINT_FHS', lambda: cases.b4_ours(sp, cases.JOINT_FHS))]

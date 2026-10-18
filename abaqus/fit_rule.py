@@ -98,6 +98,8 @@ class Fit:
 def main():
     model = sys.argv[1]
     hold = sys.argv[2] if len(sys.argv) > 2 else None
+    import runStatus as rs                                       # repo rule: every long job reports to run_status.log
+    rs.start(f'joint-rule fit (first set) {model} hold={hold}')
     f = Fit(model, hold)
     x = f.fit()
     pr = f.predict(x, CASES)
