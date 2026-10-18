@@ -1213,6 +1213,7 @@ If B11b / B11d come out near 1.2 / 1.33 the neighbour sum should use a weaker ra
 | H2e BCC r 1.0 EPU | 1.023 / 122.3 | 0.869 / 156.5 | 0.906 / 146.8 |
 | F2d C12 r 0.5 | 9.529 / 4.8 | 8.183 / 5.7 | 7.851 / 7.7 |
 | F2a C4 r 0.8 | 10.232 / 16.7 | 8.110 / 19.6 | 8.285 / 21.6 |
-(H2d, H2a in the table once the prediction job has finished.)
+| H2d C12 r 0.5 EPU | 9.425 / 3.5 | 7.666 / 4.2 | 7.239 / 4.0 |
+| H2a C4 r 0.8 EPU | 10.483 / 12.4 | 7.760 / 17.5 | 8.099 / 17.4 |
 
 **Bookkeeping added the same day:** `CLAUDE.md` (repo rules: every background / long job reports to `run_status.log`), `tests/run_logged.py` (wrapper / watcher for any command), run_status reporting inside every long script.
