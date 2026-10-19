@@ -170,3 +170,19 @@ def test_rule_factors_tail():
     d = torch.zeros_like(r); d[::3] = 1.0; h = 1e-6
     fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
     assert abs(float((g * d).sum()) - float(fd)) < 1e-5 * max(1.0, abs(float(fd)))
+
+
+def test_rule_presets_match_fit_files():
+    """The PRESETS of jointRule are the fitted parameters of the result files (no silent edits)."""
+    import json
+    import pathlib
+    import jointRule
+    root = pathlib.Path(__file__).resolve().parent.parent / 'abaqus' / 'results'
+    for name, f in (('R5', 'rule_fit3/R5.json'), ('R5_all22', 'rule_fit4/R5.json')):
+        par = json.loads((root / f).read_text())['params']
+        for k, v in par.items():
+            if k != 'mu':
+                assert jointRule.PRESETS[name][k] == v, (name, k)
+
+    c4 = dict(jointRule.PRESETS['R5'], short_gain=1.5, short_l0=4.6)
+    assert jointRule.PRESETS['R5_C4'] == c4

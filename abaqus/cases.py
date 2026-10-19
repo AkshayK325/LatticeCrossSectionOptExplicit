@@ -1580,6 +1580,31 @@ F2_CASES = {'F2a': _renew(dict(F1a, fmesh=F_MESH, **F_RUN), 'F1a', 'F2a'), 'F2d'
 H2_CASES = {'H2a': _renew(H1a, 'H1a', 'H2a'), 'H2d': _renew(H1d, 'H1d', 'H2d'), 'H2e': _renew(H1e, 'H1e', 'H2e')}
 
 
+# ------------------------------------------------------------------------------------------------ B13
+# C4 unit cell with DECOUPLED radii of the short (2.63 mm) and the long (6.35 mm) struts (2026-10-19, notes/18 sections 16-17): the C4 cell's reaction is dominated by its short
+# struts (short struts x3 in the beam model = +29 %), which the solid makes ~3 x stiffer than every model. With (r_long, r_short) varied the short struts' effective stiffness
+# and the radius-ratio dependence (needed by the design gradient) are measured in their real load path. Same loading as B10a (0.5 mm in 0.3 ms, hold 0.5 ms, linear, current
+# FHS geometry); B10b (0.6, 0.6) and B10a (0.8, 0.8) are the equal-radius members of the series.
+def _b13(tag, r_long, r_short):
+    from latticeSetup import example3
+    lat = example3(elemSize=1.0, nx=1, ny=1, name='C4')
+    L = np.linalg.norm(lat['X'][lat['conn'][:, 1]] - lat['X'][lat['conn'][:, 0]], axis=1)
+    sr = tuple(float(r_short if abs(Lb - L.min()) < 1e-6 else r_long) for Lb in L)
+    rmin = min(r_long, r_short)
+    return dict(B3, name=f"B13{tag}_C4_rl{int(round(100 * r_long)):03d}_rs{int(round(100 * r_short)):03d}_linE0",
+                cell=dict(cell='C4', elemSize=rmin, nx=1, ny=1), strut_r=sr, r=max(r_long, r_short), rmin=rmin, h=0.5 * rmin, H=12.7, amount=0.5,
+                material='linear', t_ramp=3e-4, t_hold=4e-4, r_long=r_long, r_short=r_short,
+                title=f"B13{tag}: C4 unit cell, long struts r {r_long:g}, short (2.63 mm) struts r {r_short:g}, FHS joints, LINEAR E0, top plate down 0.5 mm "
+                      f"(smooth step 0.3 ms), hold 0.4 ms; bottom plate clamped; no contact")
+
+
+B13_CASES = {'B13a': _b13('a', 0.6, 0.8), 'B13b': _b13('b', 0.6, 1.0), 'B13c': _b13('c', 0.8, 0.6), 'B13d': _b13('d', 0.8, 1.0)}
+
+
+def b13_inp(c):
+    return b3_inp(c, g=b3_mesh(dict(c, nx=1, ny=1), lat=b4_lattice(c), tag=f"B13_C4_rl{c['r_long']:g}_rs{c['r_short']:g}"))
+
+
 def b10_inp(c):
     cell = c['cell']
     return b3_inp(c, g=b3_mesh(dict(c, nx=1, ny=1), lat=b4_lattice(c), tag=f"B10_{cell['cell']}"))
@@ -1826,6 +1851,8 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
             for k, v in {**B7_CASES, **B8_CASES}.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b78_inp(v)), ours=(lambda v=v: b78_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B12_CASES.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b13_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
+            for k, v in B13_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b9_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B9_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b10_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)

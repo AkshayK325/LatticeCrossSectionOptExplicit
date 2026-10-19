@@ -34,9 +34,9 @@ FREE = {'R0': ['a', 'zl'], 'R1': ['a', 'zl', 'gamma'], 'R2': ['a', 'zl', 'gamma'
 START = dict(a=1.0, zl=1.0, gamma=0.5, b=0.2, p=0.0, cap=0.4, wsat=3.0, lmin=0.3)
 LO = dict(a=0.0, zl=0.3, gamma=0.0, b=0.0, p=-4.0, cap=0.1, wsat=0.5, lmin=0.0)
 HI = dict(a=6.0, zl=3.0, gamma=1.0, b=2.0, p=10.0, cap=0.5, wsat=20.0, lmin=2.0)
-BASE = dict(a=1.0, p=0.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tail=0.0, tail_len=2.0, tail_pow=1.0, ang_cos=False, tail_mult=False)
+BASE = dict(a=1.0, p=0.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tail=0.0, tail_len=2.0, tail_pow=1.0, ang_cos=False, tail_mult=False, short_gain=0.0, short_l0=5.5)
 RUNNER = {'B3': 'b3_ours', 'B5': 'b5_ours', 'B6': 'b4_ours', 'B7': 'b78_ours', 'B8': 'b78_ours', 'B9': 'b4_ours',
-          'B10': 'b4_ours', 'B11': 'b78_ours', 'B12': 'b78_ours'}
+          'B10': 'b4_ours', 'B11': 'b78_ours', 'B12': 'b78_ours', 'B13': 'b4_ours'}
 
 
 def runner_name(case):

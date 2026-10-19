@@ -14,10 +14,10 @@ change moves the stiffening. Parameters (a, p, zl, b) are fitted in abaqus/fit_r
 import numpy as np
 import torch
 
-DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tail=0.0, tail_len=2.0, tail_pow=1.0, ang_cos=False, tail_mult=False)
+DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tail=0.0, tail_len=2.0, tail_pow=1.0, ang_cos=False, tail_mult=False, short_gain=0.0, short_l0=5.5)
 
 
-def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tail=0.0, tail_len=2.0, tail_pow=1.0, ang_cos=False, tail_mult=False, tau=0.02):
+def _rule_core(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tail=0.0, tail_len=2.0, tail_pow=1.0, ang_cos=False, tail_mult=False, tau=0.02):
     """Per-element stiffness factors (ne,) >= 1, differentiable in r_elem (ne,) and in (a, p, zl, b, mu, pz, gamma) if tensors.
     p: angle exponent of the stiffness weight sin^p; pz: of the zone-length weight (default = p); a negative exponent weights
     ACUTE neighbours more (B7: the solid stiffens more the more acute the neighbour). gamma in [0, 1]: weight of a pair of struts
@@ -127,3 +127,32 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamm
         return le / ((le[:, None] / 2 * wg[None, :]) / beta).sum(1)
     comp = (le - ov0 - ov1) + ov0 / k0 + ov1 / k1
     return le / comp
+
+
+def rule_factors(lat, r_elem, short_gain=0.0, short_l0=5.5, **kw):
+    """_rule_core (above) times an optional SHORT-STRUT correction: the factors of the elements of a strut of length L and own radius r are multiplied by
+    1 + short_gain * max(short_l0 - L / r, 0). Calibration on the C4 solids (abaqus/short_strut_calibration.py): the short (2.63 mm) C4 struts need an extra x2.1 at L / r = 4.4
+    and x3.2 at L / r = 3.3 on top of R5 (gain ~ 1, l0 ~ 5.5), but C12 (L / r 4.6-5.7, valence 2-3) needs none: a C4-specific stopgap, off by default (notes/18 section 18)."""
+    s = _rule_core(lat, r_elem, **kw)
+    if short_gain:
+        X, C = lat['X'], lat['conn']
+        boe = torch.as_tensor(np.asarray(lat['beam_of_elem']))
+        Lb = torch.as_tensor(np.linalg.norm(X[C[:, 1]] - X[C[:, 0]], axis=1), dtype=r_elem.dtype)
+        nb = len(C)
+        cnt = torch.zeros(nb, dtype=r_elem.dtype).index_add(0, boe, torch.ones_like(r_elem))
+        rb = torch.zeros(nb, dtype=r_elem.dtype).index_add(0, boe, r_elem) / cnt
+        s = s * (1.0 + short_gain * torch.clamp(short_l0 - Lb[boe] / rb[boe], min=0.0))
+    return s
+
+
+# Ready-to-use joint configurations: drop_rig(..., joint=jointRule.PRESETS['R5']) (also latticeSetup.drop_rig / cases.b3_ours). Values = the fit files in abaqus/results.
+#   'R5'       fitted on 13 linear specimens (B3, B5, B6, B7, B8, B9a-c); held-out rms 5 %, max 10 %; unequal radii (B11) within +-6 %; C4 cells 16-24 % too soft (notes/18 sections 13-18).
+#   'R5_all22' refitted on all 22 specimens (adds B9d, B10, B11): rms 7.0 %, max 17 %; trades the long-strut cells for C4 (B10a -17 %); use only if C4 statics matter most.
+# mu = 1: the EPU 45 factor fitted on the fast prescribed ramps does not transfer to impact (notes/18 section 9).
+PRESETS = {
+    'R5': dict(mode='rule', a=3.4462742365415906, zl=0.7732454540044637, gamma=0.002556182131193757, b=0.15346978546753595, p=-0.771172326210512, wsat=2.4686884460414977),
+    # PROVISIONAL (notes/18 section 18): R5 + the short-strut law (gain 1.5, onset L / r = 4.6) calibrated on 4 C4 solids; fixes the C4 statics (22-specimen rms 3.6 %, max 9.4 %) and the C4 impact stroke / energy
+    # (F2a -3.3 %, H2a +0.2 %) but worsens the C4 impact peak force (+49 % / +25 %); independent test = B13.
+    'R5_C4': dict(mode='rule', a=3.4462742365415906, zl=0.7732454540044637, gamma=0.002556182131193757, b=0.15346978546753595, p=-0.771172326210512, wsat=2.4686884460414977, short_gain=1.5, short_l0=4.6),
+    'R5_all22': dict(mode='rule', a=2.993269531223047, zl=0.9297752637234049, gamma=0.061641144032001334, b=0.12074977714682034, p=-0.29195371444849794, wsat=3.017669602138089),
+}

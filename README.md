@@ -29,6 +29,7 @@ The linear-elastic VAE section optimisation (the earlier paper) is described in 
 | **Drop / crush rig** | the lattice between plates, hit by an impactor; objectives (force-stroke target, specific energy absorption) | `src/latticeSetup.py`, `src/objectives.py` |
 | **Gradients** | exact discrete adjoint of the explicit scheme with √N checkpointing (memory flat in time; equal to unrolled AD to 1e-16), wrapped as a `torch.autograd.Function` | `src/adjoint.py`, `src/optimizeDrop.py`, `src/dropGrad.py` |
 | **Joint stiffness in the beam model** | fused-section joint stiffening taken from the printed joint shape (no fitted constant) | `src/jointSection.py` |
+| **Joint stiffness: closed-form, differentiable rule** | stiffening of the beam ends from the strut angles and radii at each node (rigid-like zone of ~0.8 x the geometric length, saturating valence sum), exact design gradients (adjoint = AD = finite differences), fitted and cross-validated against 22 Abaqus solid specimens; presets for design use | `src/jointRule.py` (`PRESETS`), fits in `abaqus/results/rule_fit*`, scripts `abaqus/fit_rule2.py`, `abaqus/wrapup_table.py` |
 | **Print joints (FHS)** | Faired Hull-Subdivision node joints: hull of the strut rings, Loop subdivision, thin-plate fairing kept outside the strut cores; graded radii and non-circular (incl. VAE) sections; whole-lattice watertight STL / 3MF | `src/nodeJoint.py` (`lattice_fhs`) |
 | **Other joint methods (for comparison)** | rolling-ball fillets (SDF), soap-film method (port of Luo & Zou 2025), Savio et al. 2018 | `src/smoothJoint.py`, `src/subdivLattice.py`, `src/soapFilm.py` |
 | **Abaqus/Explicit benchmarks** | input files for every validation case (beams, crossings, lattices, solid unit cells, single EPU 45 struts), our matching runs, comparison and figures | `abaqus/` (see [`abaqus/README.md`](abaqus/README.md), [`abaqus/BENCHMARK_PLAN.md`](abaqus/BENCHMARK_PLAN.md)) |
@@ -82,6 +83,20 @@ rig = drop_rig(lat, radii(x, 'Midplane', lat), rig0['law'], mat=epu45(), freeze=
                **{k: v for k, v in rig_kw.items() if k != 'law'})
 J, (dJdx,) = checkpointed_adjoint(DropStepper(rig, schedule, placeholder_J), [x])
 ```
+
+## Joint stiffness in the beam model
+
+A beam model of a printed lattice is too soft at the nodes (7-70 % on the unit cells here). `src/jointRule.py` adds a closed-form, differentiable stiffening of the strut ends, a function of the
+radii and angles of the struts meeting at each node, fitted and cross-validated against Abaqus solid models of the FHS print geometry:
+
+```python
+import jointRule
+rig = drop_rig(lat, radii, law, mat=mat, joint=jointRule.PRESETS['R5'], ...)     # same call for the explicit solver and the adjoint
+```
+
+- accuracy on 22 prescribed-motion specimens: 5 % rms held out for long-strut cells (simple cubic, BCC, octet, C12, unequal-radius T-joints, within +-6 %); **the C4 design cell is 16-24 % too soft** (its short struts), see `abaqus/BENCHMARK_PLAN.md` and
+  `abaqus/results/joint_model_summary.md`;
+- the design gradient through the joint model is exact (`tests/test_joint_rule_adjoint.py`); the geometry-based slicing model (`jointSection.py`) is accurate but not differentiable.
 
 ## Performance (measured)
 

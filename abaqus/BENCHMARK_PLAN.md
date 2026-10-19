@@ -1310,3 +1310,57 @@ The slicing model (real FHS joint shape) without participation decay matches C12
 
 **Next specimens (B13, proposed, not built): the C4 cell with DECOUPLED radii of its short (2.63 mm) and long (6.35 mm) struts**, (r_long, r_short) = (0.6, 0.8), (0.6, 1.0), (0.8, 0.6), (0.8, 1.0) plus the existing B10b (0.6, 0.6) and B10a (0.8, 0.8): the short struts are in the main load path
 there, so the solid reaction versus r_short and r_long gives the effective short-strut stiffness (and the radius-ratio dependence that the design gradient needs) directly. 45-100k elements each, 15-35 min of Abaqus each.
+
+## Run list 2026-10-19: B13 (C4 with decoupled short / long strut radii), the last open experiment of the joint-model work
+
+Why (notes/18 sections 16-18): the converged C4 r 0.8 solid is 21-25 % stiffer than every model; the C4 reaction is dominated by its 12 short (2.63 mm) struts (short struts x3 = +29 %); the solids make them ~2.1 x (r 0.6) and ~3.2 x (r 0.8)
+stiffer than rule R5 (`results/short_strut_calibration.md`). B13 varies the short and the long struts' radii separately (B10b (0.6, 0.6) and B10a (0.8, 0.8) are the equal-radius members), 0.5 mm in 0.3 ms, hold 0.4 ms, linear E0,
+current FHS geometry. All four inputs are audited (every plate end has a full face; 12 short and 24 long struts with the right radii).
+
+| order | case (abaqus/inp) | r long | r short | L_short / r_short | elements | est. wall time |
+|---|---|---|---|---|---|---|
+| 1 | B13d_C4_rl080_rs100_linE0 | 0.8 | 1.0 | 2.6 | 46.4k | ~15-20 min |
+| 2 | B13a_C4_rl060_rs080_linE0 | 0.6 | 0.8 | 3.3 | 67.7k | ~30 min |
+| 3 | B13b_C4_rl060_rs100_linE0 | 0.6 | 1.0 | 2.6 | 81.4k | ~35 min |
+| 4 | B13c_C4_rl080_rs060_linE0 | 0.8 | 0.6 | 4.4 | 88.2k | ~40 min |
+| optional | B12a-e (short-strut Y pairs) | | | | 10-16k | ~5 min each (weak probe, see above) |
+
+Then `PYTHONPATH=src:tests python abaqus/b13_predict.py` and `python abaqus/short_strut_calibration.py` (the multiplier m on the short struts that reproduces each solid, on top of R5).
+
+**Blind predictions** (hold value / bare beams; `results/B13_summary.md`):
+
+| case | JOINT_FHS (no decay) | rule R5 | R5 + short-strut law (provisional stopgap) | solid |
+|---|---|---|---|---|
+| B10b (0.6, 0.6) | 1.492 | 1.306 | 1.325 | 1.462 |
+| B13a (0.6, 0.8) | 1.555 | 1.363 | **1.716** | |
+| B13b (0.6, 1.0) | 1.964 | 1.844 | **2.318** | |
+| B10a (0.8, 0.8) | 1.708 | 1.514 | 1.942 | 1.975 |
+| B13c (0.8, 0.6) | 2.044 | 1.814 | **1.914** | |
+| B13d (0.8, 1.0) | 1.794 | 1.524 | **2.066** | |
+
+**Decision rules:** (1) the stopgap (gain 1.5, onset L / r = 4.6, calibrated on the four C4 solids B10a-d) is validated for the C4 family if it is within +-8 % on all four B13 solids; (2) if the multiplier m of B13a (r_short 0.8, r_long 0.6) equals that of B10a and m of B13c equals that of B10b, m depends on the
+short strut's own radius only (law in L / r_short; refit gain and onset on the six points); (3) if m also depends on r_long (the merged node blob is set by the neighbours), the law must use the node's local radii and the design gradient changes accordingly.
+
+## Joint model: state at wrap-up (2026-10-19)
+
+**What is configured** (`src/jointRule.py`, `jointRule.PRESETS`; use `joint=jointRule.PRESETS[name]` in `drop_rig` / the prescribed-motion pipeline; exact design gradients, tested adjoint = AD 1e-9, = finite differences 1e-6):
+
+| preset | what | when |
+|---|---|---|
+| `R5` | closed-form rigid-like end zones (0.77 x the geometric zone length, neighbour-weighted, valence sum saturating at 2.5), fitted on 13 linear specimens | long-strut lattices: simple cubic, BCC, octet, C12, T-joints, unequal radii |
+| `R5_C4` (provisional) | R5 + short-strut law (gain 1.5, onset L / r 4.6) | the C4 design lattice, until B13 confirms or replaces it |
+| `R5_all22` | R5 refitted on all 22 specimens | only if one compromise model is wanted (rms 7.0 %, worst 17 %) |
+
+**Accuracy on the 22 prescribed-motion specimens (hold-window mean; `results/joint_model_summary.md`)**, rms / worst case [%]: bare beams 32 / 70; zone k = 3.5 11.3 / 24; JOINT_FHS slicing (lambda = r) 11.6 / 30; slicing without decay 7.7 / 18.5 (not differentiable);
+**R5 7.8 / 23 (3.0 / 5.7 without the C4 cells; held out on 13 specimens 5.0 / 9.7); R5 + short-strut law 3.6 / 9.4**; R5 refit 7.0 / 17.
+Unequal radii (B11, the design variables): R5 within +-6 % (JOINT_FHS 6-9 % low); the quadratic radius ratio is confirmed. C4 solid mesh-converged (stiffening 1.942 / 1.976 / 1.994, extrapolated 2.012).
+Impact (current-geometry solids F2 / H2), stroke error R5 / R5_C4: C4 F2a +14.0 / -3.3 %, H2a +23.8 / +0.2 %; C12 -4.6 / -4.7, -6.0 / -6.0; octet (F2g, F2h) -0.1, +1.3 (R5) vs JOINT_FHS +6.6, +15.2; BCC +5.1 .. +7.6 (R5).
+
+**Known limits (stated up front):** (a) the short-strut law is a four-point calibration whose onset sits exactly between the C4 (L / r <= 4.4) and C12 (L / r >= 4.6) struts, and it worsens the C4 impact PEAK force (+49 % / +25 %); (b) the EPU 45 stiffening
+of the fast prescribed ramps is 6-17 % lower than the linear one and no constant transfers to impact (mu = 1 is used); (c) section shape (VAE, non-circular) is not represented: the rule uses the radius only; (d) the explicit step cost with these stiffer ends is 1.5-2.9 x bare beams;
+(e) all fits are gradient-free and the 6-7 fitted numbers are not tightly identified (predictions are stable, parameters are not); (f) the fits use linear-elastic prescribed motion; impact validation exists for C4, C12, BCC and octet only.
+
+**Lessons that changed the work (kept in the memory and CLAUDE.md):** compare linear solids by the hold-window mean (they ring); audit that plate faces reach the plates (B7); the first solids of the F / H series were built with an old FHS geometry (11-13 % too soft in BCC);
+mesh-converge a solid before blaming a model (C4); impact stroke is a weak test of joint stiffness (JOINT_FHS looks right in impact yet is 21-30 % too soft on the static B9b / B9c).
+
+**What is left for the joint configuration:** B13 (above); then either adopt the law (rule 1) or replace it (rules 2-3); re-run the C4 impact solids F2a / H2a with the final model and look at the peak force; use the preset in the plateau-design optimisation (notes/9, k = 3.5 before) and verify one optimised design with an FHS solid.
