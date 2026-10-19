@@ -49,3 +49,13 @@ Reaction = sum RF3 at the bottom plate, hold value [N] (solid: mean over the las
 | B9d | JOINT_FHS | 5.676 | 3.248 | 1.367 | -3.0 % |
 | B9d | rule R5 | 5.471 | 3.498 | 1.472 | +4.5 % |
 | B9d | **Abaqus solid** | 4.867 | 3.349 | 1.409 |  |
+| B10e | bare beams | 10.78 | 10.82 | 1.000 | -49.8 % |
+| B10e | zone k = 3.5 | 16.34 | 16.63 | 1.536 | -22.9 % |
+| B10e | JOINT_FHS | 16.84 | 17.12 | 1.582 | -20.6 % |
+| B10e | rule R5 | 16.14 | 16.39 | 1.514 | -24.0 % |
+| B10e | **Abaqus solid** | 21.91 | 21.58 | 1.993 |  |
+| B10f | bare beams | 10.78 | 10.82 | 1.000 | -48.5 % |
+| B10f | zone k = 3.5 | 16.34 | 16.63 | 1.536 | -20.9 % |
+| B10f | JOINT_FHS | 16.84 | 17.12 | 1.582 | -18.5 % |
+| B10f | rule R5 | 16.14 | 16.39 | 1.514 | -22.0 % |
+| B10f | **Abaqus solid** | 21.24 | 21.01 | 1.941 |  |

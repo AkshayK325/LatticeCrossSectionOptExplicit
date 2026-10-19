@@ -1266,3 +1266,20 @@ Run B10f first, then B10e. Copy back the history CSV(s) and `.sta` / `.dat` / `.
 - fine within 3 % of B10a and the trend flattening: the solid is converged, the C4 under-prediction is real and needs a structural joint-model change (short strut / merged joints);
 - fine more than ~8 % below B10a (stiffening below ~1.82): part of the 1.975 is locking of the short necks; use the extrapolated value, re-score B10a-d, F2a and H2a (same mesh size) and weight them down accordingly;
 - in between: the extrapolated value is the reference and the remaining model error is the one reported.
+
+### Results 2026-10-19: mesh-convergence study of the C4 r 0.8 solid (B10f / B10a / B10e) and what it means
+
+| case | h [mm] | elements | hold mean [N] | stiffening vs bare (10.82 N) | JOINT_FHS error | rule R5 error |
+|---|---|---|---|---|---|---|
+| B10f | 0.55 | 21.4k | 21.010 | 1.942 | -18.5 % | -22.0 % |
+| B10a | 0.40 | 45.4k | 21.383 | 1.976 | -19.9 % | -23.3 % |
+| B10e | 0.28 | 110.7k | 21.576 | 1.994 | -20.6 % | -24.0 % |
+| Richardson (observed order 1.93) | 0 | - | 21.77 | **2.012** | -21.4 % | -24.7 % |
+
+- **The solid is mesh-converged to < 1 % at h 0.28 and its stiffness INCREASES with refinement** (the opposite of locking; coarse meshes are slightly soft). The C4 under-prediction is therefore real physics, not a solid artefact:
+  the models miss the converged C4 r 0.8 stiffness by 21-25 %. (The h = r/2 meshes used for all other solids are ~ 1-2 % soft by the same trend; this does not change any conclusion.)
+- **Diagnosis so far (offline):** on the C4 cell the slicing model and the rule R5 both leave the MIDDLE of the short 2.63 mm strut (L/r = 3.3 at r 0.8, 4.4 at r 0.6) unstiffened (element factors 1.01 / 1.0, ends 1.4-1.8), although the two valence-3 joints at its ends must merge along it.
+  The long-strut end elements have mean factors 5.0-5.4 (slicing) and 3.1-3.3 (rule); neither reaches the solid. One-at-a-time changes of the rule (zone scale 1.2: B10a -0.5 % but C12 B9d +40 %; short-strut zone growth: B10a -13.7 % at 0.5 but C12 +12 %, B10b unchanged; zone floor, taper 1 / 2, plate-node scale, gain, saturation)
+  never satisfy C4 and C12 together. Both have struts of ~ 2.6 mm but r 0.8 vs 0.5; the data need a mechanism that switches on between r / L = 0.19 (C12, fits) and 0.30 (C4 r 0.8; r 0.6 at 0.23 is -10 %).
+- **Proposed next specimens (B12, "short-strut series", not yet built):** a symmetric Y-joint pair: two valence-3 nodes (all angles 120 deg) joined by a strut of length L_s, with four 7.3 mm legs up to the plates, r 0.8, L_s = 2.63 / 4.5 / 7.0 mm (L_s / r = 3.3 / 5.6 / 8.8), plus r 0.6 at L_s = 2.63 (small meshes, minutes each).
+  This isolates the merged-joint regime at fixed node topology and gives the missing L / r dependence directly; the C4 cell and C12 are then explained (or not) by the same function.
