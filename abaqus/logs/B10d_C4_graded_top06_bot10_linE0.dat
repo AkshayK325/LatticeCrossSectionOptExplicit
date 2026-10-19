@@ -1,0 +1,216 @@
+1
+
+   Abaqus 2024                                  Date 18-Oct-2026   Time 17:40:17
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          B10d: graded C4 cell (top 0.6, bottom 1.0, mid 0.8; FHS joints), LINEAR E0, top plate down 0.5 mm, hold 0.3 ms; no contact                                                                                                                                                                                                                                                                                                                                                                                                      
+  *ELEMENT, TYPE=C3D10M, ELSET=CELL
+  *MATERIAL, NAME=EPU45_LIN
+  *DENSITY
+  *ELASTIC
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *SECTION CONTROLS, NAME=SCDIST, DISTORTION CONTROL=YES
+
+ ***WARNING: THE PARAMETER DISTORTION CONTROL ON THE *SECTION CONTROLS OPTION 
+             IS RELEVANT FOR SOLID ELEMENTS WHEREVER APPLICABLE. THIS WARNING 
+             CAN BE IGNORED IF THE FEATURE IS APPLIED TO SOLID ELEMENTS ONLY.
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *RIGID BODY, REF NODE=162128, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162128, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162128, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162128, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162128, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162128, TIE NSET=TOP
+  *RIGID BODY, REF NODE=162128, TIE NSET=TOP
+  *BOUNDARY
+  *BOUNDARY, AMPLITUDE=RAMP
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *RIGID BODY, REF NODE=162128, TIE NSET=TOP
+  
+                               E L E M E N T   Q U A L I T Y  C H E C K S        
+  
+  
+ ***NOTES: DISTORTED ISOPARAMETRIC ELEMENTS: ANGLE BETWEEN ISOPARAMETRIC LINES 
+           IS LESS THAN 45 DEGREES OR GREATER THAN 135 DEGREES.
+  
+           TETRAHEDRAL QUALITY MEASURE: VOLUME OF TETRAHEDRON DIVIDED BY THE 
+           VOLUME OF EQUILATERAL TETRAHEDRON WITH SAME CIRCUMSPHERE RADIUS; 
+           0 FOR DEGENERATE TETRAHEDRON AND 1 FOR EQUILATERIAL TETRAHEDRON. IT 
+           IS RECOMMENDED THAT THE TETRAHEDRAL QUALITY MEASURE BE GREATER THAN 
+           0.02, THE MIN INTERIOR (DIHEDRAL) ANGLE BE GREATER THAN 10 DEGREES, 
+           AND THE MAX INTERIOR (DIHEDRAL) ANGLE BE LESS THAN 160 DEGREES. 
+  
+           MODIFIED TETRAHEDRAL QUALITY MEASURE: ANGLES BETWEEN THE TWO LINE 
+           SEGMENTS ON EACH EDGE; THE EDGES OF MODIFIED TETRAHEDRAL SHOULD BE 
+           AS STRAIGHT AS POSSIBLE. IT IS RECOMMENDED THAT THE ANGLE BETWEEN 
+           THE TWO LINE SEGMENTS ON EACH EDGE IS BETWEEN 160 AND 180 DEGREES. 
+  
+           TRIANGULAR QUALITY MEASURE: AREA OF TRIANGLE DIVIDED BY THE AREA OF 
+           EQUILATERAL TRIANGLE WITH SAME CIRCUMCIRCLE RADIUS; 0 FOR DEGENERATE 
+           TRIANGLE AND 1 FOR EQUILATERAL TRIANGLE. IT IS RECOMMENDED THAT THE
+           TRIANGULAR QUALITY MEASURE BE GREATER THAN 0.01, THE MIN INTERIOR 
+           ANGLE BE GREATER THAN 10 DEGREES, AND THE MAX INTERIOR ANGLE BE LESS 
+           THAN 160 DEGREES. 
+  
+           NODAL ADJUSTMENTS ARISING FROM CONTACT INTERACTIONS AND/OR TIE 
+           CONSTRAINTS CAN CAUSE SEVERE ELEMENT DISTORTION. IT MAY BE NECESSARY 
+           TO REMESH IN ORDER TO REDUCE THE AMOUNT OF ADJUSTMENT. 
+
+ ***WARNING: 21 elements are distorted. Either the isoparametric angles are out 
+             of the suggested limits or the triangular or tetrahedral quality 
+             measure is bad. The elements have been identified in element set 
+             WarnElemDistorted.
+  
+ --------------------------------------------------------------------------------
+ Distorted tetrahedral elements
+  
+  Element  Quality measure     Min angle        Max angle     Adjusted nodes 
+ --------- ---------------- ---------------- ---------------- -------------- 
+      1981       0.00966565          7.93984          153.135       NO       
+      6128        0.0114798          15.4692           152.97       NO       
+     11999        0.0102283          8.70648          158.612       NO       
+     16971        0.0266204          9.58451           164.66       NO       
+     16981       0.00409945          14.5401          154.358       NO       
+     17174       0.00521939          15.0564          152.924       NO       
+     24436         0.017465          10.9659          143.377       NO       
+     27135        0.0221991          9.36108          147.536       NO       
+     27794       0.00647737          12.7719          154.805       NO       
+     28731         0.017953           20.165          150.068       NO       
+     33205        0.0099375           12.899          154.822       NO       
+     40459       0.00257867          6.33755          164.572       NO       
+     40704       0.00702232          11.2633          161.197       NO       
+     42558        0.0183056          15.4897          148.052       NO       
+     59290        0.0173308          17.8645          147.969       NO       
+     60527       0.00930624           14.184           155.98       NO       
+     68129        0.0163317          20.1897          111.408       NO       
+     74436       0.00805688          13.0013          156.505       NO       
+     86276          0.01973           15.897          144.295       NO       
+     86436       0.00485163          13.0839          159.404       NO       
+     88306      0.000319613          5.57462          170.335       NO       
+  
+  
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *FIXED MASS SCALING, DT=8.63947e-09, TYPE=BELOW MIN
+  *BOUNDARY, AMPLITUDE=RAMP
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *NODE OUTPUT, NSET=REF
+  *NODE OUTPUT, NSET=BOT
+  *ENERGY OUTPUT
+  *END STEP
+  *BOUNDARY
+  *STEP, NAME=RAMPHOLD, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *BOUNDARY, AMPLITUDE=RAMP
+
+ ***WARNING: THE OPTION *BOUNDARY,TYPE=DISPLACEMENT HAS BEEN USED; CHECK STATUS 
+             FILE BETWEEN STEPS FOR WARNINGS ON ANY JUMPS PRESCRIBED ACROSS THE 
+             STEPS IN DISPLACEMENT VALUES OF TRANSLATIONAL DOF. FOR ROTATIONAL 
+             DOF MAKE SURE THAT THERE ARE NO SUCH JUMPS. ALL JUMPS IN 
+             DISPLACEMENTS ACROSS STEPS ARE IGNORED
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                 98262
+          NUMBER OF NODES IS                                   260390
+          NUMBER OF NODES DEFINED BY THE USER                  162128
+          NUMBER OF INTERNAL NODES GENERATED BY THE PROGRAM     98262
+          TOTAL NUMBER OF VARIABLES IN THE MODEL               788574
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =      2.1    
+       SYSTEM TIME (SEC)    =      0.0    
+       TOTAL CPU TIME (SEC) =      2.1    
+       WALLCLOCK TIME (SEC) =            2

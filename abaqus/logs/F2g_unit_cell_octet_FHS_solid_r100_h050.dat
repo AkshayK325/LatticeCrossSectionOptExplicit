@@ -1,0 +1,219 @@
+1
+
+   Abaqus 2024                                  Date 18-Oct-2026   Time 18:42:31
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+ ***WARNING: Line #2 has been truncated.
+
+ ***WARNING: Line #5 has been truncated.
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          F2g: FHS-joint twin of B2g (the print geometry, src/nodeJoint.py, instead of cylinders + joint spheres; gmsh tets from the FHS STL, C3D10M h 0.5 mm, distortion control, T 0.5 ms). ONE octet unit cell (12.7 mm cube, r 1.0) as a SOLID (strut cylinders + joint spheres, gmsh/OpenCASCADE, C3D10M, h 0.5 mm), bottom face clamped, top face tied to a rigid plate carrying the impactor (16 N mm at 6 m/s, plate 0.1 g); linear elastic E = 40 MPa, nu 0.49; frictionless self-contact. Ours: beams (1 mm elements), fused-sec
+  *ELEMENT, TYPE=C3D10M, ELSET=CELL
+  *ELEMENT, TYPE=MASS, ELSET=IMPMASS
+  *MATERIAL, NAME=EPU45_LIN
+  *DENSITY
+  *ELASTIC
+  *MASS, ELSET=IMPMASS
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *SECTION CONTROLS, NAME=SCDIST, DISTORTION CONTROL=YES
+
+ ***WARNING: THE PARAMETER DISTORTION CONTROL ON THE *SECTION CONTROLS OPTION 
+             IS RELEVANT FOR SOLID ELEMENTS WHEREVER APPLICABLE. THIS WARNING 
+             CAN BE IGNORED IF THE FEATURE IS APPLIED TO SOLID ELEMENTS ONLY.
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *MASS, ELSET=IMPMASS
+  *RIGID BODY, REF NODE=93549, TIE NSET=TOP
+  *RIGID BODY, REF NODE=93549, TIE NSET=TOP
+  *RIGID BODY, REF NODE=93549, TIE NSET=TOP
+  *RIGID BODY, REF NODE=93549, TIE NSET=TOP
+  *RIGID BODY, REF NODE=93549, TIE NSET=TOP
+  *SURFACE INTERACTION, NAME=CELLINT
+  *FRICTION
+  *RIGID BODY, REF NODE=93549, TIE NSET=TOP
+  *RIGID BODY, REF NODE=93549, TIE NSET=TOP
+  *BOUNDARY
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *RIGID BODY, REF NODE=93549, TIE NSET=TOP
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  *FRICTION
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  
+                               E L E M E N T   Q U A L I T Y  C H E C K S        
+  
+  
+ ***NOTES: DISTORTED ISOPARAMETRIC ELEMENTS: ANGLE BETWEEN ISOPARAMETRIC LINES 
+           IS LESS THAN 45 DEGREES OR GREATER THAN 135 DEGREES.
+  
+           TETRAHEDRAL QUALITY MEASURE: VOLUME OF TETRAHEDRON DIVIDED BY THE 
+           VOLUME OF EQUILATERAL TETRAHEDRON WITH SAME CIRCUMSPHERE RADIUS; 
+           0 FOR DEGENERATE TETRAHEDRON AND 1 FOR EQUILATERIAL TETRAHEDRON. IT 
+           IS RECOMMENDED THAT THE TETRAHEDRAL QUALITY MEASURE BE GREATER THAN 
+           0.02, THE MIN INTERIOR (DIHEDRAL) ANGLE BE GREATER THAN 10 DEGREES, 
+           AND THE MAX INTERIOR (DIHEDRAL) ANGLE BE LESS THAN 160 DEGREES. 
+  
+           MODIFIED TETRAHEDRAL QUALITY MEASURE: ANGLES BETWEEN THE TWO LINE 
+           SEGMENTS ON EACH EDGE; THE EDGES OF MODIFIED TETRAHEDRAL SHOULD BE 
+           AS STRAIGHT AS POSSIBLE. IT IS RECOMMENDED THAT THE ANGLE BETWEEN 
+           THE TWO LINE SEGMENTS ON EACH EDGE IS BETWEEN 160 AND 180 DEGREES. 
+  
+           TRIANGULAR QUALITY MEASURE: AREA OF TRIANGLE DIVIDED BY THE AREA OF 
+           EQUILATERAL TRIANGLE WITH SAME CIRCUMCIRCLE RADIUS; 0 FOR DEGENERATE 
+           TRIANGLE AND 1 FOR EQUILATERAL TRIANGLE. IT IS RECOMMENDED THAT THE
+           TRIANGULAR QUALITY MEASURE BE GREATER THAN 0.01, THE MIN INTERIOR 
+           ANGLE BE GREATER THAN 10 DEGREES, AND THE MAX INTERIOR ANGLE BE LESS 
+           THAN 160 DEGREES. 
+  
+           NODAL ADJUSTMENTS ARISING FROM CONTACT INTERACTIONS AND/OR TIE 
+           CONSTRAINTS CAN CAUSE SEVERE ELEMENT DISTORTION. IT MAY BE NECESSARY 
+           TO REMESH IN ORDER TO REDUCE THE AMOUNT OF ADJUSTMENT. 
+
+ ***WARNING: 16 elements are distorted. Either the isoparametric angles are out 
+             of the suggested limits or the triangular or tetrahedral quality 
+             measure is bad. The elements have been identified in element set 
+             WarnElemDistorted.
+  
+ --------------------------------------------------------------------------------
+ Distorted tetrahedral elements
+  
+  Element  Quality measure     Min angle        Max angle     Adjusted nodes 
+ --------- ---------------- ---------------- ---------------- -------------- 
+       796        0.0192977           35.939          137.422       NO       
+      2597       0.00688441          7.29567           160.46       NO       
+      4271        0.0148417          17.6393           150.93       NO       
+     18149       0.00708203          14.9645          143.056       NO       
+     24370        0.0147048          14.6645          151.917       NO       
+     28078       0.00265142          12.9859          163.376       NO       
+     31007        0.0172084          16.2803          135.255       NO       
+     36039         0.122156          9.05016          160.553       NO       
+     41959       0.00878783          42.2955          130.569       NO       
+     41960        0.0151823          48.9157          123.464       NO       
+     41963        0.0292653          6.44187          122.302       NO       
+     41984        0.0158423          48.9515          124.909       NO       
+     42126       0.00473148          10.2468          160.314       NO       
+     43260        0.0596809          8.51676          121.857       NO       
+     43979        0.0142911          19.0864          148.393       NO       
+     53916        0.0114062          14.9369          153.156       NO       
+  
+  
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *STEP, NAME=DROP, NLGEOM=YES
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *FIXED MASS SCALING, DT=4.21589e-08, TYPE=BELOW MIN
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=2e-06
+  *NODE OUTPUT, NSET=REF
+  *NODE OUTPUT, NSET=BOT
+  *ENERGY OUTPUT
+  *END STEP
+  *SURFACE INTERACTION, NAME=CELLINT
+  *FRICTION
+  *BOUNDARY
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *CONTACT
+  *CONTACT INCLUSIONS, ALL EXTERIOR
+  *CONTACT PROPERTY ASSIGNMENT
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                 54671
+          NUMBER OF NODES IS                                   148219
+          NUMBER OF NODES DEFINED BY THE USER                   93549
+          NUMBER OF INTERNAL NODES GENERATED BY THE PROGRAM     54670
+          TOTAL NUMBER OF VARIABLES IN THE MODEL               452628
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =      1.1    
+       SYSTEM TIME (SEC)    =     0.10    
+       TOTAL CPU TIME (SEC) =      1.2    
+       WALLCLOCK TIME (SEC) =            1

@@ -1,0 +1,152 @@
+
+The double precision Abaqus/Package executable will be used in this analysis.
+
+Abaqus/Explicit 2024                             DATE 18-Oct-2026  TIME 16:39:15
+-------------------------------------------------------------------------------
+ PREPROCESSOR WARNING MESSAGES
+-------------------------------------------------------------------------------
+
+
+***WARNING: There are 3 warning messages in the data (.dat) file.  Please
+            check the data file for possible errors in the input file.
+
+
+-------------------------------------------------------------------------------
+           DOMAIN DECOMPOSITION INFORMATION
+-------------------------------------------------------------------------------
+
+
+     DOMAIN 1 HAS 7365 ELEMENTS AND 21012 NODES with WEIGHT 12.500
+
+     DOMAIN 2 HAS 7365 ELEMENTS AND 20992 NODES with WEIGHT 12.500
+
+     DOMAIN 3 HAS 7365 ELEMENTS AND 20947 NODES with WEIGHT 12.500
+
+     DOMAIN 4 HAS 7365 ELEMENTS AND 21028 NODES with WEIGHT 12.500
+
+     DOMAIN 5 HAS 7365 ELEMENTS AND 21009 NODES with WEIGHT 12.500
+
+     DOMAIN 6 HAS 7365 ELEMENTS AND 20996 NODES with WEIGHT 12.500
+
+     DOMAIN 7 HAS 7365 ELEMENTS AND 20963 NODES with WEIGHT 12.500
+
+     DOMAIN 8 HAS 7365 ELEMENTS AND 21062 NODES with WEIGHT 12.500
+
+
+-------------------------------------------------------------------------------
+ MODEL INFORMATION (IN GLOBAL X-Y COORDINATES)
+-------------------------------------------------------------------------------
+
+   Total mass (unscaled) in model = 1.80068E-07
+   Center of mass of model (based on unscaled mass) = ( 6.351332E+00, 6.350023E+00, 6.353864E+00)
+
+    Moments of Inertia :
+                 About Center of Mass              About Origin
+      I(XX)          6.149693E-06                  2.068017E-05
+      I(YY)          6.148991E-06                  2.068246E-05
+      I(ZZ)          7.280928E-06                  2.180561E-05
+      I(XY)          1.100096E-10                 -7.262230E-06
+      I(YZ)         -6.084582E-10                 -7.265844E-06
+      I(ZX)          1.242340E-09                 -7.265491E-06
+
+-------------------------------------------------------------------------------
+ STABLE TIME INCREMENT INFORMATION
+-------------------------------------------------------------------------------
+
+
+  The stable time increment estimate for each element is based on
+  linearization about the initial state. The stable time increment estimates
+  do not account for mass scaling.
+
+
+   Initial time increment = 8.99779E-10
+
+   Statistics for all elements:
+      Mean = 2.09390E-08
+      Standard deviation = 5.07176E-09
+
+   Most critical elements:
+    Element number   Rank    Time increment   Increment ratio
+   ----------------------------------------------------------
+       22840          1       8.997788E-10      1.000000E+00
+       12882          2       9.213994E-10      9.765351E-01
+       12109          3       9.254785E-10      9.722309E-01
+        3339          4       9.283202E-10      9.692548E-01
+       12077          5       9.312566E-10      9.661986E-01
+       57984          6       9.424371E-10      9.547362E-01
+       12103          7       3.580846E-09      2.512755E-01
+       19336          8       3.844238E-09      2.340591E-01
+       19432          9       3.963384E-09      2.270229E-01
+       12002         10       4.011936E-09      2.242755E-01
+
+
+Abaqus/Explicit 2024                             DATE 18-Oct-2026  TIME 16:39:22
+
+The double precision Abaqus/Explicit executable will be used in this analysis.
+
+The model has been decomposed into 8 domains.
+Domain level parallelization will be used with 8 processors each hosting an MPI rank.
+
+-------------------------------------------------------------------------------
+ SOLUTION PROGRESS
+-------------------------------------------------------------------------------
+
+ STEP 1  ORIGIN 0.0000
+
+  Total memory used for step 1 is approximately 715.0 megabytes.
+  Element by element stable time estimation algorithm will be used.
+  Scaling factor:  1.0000
+              STEP     TOTAL      WALL      STABLE    CRITICAL    KINETIC      TOTAL    PERCENT
+INCREMENT     TIME      TIME      TIME   INCREMENT     ELEMENT     ENERGY     ENERGY  CHNG MASS
+        0  0.000E+00 0.000E+00  00:00:01 8.639E-09       12882  0.000E+00  0.000E+00  3.677E-02
+Output Field Frame Number     0, of     20, at step time 0.000E+00
+     4633  4.000E-05 4.000E-05  00:01:14 8.625E-09       53111  8.224E-03 -1.723E-09  3.677E-02
+Output Field Frame Number     1, of     20, at step time 4.000E-05
+     9280  8.000E-05 8.000E-05  00:02:27 8.591E-09       53111  1.352E-01 -1.242E-07  3.677E-02
+Output Field Frame Number     2, of     20, at step time 8.000E-05
+    13943  1.200E-04 1.200E-04  00:03:40 8.566E-09       53111  3.726E-01 -5.161E-07  3.677E-02
+Output Field Frame Number     3, of     20, at step time 1.200E-04
+    18628  1.600E-04 1.600E-04  00:04:53 8.481E-09        3339  4.938E-01 -9.880E-07  3.677E-02
+Output Field Frame Number     4, of     20, at step time 1.600E-04
+    23388  2.000E-04 2.000E-04  00:06:07 8.337E-09        3339  3.365E-01 -1.894E-06  3.677E-02
+Output Field Frame Number     5, of     20, at step time 2.000E-04
+    28205  2.400E-04 2.400E-04  00:07:23 8.284E-09        3339  5.620E-02 -2.378E-06  3.677E-02
+Output Field Frame Number     6, of     20, at step time 2.400E-04
+    33033  2.800E-04 2.800E-04  00:08:39 8.297E-09        3339  1.902E-02 -2.541E-06  3.677E-02
+Output Field Frame Number     7, of     20, at step time 2.800E-04
+    37837  3.200E-04 3.200E-04  00:09:54 8.357E-09        3339  2.298E-02 -2.845E-06  3.677E-02
+Output Field Frame Number     8, of     20, at step time 3.200E-04
+    42616  3.600E-04 3.600E-04  00:11:09 8.371E-09        3339  2.305E-03 -2.963E-06  3.677E-02
+Output Field Frame Number     9, of     20, at step time 3.600E-04
+    47404  4.000E-04 4.000E-04  00:12:25 8.333E-09        3339  3.143E-02 -3.229E-06  3.677E-02
+Output Field Frame Number    10, of     20, at step time 4.000E-04
+    52218  4.400E-04 4.400E-04  00:13:40 8.288E-09        3339  6.793E-03 -3.513E-06  3.677E-02
+Output Field Frame Number    11, of     20, at step time 4.400E-04
+    57047  4.800E-04 4.800E-04  00:14:57 8.287E-09        3339  1.682E-02 -3.569E-06  3.677E-02
+Output Field Frame Number    12, of     20, at step time 4.800E-04
+    61858  5.200E-04 5.200E-04  00:16:12 8.348E-09        3339  2.479E-02 -3.877E-06  3.677E-02
+Output Field Frame Number    13, of     20, at step time 5.200E-04
+    66637  5.600E-04 5.600E-04  00:17:27 8.381E-09        3339  7.259E-04 -4.021E-06  3.677E-02
+Output Field Frame Number    14, of     20, at step time 5.600E-04
+    71418  6.000E-04 6.000E-04  00:18:43 8.340E-09        3339  2.980E-02 -4.270E-06  3.677E-02
+Output Field Frame Number    15, of     20, at step time 6.000E-04
+    76235  6.400E-04 6.400E-04  00:20:00 8.275E-09        3339  8.017E-03 -4.513E-06  3.677E-02
+Output Field Frame Number    16, of     20, at step time 6.400E-04
+    81067  6.800E-04 6.800E-04  00:21:16 8.296E-09        3339  1.428E-02 -4.556E-06  3.677E-02
+Output Field Frame Number    17, of     20, at step time 6.800E-04
+    85873  7.200E-04 7.200E-04  00:22:32 8.348E-09        3339  2.702E-02 -4.942E-06  3.677E-02
+Output Field Frame Number    18, of     20, at step time 7.200E-04
+    90655  7.600E-04 7.600E-04  00:23:45 8.373E-09        3339  1.387E-03 -5.089E-06  3.677E-02
+Output Field Frame Number    19, of     20, at step time 7.600E-04
+    95439  8.000E-04 8.000E-04  00:25:02 8.340E-09        3339  2.923E-02 -5.269E-06  3.677E-02
+Restart Number  1 at 8.00000E-04
+Output Field Frame Number    20, of     20, at step time 8.000E-04
+  EXPLICIT EXECUTABLE TIME SUMMARY
+       USER TIME (SEC)      =   1393.7
+       SYSTEM TIME (SEC)    =   11.900
+       WALLCLOCK TIME (SEC) =         1503
+              INIT (SEC) =          1
+              MAIN (SEC) =       1502
+
+  THE ANALYSIS HAS COMPLETED SUCCESSFULLY
+
