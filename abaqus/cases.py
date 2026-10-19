@@ -1525,6 +1525,12 @@ B10_CASES = {
                  rmin=0.6, h=0.3, H=12.7, amount=0.5, material='linear', t_ramp=3e-4, t_hold=3e-4,
                  title='B10d: graded C4 cell (top 0.6, bottom 1.0, mid 0.8; FHS joints), LINEAR E0, top plate down 0.5 mm, hold 0.3 ms; no contact'),
 }
+# mesh-convergence check of the C4 r 0.8 solid (2026-10-19): B10a (h 0.4, 45k C3D10M) gives a stiffening of 1.975 x bare, 16-23 % above every model; are the short
+# necks (L/r = 3.3, nu 0.49) mesh-converged? Same case with h 0.28 (fine) and h 0.55 (coarse); everything else identical to B10a.
+B10_CASES['B10e'] = dict(B10_CASES['B10a'], name='B10e_C4_r08_h028_linE0', h=0.28,
+                         title=B10_CASES['B10a']['title'].replace('B10a', 'B10e') + ' [mesh study: h 0.28]')
+B10_CASES['B10f'] = dict(B10_CASES['B10a'], name='B10f_C4_r08_h055_linE0', h=0.55,
+                         title=B10_CASES['B10a']['title'].replace('B10a', 'B10f') + ' [mesh study: h 0.55]')
 B9d = dict(B9_CASES['B9c'], name='B9d_C12_r05_linE0_longhold', t_hold=1.2e-3, out_dt=4e-6,
            title='B9d: as B9c (C12 unit cell r 0.5, FHS, LINEAR E0, top plate down 0.5 mm in 0.3 ms) with a 1.2 ms hold (the C12 solid '
                  'rings with a ~0.2 ms period: the static value is the mean over several periods)')

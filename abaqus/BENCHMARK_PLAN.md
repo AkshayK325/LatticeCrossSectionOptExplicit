@@ -1248,3 +1248,21 @@ If B11b / B11d come out near 1.2 / 1.33 the neighbour sum should use a weaker ra
   rms over the 22 specimens 11.6 % (lambda = r, the recorded model), 9.2 % (2 r), 8.1 % (4 r), 7.7 % (8 r and none). The recorded lambda = r was chosen before any evaluation and never tuned; the static data prefer no decay (the impact data of 2026-10-05 had preferred lambda = r).
   Neither the slicing model nor the rule is below ~7.7 % rms / 17-18 % worst case on the 22 static specimens: the remaining errors are structural: C4 r 0.8 under, BCC cell over, for both model families.
 - **Not yet checked:** whether the C4 r 0.8 solid itself is mesh-converged (h/r = 0.5; the stiffening of 1.98 may contain locking in the short necks); the short-strut Timoshenko limit (L/r = 3.3); the overlap of the two joints of the 2.63 mm strut at r 0.8.
+
+## Run list 2026-10-19: mesh-convergence study of the C4 r 0.8 solid (B10e, B10f)
+
+Why: B10a (h 0.4, 45.4k C3D10M) gives a stiffening of 1.975 x bare beams, 16-23 % above every model (notes/18 section 14). The short C4 strut is 2.63 mm = 3.3 r with nu = 0.49: before any
+joint-model change we must know whether that solid value is mesh-converged. Same case and loading as B10a (r 0.8, 0.5 mm in 0.3 ms, hold 0.5 ms, linear E0), only the tet size changes; plate-end audit passed.
+
+| case (abaqus/inp) | tet size h | elements | est. wall time |
+|---|---|---|---|
+| B10f_C4_r08_h055_linE0 (coarse) | 0.55 | 21.4k | ~6 min |
+| B10a_C4_r08_linE0 (done) | 0.40 | 45.4k | 14 min (done) |
+| B10e_C4_r08_h028_linE0 (fine) | 0.28 | 110.7k | ~50-60 min |
+
+Run B10f first, then B10e. Copy back the history CSV(s) and `.sta` / `.dat` / `.msg` as before. Then `PYTHONPATH=src:tests python abaqus/bx_predict.py B10a B10e B10f` (the beam-model predictions are mesh independent) and compare the hold-window means.
+
+**Decision rule** (hold mean of the sum reaction, B10a = 21.38 N, stiffening 1.975): the three meshes give a convergence trend (refinement ratio ~1.4); extrapolate with the observed order.
+- fine within 3 % of B10a and the trend flattening: the solid is converged, the C4 under-prediction is real and needs a structural joint-model change (short strut / merged joints);
+- fine more than ~8 % below B10a (stiffening below ~1.82): part of the 1.975 is locking of the short necks; use the extrapolated value, re-score B10a-d, F2a and H2a (same mesh size) and weight them down accordingly;
+- in between: the extrapolated value is the reference and the remaining model error is the one reported.
