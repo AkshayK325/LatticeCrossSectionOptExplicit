@@ -183,6 +183,7 @@ def test_rule_presets_match_fit_files():
         for k, v in par.items():
             if k != 'mu':
                 assert jointRule.PRESETS[name][k] == v, (name, k)
+        assert jointRule.PRESETS[name]['smooth'] == 0.05             # presets are the smooth (kink-free) form: exact design gradients
 
     c4 = dict(jointRule.PRESETS['R5'], short_gain=1.5, short_l0=4.6)
     assert jointRule.PRESETS['R5_C4'] == c4

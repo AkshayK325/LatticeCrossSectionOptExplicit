@@ -11,9 +11,13 @@ torch.set_default_dtype(torch.float64)
 MAT = project_material()
 import pytest
 
+import jointRule
+
 JOINTS = {'first': dict(mode='rule', a=1.2, p=4.0, zl=1.1, b=0.3, mu=0.8),
           # R5 of abaqus/results/rule_fit3/R5.json: rigid zone, negative angle exponent, neighbour-sum saturation
-          'R5': dict(mode='rule', a=3.45, p=-0.77, pz=-0.77, zl=0.77, b=0.15, gamma=0.0, wsat=2.47)}
+          'R5': dict(mode='rule', a=3.45, p=-0.77, pz=-0.77, zl=0.77, b=0.15, gamma=0.0, wsat=2.47),
+          # the shipped smooth presets (kink-free, short-strut law for C4): the configuration used for design
+          'R5_C4_preset': dict(jointRule.PRESETS['R5_C4'])}
 RIG0 = dict(law={'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}, start='co_moving', gap0=0.1, energy_J=0.75)
 SYM = 'Midplane'
 
@@ -26,7 +30,7 @@ def _setup(RIG):
     return lat, x0, rig0, sched
 
 
-@pytest.mark.parametrize('which', ['first', 'R5'])
+@pytest.mark.parametrize('which', ['first', 'R5', 'R5_C4_preset'])
 def test_rule_gradient_adjoint_ad_fd(which):
     RIG = dict(RIG0, joint=JOINTS[which])
     lat, x0, rig0, sched = _setup(RIG)

@@ -96,7 +96,7 @@ rig = drop_rig(lat, radii, law, mat=mat, joint=jointRule.PRESETS['R5'], ...)    
 
 - accuracy on 22 prescribed-motion specimens: 5 % rms held out for long-strut cells (simple cubic, BCC, octet, C12, unequal-radius T-joints, within +-6 %); **the C4 design cell is 16-24 % too soft** (its short struts), see `abaqus/BENCHMARK_PLAN.md` and
   `abaqus/results/joint_model_summary.md`;
-- the design gradient through the joint model is exact (`tests/test_joint_rule_adjoint.py`); the geometry-based slicing model (`jointSection.py`) is accurate but not differentiable.
+- the design gradient through the joint model is exact (`tests/test_joint_rule_adjoint.py`, kink-free `smooth` form, `tests/test_joint_rule_smooth.py`: autograd = finite differences at random radii, parameter gradients exact); the geometry-based slicing model (`jointSection.py`) is accurate but not differentiable.
 
 ## Performance (measured)
 

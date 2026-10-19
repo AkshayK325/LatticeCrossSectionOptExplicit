@@ -1364,3 +1364,22 @@ of the fast prescribed ramps is 6-17 % lower than the linear one and no constant
 mesh-converge a solid before blaming a model (C4); impact stroke is a weak test of joint stiffness (JOINT_FHS looks right in impact yet is 21-30 % too soft on the static B9b / B9c).
 
 **What is left for the joint configuration:** B13 (above); then either adopt the law (rule 1) or replace it (rules 2-3); re-run the C4 impact solids F2a / H2a with the final model and look at the peak force; use the preset in the plateau-design optimisation (notes/9, k = 3.5 before) and verify one optimised design with an FHS solid.
+
+## Differentiability audit and the final presets (2026-10-19; B13 results not yet received)
+
+**Status of B13:** the four inputs are built and the blind predictions recorded (sections above); the Abaqus results are NOT in the repo yet, so the short-strut law is still the provisional four-point stopgap (`PRESETS['R5_C4']`).
+The calibration script (`short_strut_calibration.py`) and `b13_predict.py` are ready to run on the B13 CSVs; the decision rules are written down.
+
+**Differentiability, for use in gradient-based design (`src/jointRule.py`, tests `tests/test_joint_rule_smooth.py`, `tests/test_joint_rule_adjoint.py`):**
+- The rule is a torch expression of the element radii and of every parameter: autograd gives dk/dr (and the gradient w.r.t. the rule parameters, for fitting through the solver). Checked against central finite differences.
+- **Kinks removed.** The hard rule has kinks where AD and finite differences disagree: the clamp of the pair zone length, `max(W - 2, 0)`, the zone cap at L / 2, the zone edge crossing an element boundary (piecewise-linear overlap), and the short-strut onset.
+  `smooth = 0.05` (a width in units of the own radius) replaces each by a smooth version. A first version blended the zone edge in the stiffness domain and shifted the effective edge outward by ~ w ln k (+27 % on the short C4 struts); the final version blends the
+  COMPLIANCE, 1/beta = 1 - (1 - 1/k0) phi0 - (1 - 1/k1) phi1, which reproduces the hard rule to 0.2 % (mean factor ratio 1.000, max 0.001-0.002 at r 0.5 / 0.7 / 0.9).
+  The short-strut onset is smoothed over 0.03 in L / r only (a wider one leaked into C12's L / r = 4.64 struts and raised the C12 error from 3.2 % to 12.1 %).
+- **Results:** autograd = finite differences at random per-element radii (180 elements, 12 random draws, relative error < 1e-5); the factors are continuous along a 1500-step radius scan (no jumps > 5 % per 0.4 % radius step); the parameter gradients (a, zl, b, p, wsat, short_gain) are exact;
+  the checkpointed adjoint through the whole explicit drop equals unrolled AD (1e-9) and finite differences (1e-6) for the shipped smooth `R5_C4` preset (`tests/test_joint_rule_adjoint.py`).
+- **Cost per design evaluation:** 0.02 s (forward) and 0.14 s (backward) for the 3 x 3 C4 lattice (276 struts, 1332 elements), negligible against the 10 min value + gradient of the drop.
+- **Accuracy unchanged by smoothing** (`results/preset_check.md`, 22 specimens, rms / worst): `R5` 7.8 / 23.5 %; **`R5_C4` 3.6 / 9.7 %** (C4 7.0, graded C4 3.6, C12 3.6, others as R5); `R5_all22` 7.1 / 18.0 %.
+
+**How to use it in the optimiser:** `rig = drop_rig(lat, radii(x, ...), law, mat=mat, joint=jointRule.PRESETS['R5_C4'])`; the gradient w.r.t. the design `x` then includes how the radii move the joint stiffening. Use `PRESETS['R5']` for lattices without short (L / r < 4.6) struts.
+The presets are the smooth form; do not use `smooth = 0` in an optimisation (kinks).
