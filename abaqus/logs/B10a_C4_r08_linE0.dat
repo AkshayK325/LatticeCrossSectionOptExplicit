@@ -1,6 +1,6 @@
 1
 
-   Abaqus 2024                                  Date 18-Oct-2026   Time 16:23:36
+   Abaqus 2024                                  Date 19-Oct-2026   Time 12:23:47
    For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
 
 
@@ -194,6 +194,6 @@
 
      JOB TIME SUMMARY
        USER TIME (SEC)      =      1.0    
-       SYSTEM TIME (SEC)    =     0.10    
-       TOTAL CPU TIME (SEC) =      1.1    
-       WALLCLOCK TIME (SEC) =            2
+       SYSTEM TIME (SEC)    =      0.0    
+       TOTAL CPU TIME (SEC) =      1.0    
+       WALLCLOCK TIME (SEC) =            1

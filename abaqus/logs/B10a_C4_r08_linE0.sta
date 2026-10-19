@@ -1,7 +1,7 @@
 
 The double precision Abaqus/Package executable will be used in this analysis.
 
-Abaqus/Explicit 2024                             DATE 18-Oct-2026  TIME 16:23:40
+Abaqus/Explicit 2024                             DATE 19-Oct-2026  TIME 12:23:50
 -------------------------------------------------------------------------------
  PREPROCESSOR WARNING MESSAGES
 -------------------------------------------------------------------------------
@@ -80,7 +80,7 @@ Abaqus/Explicit 2024                             DATE 18-Oct-2026  TIME 16:23:40
        32897         10       7.655707E-09      5.498731E-01
 
 
-Abaqus/Explicit 2024                             DATE 18-Oct-2026  TIME 16:23:47
+Abaqus/Explicit 2024                             DATE 19-Oct-2026  TIME 12:23:57
 
 The double precision Abaqus/Explicit executable will be used in this analysis.
 
@@ -100,53 +100,53 @@ Domain level parallelization will be used with 8 processors each hosting an MPI 
 INCREMENT     TIME      TIME      TIME   INCREMENT     ELEMENT     ENERGY     ENERGY  CHNG MASS
         0  0.000E+00 0.000E+00  00:00:01 1.152E-08       38516  0.000E+00  0.000E+00  3.335E-02
 Output Field Frame Number     0, of     20, at step time 0.000E+00
-     3475  4.000E-05 4.000E-05  00:00:46 1.150E-08       27717  1.584E-02 -1.250E-09  3.335E-02
+     3475  4.000E-05 4.000E-05  00:00:45 1.150E-08       27717  1.584E-02 -1.250E-09  3.335E-02
 Output Field Frame Number     1, of     20, at step time 4.000E-05
-     6961  8.000E-05 8.000E-05  00:01:29 1.146E-08       27717  2.555E-01 -2.257E-07  3.335E-02
+     6961  8.000E-05 8.000E-05  00:01:27 1.146E-08       27717  2.555E-01 -2.257E-07  3.335E-02
 Output Field Frame Number     2, of     20, at step time 8.000E-05
-    10457  1.200E-04 1.200E-04  00:02:12 1.143E-08       27717  6.495E-01 -1.128E-06  3.335E-02
+    10457  1.200E-04 1.200E-04  00:02:06 1.143E-08       27717  6.495E-01 -1.128E-06  3.335E-02
 Output Field Frame Number     3, of     20, at step time 1.200E-04
-    13961  1.600E-04 1.600E-04  00:02:53 1.139E-08       41535  7.385E-01 -3.240E-06  3.335E-02
+    13961  1.600E-04 1.600E-04  00:02:45 1.139E-08       41535  7.385E-01 -3.240E-06  3.335E-02
 Output Field Frame Number     4, of     20, at step time 1.600E-04
-    17479  2.000E-04 2.000E-04  00:03:35 1.134E-08       41535  4.108E-01 -6.155E-06  3.335E-02
+    17479  2.000E-04 2.000E-04  00:03:24 1.134E-08       41535  4.108E-01 -6.155E-06  3.335E-02
 Output Field Frame Number     5, of     20, at step time 2.000E-04
-    21011  2.400E-04 2.400E-04  00:04:19 1.131E-08       41535  9.523E-02 -7.446E-06  3.335E-02
+    21011  2.400E-04 2.400E-04  00:04:03 1.131E-08       41535  9.523E-02 -7.446E-06  3.335E-02
 Output Field Frame Number     6, of     20, at step time 2.400E-04
-    24551  2.800E-04 2.800E-04  00:05:02 1.130E-08       41535  5.334E-03 -7.689E-06  3.335E-02
+    24551  2.800E-04 2.800E-04  00:04:42 1.130E-08       41535  5.334E-03 -7.689E-06  3.335E-02
 Output Field Frame Number     7, of     20, at step time 2.800E-04
-    28092  3.200E-04 3.200E-04  00:05:46 1.129E-08       41535  7.245E-03 -7.744E-06  3.335E-02
+    28092  3.200E-04 3.200E-04  00:05:21 1.129E-08       41535  7.245E-03 -7.744E-06  3.335E-02
 Output Field Frame Number     8, of     20, at step time 3.200E-04
-    31635  3.600E-04 3.600E-04  00:06:29 1.129E-08       41535  3.643E-03 -7.923E-06  3.335E-02
+    31635  3.600E-04 3.600E-04  00:06:01 1.129E-08       41535  3.643E-03 -7.923E-06  3.335E-02
 Output Field Frame Number     9, of     20, at step time 3.600E-04
-    35178  4.000E-04 4.000E-04  00:07:13 1.129E-08       41535  7.558E-03 -8.004E-06  3.335E-02
+    35178  4.000E-04 4.000E-04  00:06:40 1.129E-08       41535  7.558E-03 -8.004E-06  3.335E-02
 Output Field Frame Number    10, of     20, at step time 4.000E-04
-    38720  4.400E-04 4.400E-04  00:07:57 1.129E-08       41535  1.311E-03 -8.171E-06  3.335E-02
+    38720  4.400E-04 4.400E-04  00:07:19 1.129E-08       41535  1.311E-03 -8.171E-06  3.335E-02
 Output Field Frame Number    11, of     20, at step time 4.400E-04
-    42262  4.800E-04 4.800E-04  00:08:40 1.129E-08       41535  6.753E-03 -8.247E-06  3.335E-02
+    42262  4.800E-04 4.800E-04  00:08:01 1.129E-08       41535  6.753E-03 -8.247E-06  3.335E-02
 Output Field Frame Number    12, of     20, at step time 4.800E-04
-    45805  5.200E-04 5.200E-04  00:09:22 1.129E-08       41535  4.049E-04 -8.406E-06  3.335E-02
+    45805  5.200E-04 5.200E-04  00:08:41 1.129E-08       41535  4.049E-04 -8.406E-06  3.335E-02
 Output Field Frame Number    13, of     20, at step time 5.200E-04
-    49348  5.600E-04 5.600E-04  00:10:06 1.129E-08       41535  7.970E-03 -8.521E-06  3.335E-02
+    49348  5.600E-04 5.600E-04  00:09:21 1.129E-08       41535  7.970E-03 -8.521E-06  3.335E-02
 Output Field Frame Number    14, of     20, at step time 5.600E-04
-    52889  6.000E-04 6.000E-04  00:10:51 1.130E-08       41535  1.807E-03 -8.645E-06  3.335E-02
+    52889  6.000E-04 6.000E-04  00:10:00 1.130E-08       41535  1.807E-03 -8.645E-06  3.335E-02
 Output Field Frame Number    15, of     20, at step time 6.000E-04
-    56431  6.400E-04 6.400E-04  00:11:34 1.129E-08       41535  9.084E-03 -8.751E-06  3.335E-02
+    56431  6.400E-04 6.400E-04  00:10:39 1.129E-08       41535  9.084E-03 -8.751E-06  3.335E-02
 Output Field Frame Number    16, of     20, at step time 6.400E-04
-    59974  6.800E-04 6.800E-04  00:12:17 1.129E-08       41535  1.989E-03 -8.871E-06  3.335E-02
+    59974  6.800E-04 6.800E-04  00:11:18 1.129E-08       41535  1.989E-03 -8.871E-06  3.335E-02
 Output Field Frame Number    17, of     20, at step time 6.800E-04
-    63517  7.200E-04 7.200E-04  00:13:01 1.129E-08       41535  7.478E-03 -9.031E-06  3.335E-02
+    63517  7.200E-04 7.200E-04  00:11:58 1.129E-08       41535  7.478E-03 -9.031E-06  3.335E-02
 Output Field Frame Number    18, of     20, at step time 7.200E-04
-    67059  7.600E-04 7.600E-04  00:13:45 1.130E-08       41535  9.441E-04 -9.111E-06  3.335E-02
+    67059  7.600E-04 7.600E-04  00:12:38 1.130E-08       41535  9.441E-04 -9.111E-06  3.335E-02
 Output Field Frame Number    19, of     20, at step time 7.600E-04
-    70601  8.000E-04 8.000E-04  00:14:28 1.129E-08       41535  5.911E-03 -9.274E-06  3.335E-02
+    70601  8.000E-04 8.000E-04  00:13:17 1.129E-08       41535  5.911E-03 -9.274E-06  3.335E-02
 Restart Number  1 at 8.00000E-04
 Output Field Frame Number    20, of     20, at step time 8.000E-04
   EXPLICIT EXECUTABLE TIME SUMMARY
-       USER TIME (SEC)      =   801.90
-       SYSTEM TIME (SEC)    =   8.0000
-       WALLCLOCK TIME (SEC) =          868
+       USER TIME (SEC)      =   772.20
+       SYSTEM TIME (SEC)    =   6.1000
+       WALLCLOCK TIME (SEC) =          797
               INIT (SEC) =          1
-              MAIN (SEC) =        867
+              MAIN (SEC) =        796
 
   THE ANALYSIS HAS COMPLETED SUCCESSFULLY
 
