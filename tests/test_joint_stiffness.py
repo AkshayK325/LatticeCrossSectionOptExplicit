@@ -151,3 +151,22 @@ def test_rule_factors_taper():
     d = torch.zeros_like(r); d[::3] = 1.0; h = 1e-6
     fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
     assert abs(float((g * d).sum()) - float(fd)) < 1e-5 * max(1.0, abs(float(fd)))
+
+
+def test_rule_factors_tail():
+    """The exponential tail (overlapping tails of a short strut) only adds stiffness, is mesh independent and keeps the radii gradient exact."""
+    import jointRule
+    kw = dict(a=3.0, p=-0.8, zl=0.8, b=0.1, gamma=0.0, wsat=2.5)
+    lat = example3(elemSize=1.0, nx=1, ny=1)
+    r = torch.full((len(lat['connr']),), 0.6, dtype=torch.float64, requires_grad=True)
+    s0 = jointRule.rule_factors(lat, r.detach(), **kw)
+    s1 = jointRule.rule_factors(lat, r.detach(), tail=0.5, tail_len=2.0, **kw)
+    assert float(s1.min()) >= 1.0 - 1e-9 and float(s1.sum()) >= float(s0.sum()) - 1e-6
+    lat2 = example3(elemSize=0.5, nx=1, ny=1)
+    s2 = jointRule.rule_factors(lat2, torch.full((len(lat2['connr']),), 0.6, dtype=torch.float64), tail=0.5, tail_len=2.0, **kw)
+    assert abs(float((1 / s1).mean()) - float((1 / s2).mean())) < 0.02
+    f = lambda rr: jointRule.rule_factors(lat, rr, tail=0.5, tail_len=2.0, **kw).sum()
+    g, = torch.autograd.grad(f(r), r)
+    d = torch.zeros_like(r); d[::3] = 1.0; h = 1e-6
+    fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
+    assert abs(float((g * d).sum()) - float(fd)) < 1e-5 * max(1.0, abs(float(fd)))

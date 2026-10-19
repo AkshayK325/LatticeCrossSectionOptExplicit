@@ -1283,3 +1283,30 @@ Run B10f first, then B10e. Copy back the history CSV(s) and `.sta` / `.dat` / `.
   never satisfy C4 and C12 together. Both have struts of ~ 2.6 mm but r 0.8 vs 0.5; the data need a mechanism that switches on between r / L = 0.19 (C12, fits) and 0.30 (C4 r 0.8; r 0.6 at 0.23 is -10 %).
 - **Proposed next specimens (B12, "short-strut series", not yet built):** a symmetric Y-joint pair: two valence-3 nodes (all angles 120 deg) joined by a strut of length L_s, with four 7.3 mm legs up to the plates, r 0.8, L_s = 2.63 / 4.5 / 7.0 mm (L_s / r = 3.3 / 5.6 / 8.8), plus r 0.6 at L_s = 2.63 (small meshes, minutes each).
   This isolates the merged-joint regime at fixed node topology and gives the missing L / r dependence directly; the C4 cell and C12 are then explained (or not) by the same function.
+
+## Run list 2026-10-19: B12 (short-strut Y-joint series) and what the offline tests say about it (notes/18 section 17)
+
+Built as proposed: two valence-3 Y nodes (all angles 120 deg) at mid height joined by a strut of length Ls, two legs per node (30 deg to the vertical) ending on the plates, H 12.7, linear E0,
+top plate down 0.5 mm in 0.3 ms, hold 0.5 ms, current FHS geometry, solid h = r / 2 (10-16k C3D10M each, a few minutes of Abaqus each), plate-end check passed.
+
+| case (abaqus/inp) | r | Ls [mm] | Ls / r | elements |
+|---|---|---|---|---|
+| B12a_Y_r080_Ls263_linE0 | 0.8 | 2.63 | 3.3 | 10.0k |
+| B12b_Y_r080_Ls450_linE0 | 0.8 | 4.5 | 5.6 | 10.3k |
+| B12c_Y_r080_Ls700_linE0 | 0.8 | 7.0 | 8.8 | 10.0k |
+| B12d_Y_r060_Ls263_linE0 | 0.6 | 2.63 | 4.4 | 12.5k |
+| B12e_Y_r050_Ls263_linE0 | 0.5 | 2.63 | 5.3 | 15.5k |
+
+Blind predictions (`results/B12_summary.md`; hold value / bare beams): every model gives only 1.03-1.08 (B12a: bare 32.1 N, JOINT_FHS 1.042-1.047, rule R5 1.075-1.080; B12c 1.04-1.07; B12e 1.03-1.05).
+**B12 is a weak probe:** a RIGID short strut raises the predicted reaction by only 5-9 % (B12a 34.7 -> 37.0 N, B12e 12.9 -> 14.0 N) because the inclined legs dominate the load path; so a solid more than ~10 % above 1.08 would be news,
+anything below tells little. Run only if cheap (all five are a few minutes); it does not replace B13.
+
+**Where the C4 stiffness sits (offline sensitivity of the B10a beam model, rule R5; solid target 21.77 N vs R5 16.39 N = +33 %):** short struts x3 -> 21.08 N (+28.6 %); short struts rigid -> 31.43 N (+92 %); end elements of the long struts x2 / x4 -> +10 / +16 %;
+middle elements of the long struts x1.3 -> +15 %; elements within 0.9 mm of the plates x2 -> +8 %. **The C4 cell is dominated by its short struts, and the solid behaves as if they were ~3 x stiffer than the models make them (their middle element stays at factor 1.0).**
+
+**Offline tests that did NOT reconcile C4 (needs +25 %) with C12 (needs 0) / octet / BCC, all within the rule family:** zone scale; zone floor; short-strut zone growth (L / r < 5); linear / exponential / Gaussian tails of height 0.3-2 and length 1-2.5 r from each joint (additive and multiplicative combination of the two ends:
+C4 -> +-3 % at tail 0.3 / 1.5 r, but C12 B9d +37 %, B9c +69 %, octet B9b +19 %); plate-node scale; gain / saturation; the angle weight sin^p and ((1 + cos)/2)^p (refit R7 on 22 specimens: rms 7.6 %, max 18.8 %, the fit sets p = 0).
+The slicing model (real FHS joint shape) without participation decay matches C12 (+2 %) and C4 r 0.6 (+2 %) but not C4 r 0.8 (-13.5 %). C4 r 0.6 -> 0.8 changes the stiffening from 1.46 to 1.98, which suggests a threshold: the two joint fillets (~ 1.7 r each) merge along the 2.63 mm strut at r ~ 0.77.
+
+**Next specimens (B13, proposed, not built): the C4 cell with DECOUPLED radii of its short (2.63 mm) and long (6.35 mm) struts**, (r_long, r_short) = (0.6, 0.8), (0.6, 1.0), (0.8, 0.6), (0.8, 1.0) plus the existing B10b (0.6, 0.6) and B10a (0.8, 0.8): the short struts are in the main load path
+there, so the solid reaction versus r_short and r_long gives the effective short-strut stiffness (and the radius-ratio dependence that the design gradient needs) directly. 45-100k elements each, 15-35 min of Abaqus each.

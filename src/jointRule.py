@@ -14,10 +14,10 @@ change moves the stiffening. Parameters (a, p, zl, b) are fitted in abaqus/fit_r
 import numpy as np
 import torch
 
-DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0)
+DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tail=0.0, tail_len=2.0, tail_pow=1.0, ang_cos=False, tail_mult=False)
 
 
-def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tau=0.02):
+def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tail=0.0, tail_len=2.0, tail_pow=1.0, ang_cos=False, tail_mult=False, tau=0.02):
     """Per-element stiffness factors (ne,) >= 1, differentiable in r_elem (ne,) and in (a, p, zl, b, mu, pz, gamma) if tensors.
     p: angle exponent of the stiffness weight sin^p; pz: of the zone-length weight (default = p); a negative exponent weights
     ACUTE neighbours more (B7: the solid stiffens more the more acute the neighbour). gamma in [0, 1]: weight of a pair of struts
@@ -63,8 +63,12 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamm
     pz = p if pz is None else pz
     gmt = torch.as_tensor(gm)
     gfac = torch.where(gmt, torch.as_tensor(gamma, dtype=dt), torch.ones((), dtype=dt))
-    w = sn ** p * gfac
-    wz = sn ** pz * gfac
+    if ang_cos:           # ((1 + cos theta) / 2)^p: 1 for acute pairs, 0.5^p at 90 deg, -> 0 for near-collinear (obtuse pairs of kinks add little)
+        ca = ((1.0 + cs) / 2.0).clamp_min(1e-6)
+        w, wz = ca ** p * gfac, ca ** pz * gfac
+    else:
+        w = sn ** p * gfac
+        wz = sn ** pz * gfac
     q = rb[nbrs] / ra
     W = torch.zeros(2 * nb, dtype=dt).index_add(0, ends, q * q * w)                   # per strut end
     li = zl * wz * torch.maximum(torch.clamp((rb[nbrs] + ra * cs) / sn, min=0.0), lmin * ra)
@@ -93,6 +97,26 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamm
     k0, k1 = k[2 * boe], k[2 * boe + 1]
     ov0 = torch.clamp(torch.minimum(hi, l0) - lo, min=0.0)
     ov1 = torch.clamp(hi - torch.maximum(lo, Lbt - l1), min=0.0)
+    if tail > 0:          # step zone (smoothed over 0.1 r) + exponential TAIL of height `tail` and length tail_len * r from each end that has neighbours:
+        # overlapping tails stiffen a short strut (L / r < ~5) between two joints strongly and a long strut little (B10: the C4 short struts act ~3 x stiffer)
+        nq, nsub = 8, 6
+        xg, wg = np.polynomial.legendre.leggauss(nq)
+        xg, wg = torch.as_tensor(xg, dtype=dt), torch.as_tensor(wg, dtype=dt)
+        edges = torch.linspace(0.0, 1.0, nsub + 1, dtype=dt)
+        a_, b_ = edges[:-1][:, None], edges[1:][:, None]
+        u = (a_ + (b_ - a_) * (xg[None, :] + 1) / 2).reshape(-1)                              # (nsub nq) points in [0, 1]
+        wu = ((b_ - a_) / 2 * wg[None, :]).reshape(-1)
+        sg = lo[:, None] + (hi - lo)[:, None] * u[None, :]                                    # (ne, nq nsub) distance from node 0
+        ra_e = rb[boe]                                                                        # own radius per element
+        w_s = 0.1 * ra_e[:, None]
+        phi0 = torch.sigmoid((l0[:, None] - sg) / w_s)
+        phi1 = torch.sigmoid((l1[:, None] - (Lbt[:, None] - sg)) / w_s)
+        t0 = tail * (l0 > 0).to(dt)[:, None] * torch.exp(-(sg / (tail_len * ra_e[:, None])) ** tail_pow)
+        t1 = tail * (l1 > 0).to(dt)[:, None] * torch.exp(-((Lbt[:, None] - sg) / (tail_len * ra_e[:, None])) ** tail_pow)
+        beta0 = 1 + (k0 - 1)[:, None] * phi0 + t0
+        beta1 = 1 + (k1 - 1)[:, None] * phi1 + t1
+        beta = beta0 * beta1 if tail_mult else beta0 + beta1 - 1          # tail_mult: overlapping joint regions multiply (merged blobs are stiffer than the sum)
+        return le / ((le[:, None] * wu[None, :]) / beta).sum(1)
     if taper > 0:         # smooth profile: beta(s) = 1 + (k - 1) (1 - s / l)+^taper from each end, compliance = int ds / beta (Gauss-Legendre)
         xg, wg = np.polynomial.legendre.leggauss(8)
         xg, wg = torch.as_tensor(xg, dtype=dt), torch.as_tensor(wg, dtype=dt)

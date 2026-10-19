@@ -18,7 +18,7 @@ import fit_rule2 as fr                                           # noqa: E402
 from b9_predict import zone_model                                # noqa: E402
 
 NAMES = ['B10a', 'B10b', 'B10c', 'B10d', 'B11a', 'B11b', 'B11c', 'B11d', 'B9d', 'B10e', 'B10f']
-RUN = lambda case: cases.b78_ours if case.startswith('B11') else cases.b4_ours
+RUN = lambda case: cases.b78_ours if case.startswith(('B11', 'B12')) else cases.b4_ours
 
 
 def zone_any(case, sp):

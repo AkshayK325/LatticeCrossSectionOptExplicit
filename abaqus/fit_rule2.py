@@ -29,13 +29,14 @@ WEIGHT = {'B9c': 0.3 if SET == '4' else 0.5}                                # th
 CASES = [c for g in GROUPS.values() for c in g]
 FREE = {'R0': ['a', 'zl'], 'R1': ['a', 'zl', 'gamma'], 'R2': ['a', 'zl', 'gamma', 'b'], 'R3': ['a', 'zl', 'gamma', 'b', 'p'],
         'R4': ['a', 'zl', 'gamma', 'b', 'p', 'cap'], 'R5': ['a', 'zl', 'gamma', 'b', 'p', 'wsat'],
-        'R6': ['a', 'zl', 'gamma', 'b', 'p', 'wsat', 'lmin']}   # R6: + zone floor lmin (set 4)   # R4 / R5: after B9 (notes/18 11)
+        'R6': ['a', 'zl', 'gamma', 'b', 'p', 'wsat', 'lmin'],
+        'R7': ['a', 'zl', 'gamma', 'b', 'p', 'wsat']}      # R7: = R5 with the angle weight ((1 + cos theta) / 2)^p (ang_cos)   # R6: + zone floor lmin (set 4)   # R4 / R5: after B9 (notes/18 11)
 START = dict(a=1.0, zl=1.0, gamma=0.5, b=0.2, p=0.0, cap=0.4, wsat=3.0, lmin=0.3)
 LO = dict(a=0.0, zl=0.3, gamma=0.0, b=0.0, p=-4.0, cap=0.1, wsat=0.5, lmin=0.0)
 HI = dict(a=6.0, zl=3.0, gamma=1.0, b=2.0, p=10.0, cap=0.5, wsat=20.0, lmin=2.0)
-BASE = dict(a=1.0, p=0.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0)
+BASE = dict(a=1.0, p=0.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, short=0.0, tail=0.0, tail_len=2.0, tail_pow=1.0, ang_cos=False, tail_mult=False)
 RUNNER = {'B3': 'b3_ours', 'B5': 'b5_ours', 'B6': 'b4_ours', 'B7': 'b78_ours', 'B8': 'b78_ours', 'B9': 'b4_ours',
-          'B10': 'b4_ours', 'B11': 'b78_ours'}
+          'B10': 'b4_ours', 'B11': 'b78_ours', 'B12': 'b78_ours'}
 
 
 def runner_name(case):
@@ -76,8 +77,10 @@ def solid_ref():
     return out
 
 
-def joint_of(par):
+def joint_of(par, model=None):
     j = dict(BASE); j.update(par)
+    if (model or os.environ.get('RULE_FIT_MODEL', '')) == 'R7' or par.get('ang_cos'):
+        j['ang_cos'] = True
     j['pz'] = j['p']                      # one angle exponent for zone and stiffness
     return dict(mode='rule', **j)
 
@@ -96,7 +99,7 @@ class Fit:
         return par
 
     def predict(self, x, cases_):
-        j = joint_of(self.params(x))
+        j = joint_of(self.params(x), self.model)
         return dict(self.pool.map(run_case, [(c, j) for c in cases_]))
 
     def resid(self, x):
@@ -110,7 +113,10 @@ class Fit:
 
     def fit(self):
         from scipy.optimize import least_squares
-        x0 = np.array([START[k] for k in self.free])
+        start = dict(START)
+        if self.model == 'R7':
+            start.update(a=3.0, zl=0.9, gamma=0.1, p=0.85, wsat=3.0)
+        x0 = np.array([start[k] for k in self.free])
         res = least_squares(self.resid, x0, bounds=([LO[k] for k in self.free], [HI[k] for k in self.free]),
                             diff_step=0.05, max_nfev=12, x_scale=np.maximum(np.abs(x0), 0.5))
         return res.x

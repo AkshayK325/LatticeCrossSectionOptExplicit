@@ -24,7 +24,7 @@ FIGDIR = ROOT.parent / 'ResultsFig' / 'abaqus'
 
 def _is_b1(case):
     """The single-strut B1 cases (B1a-g, B1e2, ...); B10 / B11 are prescribed-motion specimens, not B1 (bug 2026-10-19: both startwith 'B1')."""
-    return case.startswith('B1') and not case.startswith(('B10', 'B11'))
+    return case.startswith('B1') and case[2:3].isalpha()
 
 def read_abaqus(name):
     """{(region, variable): (t, y)} from <name>_history.csv, or None."""
@@ -159,7 +159,7 @@ def labels(case):
     if case in ('A3s', 'A3s1'):
         g = cases.a3s_mesh(cases.CASES[case]['spec'])
         return {'amid': g['midA'], 'bmid': g['midB'], 'b': g['labelsB']}
-    if case.startswith(('B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'F', 'H')):   # F = B2 rig with FHS joints, H = F with EPU 45, B3/4 driven
+    if case.startswith(('B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12', 'F', 'H')):   # F = B2 rig with FHS joints, H = F with EPU 45, B3/4 driven
         return _rig_labels_from_inp(cases.CASES[case]['spec']['name'])
     if case in ('A4', 'A5a', 'A5b', 'A5as', 'A5aq', 'A5bs'):
         lat, rig = cases._a4_rig(cases.CASES[case]['spec'])
@@ -174,7 +174,7 @@ def signals(case, ours):
          ('strain energy', 'ALLSE', 'ALLSE', None, 'N mm', None)]
     if case.startswith('H'):                                     # EPU 45: viscous (Prony) dissipation
         E.append(('viscous dissipation', 'ALLCD', 'ALLCD', None, 'N mm', None))
-    if case.startswith(('B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11')):                     # joint specimen / cell, prescribed plate motion
+    if case.startswith(('B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'B12')):                     # joint specimen / cell, prescribed plate motion
         return [('plate U3 (driven)', 'U3ref', 'U3', ('node', L['ref']), 'mm', 0.01),
                 ('bottom reaction (sum RF3)', 'RF3bot', 'RF3', ('sum', L['bot']), 'N', 0.05),
                 ('kinetic energy', 'ALLKE', 'ALLKE', None, 'N mm', None)]

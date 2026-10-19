@@ -1453,6 +1453,13 @@ def b78_lattice(c):
         # the column. Every plate end is a single-strut end (no plate-node degeneracy), the joint is an interior FHS node.
         X = np.array([[0, 0, 0], [0, 0, H / 2], [0, 0, H], [H / 2 * np.tan(np.radians(c['theta'])), 0, H]], float)
         C = np.array([[0, 1], [1, 2], [1, 3]])
+    elif c['cell'] == 'Y':
+        # B12: two valence-3 Y nodes (all angles 120 deg) at mid height joined by a strut of length Ls along x; each node has two legs
+        # (up and down, 30 deg to the vertical) ending on the plates. Tests the merged-joint regime of a SHORT strut between two joints.
+        Ls, ll = c['Ls'], (H / 2) / np.sin(np.radians(60.0))
+        dx = ll * np.cos(np.radians(60.0))
+        X = np.array([[-Ls / 2, 0, H / 2], [Ls / 2, 0, H / 2], [-Ls / 2 - dx, 0, H], [-Ls / 2 - dx, 0, 0.0], [Ls / 2 + dx, 0, H], [Ls / 2 + dx, 0, 0.0]], float)
+        C = np.array([[0, 1], [0, 2], [0, 3], [1, 4], [1, 5]])
     else:
         d = 6.35 * np.sqrt(2.0)                                     # BCC diagonal: horizontal offset 8.98, half height 6.35
         n = c['n']
@@ -1470,8 +1477,24 @@ def b78_lattice(c):
             'beam_of_elem': np.repeat(np.arange(len(C)), np.rint(L / c['elemSize']).astype(int))}
 
 
+# ------------------------------------------------------------------------------------------------ B12
+# Short-strut series (notes/18 section 16): the converged C4 r 0.8 solid is 21-25 % stiffer than every model, and the models leave the middle of its 2.63 mm
+# strut (L/r = 3.3) unstiffened. Two symmetric Y nodes (valence 3, all angles 120 deg) joined by a strut of length Ls, legs up and down to the plates
+# (30 deg to the vertical), r and Ls varied: the stiffening as a function of Ls / r at fixed node topology. Linear, prescribed motion 0.5 mm in 0.3 ms,
+# hold 0.5 ms, current FHS geometry, solid h = r / 2, beam elements r long.
+def _b12(tag, r, Ls):
+    return dict(B3, name=f"B12{tag}_Y_r{int(round(100 * r)):03d}_Ls{int(round(100 * Ls)):03d}_linE0", cell='Y', Ls=float(Ls), r=r, h=0.5 * r,
+                H=12.7, amount=0.5, material='linear', t_ramp=3e-4, t_hold=5e-4, elemSize=r, plate_push='out',
+                title=f"B12{tag}: two Y nodes (valence 3, 120 deg) joined by a strut of {Ls:g} mm (L/r = {Ls / r:.1f}), r {r:g}, legs to the plates, FHS joints, "
+                      f"LINEAR E0, top plate down 0.5 mm (smooth step 0.3 ms), hold 0.5 ms; bottom plate clamped; no contact")
+
+
+B12_CASES = {'B12a': _b12('a', 0.8, 2.63), 'B12b': _b12('b', 0.8, 4.5), 'B12c': _b12('c', 0.8, 7.0), 'B12d': _b12('d', 0.6, 2.63), 'B12e': _b12('e', 0.5, 2.63)}
+
+
 def b78_inp(c):
-    tag = (f"B7_T{c.get('theta', 0):g}" + ''.join(f'_{v:g}' for v in c.get('strut_r', ()))) if c['cell'] == 'T' else f"B8_N{c['n']}"
+    tag = (f"B7_T{c.get('theta', 0):g}" + ''.join(f'_{v:g}' for v in c.get('strut_r', ()))) if c['cell'] == 'T' else \
+        (f"B12_Y{c['Ls']:g}" if c['cell'] == 'Y' else f"B8_N{c['n']}")
     return b3_inp(c, g=b3_mesh(c, lat=b78_lattice(c), tag=tag))
 
 
@@ -1801,6 +1824,8 @@ CASES = {'A1': dict(spec=A1, inp=a1_inp, ours=a1_ours),
             for k, v in B6_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b78_inp(v)), ours=(lambda v=v: b78_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in {**B7_CASES, **B8_CASES}.items()},
+         **{k: dict(spec=v, inp=(lambda v=v: b78_inp(v)), ours=(lambda v=v: b78_ours(v, JOINT_FHS)), joint=JOINT_FHS)
+            for k, v in B12_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b9_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
             for k, v in B9_CASES.items()},
          **{k: dict(spec=v, inp=(lambda v=v: b10_inp(v)), ours=(lambda v=v: b4_ours(v, JOINT_FHS)), joint=JOINT_FHS)
