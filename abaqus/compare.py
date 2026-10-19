@@ -21,6 +21,11 @@ import cases                                                     # noqa: E402
 FIGDIR = ROOT.parent / 'ResultsFig' / 'abaqus'
 
 
+
+def _is_b1(case):
+    """The single-strut B1 cases (B1a-g, B1e2, ...); B10 / B11 are prescribed-motion specimens, not B1 (bug 2026-10-19: both startwith 'B1')."""
+    return case.startswith('B1') and not case.startswith(('B10', 'B11'))
+
 def read_abaqus(name):
     """{(region, variable): (t, y)} from <name>_history.csv, or None."""
     # whole file, or split parts (<name>_history_*.csv / <name>_history_h1.csv ...) for large runs
@@ -141,7 +146,7 @@ def _b1_labels_from_inp(name):
 
 
 def labels(case):
-    if case.startswith('B1'):
+    if _is_b1(case):
         return _b1_labels_from_inp(cases.CASES[case]['spec']['name'])
     if case == 'A1':
         return {'tip': cases.A1['n_el'] + 1, 'root': 1}
@@ -173,7 +178,7 @@ def signals(case, ours):
         return [('plate U3 (driven)', 'U3ref', 'U3', ('node', L['ref']), 'mm', 0.01),
                 ('bottom reaction (sum RF3)', 'RF3bot', 'RF3', ('sum', L['bot']), 'N', 0.05),
                 ('kinetic energy', 'ALLKE', 'ALLKE', None, 'N mm', None)]
-    if case.startswith('B1'):                                   # single EPU 45 strut, prescribed ramp-and-hold
+    if _is_b1(case):                                   # single EPU 45 strut, prescribed ramp-and-hold
         comp = '1' if cases.CASES[case]['spec']['mode'] == 'bend' else '3'
         return [('driven displacement', 'Udrv', 'U' + comp, ('node', L['drv']), 'mm', 0.01),
                 ('bottom reaction (sum RF)', 'RFbot', 'RF' + comp, ('sum', L['bot']), 'N', 0.05),
@@ -211,7 +216,7 @@ def scalar_metrics(case, ours, ab):
 
     def rel(a, b):
         return abs(a - b) / max(abs(b), 1e-300)
-    if case.startswith('B1'):
+    if _is_b1(case):
         sp = cases.CASES[case]['spec']
         comp = '1' if sp['mode'] == 'bend' else '3'
         rf, ud = pick(ab, 'RF' + comp, ('sum', L['bot'])), pick(ab, 'U' + comp, ('node', L['drv']))

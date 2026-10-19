@@ -117,3 +117,37 @@ def test_rule_factors_cap_and_saturation():
     d = torch.zeros_like(r); d[::4] = 1.0; h = 1e-6
     fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
     assert abs(float((g * d).sum()) - float(fd)) < 1e-6 * max(1.0, abs(float(fd)))
+
+
+def test_rule_factors_lmin_floor():
+    """lmin (floor of the pair zone length) only adds stiffening and keeps the radii gradient exact."""
+    import jointRule
+    lat = example3(elemSize=1.0, nx=1, ny=1)
+    r = torch.full((len(lat['connr']),), 0.6, dtype=torch.float64, requires_grad=True)
+    kw = dict(a=3.0, p=-0.8, zl=0.8, b=0.1, gamma=0.0, wsat=2.5)
+    s0 = jointRule.rule_factors(lat, r.detach(), **kw)
+    s1 = jointRule.rule_factors(lat, r.detach(), lmin=0.8, **kw)
+    assert float(s1.sum()) >= float(s0.sum()) - 1e-9
+    f = lambda rr: jointRule.rule_factors(lat, rr, lmin=0.8, **kw).sum()
+    g, = torch.autograd.grad(f(r), r)
+    d = torch.zeros_like(r); d[::3] = 1.0; h = 1e-6
+    fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
+    assert abs(float((g * d).sum()) - float(fd)) < 1e-5 * max(1.0, abs(float(fd)))
+
+
+def test_rule_factors_taper():
+    """taper > 0 (smooth stiffness profile) keeps factors >= 1, is mesh independent and has an exact radii gradient."""
+    import jointRule
+    kw = dict(a=3.0, p=-0.8, zl=1.2, b=0.1, gamma=0.0, wsat=2.5, taper=1.0)
+    lat = example3(elemSize=1.0, nx=1, ny=1)
+    r = torch.full((len(lat['connr']),), 0.6, dtype=torch.float64, requires_grad=True)
+    s = jointRule.rule_factors(lat, r.detach(), **kw)
+    assert float(s.min()) >= 1.0 - 1e-12
+    lat2 = example3(elemSize=0.5, nx=1, ny=1)
+    s2 = jointRule.rule_factors(lat2, torch.full((len(lat2['connr']),), 0.6, dtype=torch.float64), **kw)
+    assert abs(float((1 / s).mean()) - float((1 / s2).mean())) < 0.02            # compliance, mesh independent to quadrature level
+    f = lambda rr: jointRule.rule_factors(lat, rr, **kw).sum()
+    g, = torch.autograd.grad(f(r), r)
+    d = torch.zeros_like(r); d[::3] = 1.0; h = 1e-6
+    fd = (f(r.detach() + h * d) - f(r.detach() - h * d)) / (2 * h)
+    assert abs(float((g * d).sum()) - float(fd)) < 1e-5 * max(1.0, abs(float(fd)))

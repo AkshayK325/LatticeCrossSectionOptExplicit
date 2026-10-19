@@ -20,17 +20,26 @@ ROOT = pathlib.Path(__file__).resolve().parent
 import os
 SET = os.environ.get('RULE_FIT_SET', '2')           # '3': + B9 (octet, C12) after the B9 runs, results in rule_fit3/
 GROUPS = {'SC': ['B5a', 'B5c', 'B5d'], 'STAR': ['B3a', 'B8a', 'B8b'], 'TJOINT': ['B7a', 'B7b', 'B7c'], 'CELL': ['B6a']}
-if SET == '3':
+if SET in ('3', '4'):
     GROUPS.update({'OCT': ['B9a', 'B9b'], 'C12': ['B9c']})
-WEIGHT = {'B9c': 0.5}                                # the C12 solid rings with a period ~ the hold window: static value uncertain ~ +-5 %
+if SET == '4':                                         # + B9d (long hold), B11 (unequal radii), B10 (C4, graded C4)
+    GROUPS['C12'] = ['B9c', 'B9d']
+    GROUPS.update({'UNEQ': ['B11a', 'B11b', 'B11c', 'B11d'], 'C4': ['B10a', 'B10b'], 'C4G': ['B10c', 'B10d']})
+WEIGHT = {'B9c': 0.3 if SET == '4' else 0.5}                                # the C12 solid rings with a period ~ the hold window: static value uncertain ~ +-5 %
 CASES = [c for g in GROUPS.values() for c in g]
 FREE = {'R0': ['a', 'zl'], 'R1': ['a', 'zl', 'gamma'], 'R2': ['a', 'zl', 'gamma', 'b'], 'R3': ['a', 'zl', 'gamma', 'b', 'p'],
-        'R4': ['a', 'zl', 'gamma', 'b', 'p', 'cap'], 'R5': ['a', 'zl', 'gamma', 'b', 'p', 'wsat']}   # R4 / R5: after B9 (notes/18 11)
-START = dict(a=1.0, zl=1.0, gamma=0.5, b=0.2, p=0.0, cap=0.4, wsat=3.0)
-LO = dict(a=0.0, zl=0.3, gamma=0.0, b=0.0, p=-4.0, cap=0.1, wsat=0.5)
-HI = dict(a=6.0, zl=3.0, gamma=1.0, b=2.0, p=10.0, cap=0.5, wsat=20.0)
-BASE = dict(a=1.0, p=0.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None)
-RUNNER = {'B3': 'b3_ours', 'B5': 'b5_ours', 'B6': 'b4_ours', 'B7': 'b78_ours', 'B8': 'b78_ours', 'B9': 'b4_ours'}
+        'R4': ['a', 'zl', 'gamma', 'b', 'p', 'cap'], 'R5': ['a', 'zl', 'gamma', 'b', 'p', 'wsat'],
+        'R6': ['a', 'zl', 'gamma', 'b', 'p', 'wsat', 'lmin']}   # R6: + zone floor lmin (set 4)   # R4 / R5: after B9 (notes/18 11)
+START = dict(a=1.0, zl=1.0, gamma=0.5, b=0.2, p=0.0, cap=0.4, wsat=3.0, lmin=0.3)
+LO = dict(a=0.0, zl=0.3, gamma=0.0, b=0.0, p=-4.0, cap=0.1, wsat=0.5, lmin=0.0)
+HI = dict(a=6.0, zl=3.0, gamma=1.0, b=2.0, p=10.0, cap=0.5, wsat=20.0, lmin=2.0)
+BASE = dict(a=1.0, p=0.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0)
+RUNNER = {'B3': 'b3_ours', 'B5': 'b5_ours', 'B6': 'b4_ours', 'B7': 'b78_ours', 'B8': 'b78_ours', 'B9': 'b4_ours',
+          'B10': 'b4_ours', 'B11': 'b78_ours'}
+
+
+def runner_name(case):
+    return RUNNER[case[:3]] if case[:3] in RUNNER else RUNNER[case[:2]]
 
 
 def _init():
@@ -49,7 +58,7 @@ def run_case(args):
     case, joint = args
     import cases
     sp = cases.CASES[case]['spec']
-    o = getattr(cases, RUNNER[case[:2]])(sp, joint)
+    o = getattr(cases, runner_name(case))(sp, joint)
     return case, hold_mean(o['time'], o['RF3bot'], sp)
 
 
@@ -117,7 +126,7 @@ def main():
     pr = f.predict(x, CASES)
     err = {c: pr[c] / f.ref[c] - 1 for c in CASES}
     out = dict(model=model, hold=hold, params=f.params(x), err=err, train=f.train, ref=f.ref)
-    d = ROOT / 'results' / ('rule_fit2' if SET == '2' else 'rule_fit3')
+    d = ROOT / 'results' / {'2': 'rule_fit2', '3': 'rule_fit3', '4': 'rule_fit4'}[SET]
     d.mkdir(exist_ok=True)
     (d / f"{model}{'_' + hold if hold else ''}.json").write_text(json.dumps(out, indent=1))
     print(json.dumps(out['params']), {c: round(100 * e, 1) for c, e in err.items()}, flush=True)

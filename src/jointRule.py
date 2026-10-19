@@ -14,16 +14,18 @@ change moves the stiffening. Parameters (a, p, zl, b) are fitted in abaqus/fit_r
 import numpy as np
 import torch
 
-DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None)
+DEFAULT = dict(a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0)
 
 
-def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, tau=0.02):
+def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamma=1.0, cap=0.5, wsat=None, lmin=0.0, taper=0.0, plate_scale=1.0, tau=0.02):
     """Per-element stiffness factors (ne,) >= 1, differentiable in r_elem (ne,) and in (a, p, zl, b, mu, pz, gamma) if tensors.
     p: angle exponent of the stiffness weight sin^p; pz: of the zone-length weight (default = p); a negative exponent weights
     ACUTE neighbours more (B7: the solid stiffens more the more acute the neighbour). gamma in [0, 1]: weight of a pair of struts
     that both LEAVE a plate at a plate node (B6: the oblique diagonal at a plate corner adds less than in-plate struts do).
     cap: largest zone length as a fraction of the strut length (0.5 = the zones of the two ends just touch). wsat: if given, the
-    neighbour sum W saturates smoothly at wsat (wsat tanh(W / wsat)), so that valence-6-12 nodes do not become ever stiffer (B9)."""
+    lmin: floor of the geometric pair zone length in units of the own radius, so that obtuse pairs (whose cylinder-union zone shrinks to 0)
+    taper: 0 = step profile (rigid-like zone); m > 0: stiffness decays as (1 - s / l)^m from the node (e.g. 1 = linear taper).
+    keep the fillet / web material of the FHS joint (C4, 120 deg nodes: B10). neighbour sum W saturates smoothly at wsat (wsat tanh(W / wsat)), so that valence-6-12 nodes do not become ever stiffer (B9)."""
     X, C = lat['X'], lat['conn']
     Xr, connr = lat['Xr'], lat['connr']
     boe_np = np.asarray(lat['beam_of_elem'])
@@ -34,6 +36,7 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamm
     rb = torch.zeros(nb, dtype=dt).index_add(0, boe, r_elem) / cnt
     Lb = np.linalg.norm(X[C[:, 1]] - X[C[:, 0]], axis=1)
     ends, nbrs, cs, sn, gm = [], [], [], [], []
+    plate_end = np.zeros(2 * nb, bool)                                  # strut end lies on a plate
     zlo, zhi = float(X[:, 2].min()), float(X[:, 2].max())
     for b_, (i, j) in enumerate(C):
         for side, (node, other) in enumerate(((i, j), (j, i))):
@@ -48,6 +51,7 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamm
                 if st < 1e-6:                                       # collinear: the same strut continuing
                     continue
                 at_plate = abs(X[node, 2] - zlo) < 1e-9 or abs(X[node, 2] - zhi) < 1e-9
+                plate_end[2 * b_ + side] = at_plate
                 in_plane = lambda u: abs(u[2]) < 1e-9 * max(np.linalg.norm(u), 1.0)         # strut lies in the plate plane
                 both_out = at_plate and not in_plane(X[other] - X[node]) and not in_plane(X[o] - X[node])
                 ends.append(2 * b_ + side); nbrs.append(c); cs.append(ct); sn.append(st); gm.append(both_out)
@@ -63,7 +67,7 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamm
     wz = sn ** pz * gfac
     q = rb[nbrs] / ra
     W = torch.zeros(2 * nb, dtype=dt).index_add(0, ends, q * q * w)                   # per strut end
-    li = zl * wz * torch.clamp((rb[nbrs] + ra * cs) / sn, min=0.0)
+    li = zl * wz * torch.maximum(torch.clamp((rb[nbrs] + ra * cs) / sn, min=0.0), lmin * ra)
     wt = tau * ra
     m0 = torch.full((2 * nb,), -torch.inf, dtype=dt).scatter_reduce(0, ends, li.detach(), 'amax')
     lse = torch.zeros(2 * nb, dtype=dt).index_add(0, ends, torch.exp((li - m0[ends]) / wt))
@@ -75,6 +79,7 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamm
     if wsat is not None:
         W = wsat * torch.tanh(W / wsat)
     k = 1.0 + mu * a * W
+    k = 1.0 + (k - 1.0) * torch.where(torch.as_tensor(plate_end), torch.as_tensor(plate_scale, dtype=dt), torch.ones((), dtype=dt))
     P0, tb_ = X[C[boe_np, 0]], (X[C[boe_np, 1]] - X[C[boe_np, 0]]) / Lb[boe_np, None]
     s1 = ((Xr[connr[:, 0]] - P0) * tb_).sum(1)
     s2 = ((Xr[connr[:, 1]] - P0) * tb_).sum(1)
@@ -86,5 +91,13 @@ def rule_factors(lat, r_elem, a=1.0, p=4.0, zl=1.0, b=0.0, mu=1.0, pz=None, gamm
     k0, k1 = k[2 * boe], k[2 * boe + 1]
     ov0 = torch.clamp(torch.minimum(hi, l0) - lo, min=0.0)
     ov1 = torch.clamp(hi - torch.maximum(lo, Lbt - l1), min=0.0)
+    if taper > 0:         # smooth profile: beta(s) = 1 + (k - 1) (1 - s / l)+^taper from each end, compliance = int ds / beta (Gauss-Legendre)
+        xg, wg = np.polynomial.legendre.leggauss(8)
+        xg, wg = torch.as_tensor(xg, dtype=dt), torch.as_tensor(wg, dtype=dt)
+        sg = lo[:, None] + (hi - lo)[:, None] * (xg[None, :] + 1) / 2                    # (ne, 8) distance from node 0
+        phi0 = torch.clamp(1 - sg / l0.clamp_min(1e-12)[:, None], min=0.0) ** taper
+        phi1 = torch.clamp(1 - (Lbt[:, None] - sg) / l1.clamp_min(1e-12)[:, None], min=0.0) ** taper
+        beta = 1 + (k0 - 1)[:, None] * phi0 + (k1 - 1)[:, None] * phi1
+        return le / ((le[:, None] / 2 * wg[None, :]) / beta).sum(1)
     comp = (le - ov0 - ov1) + ov0 / k0 + ov1 / k1
     return le / comp

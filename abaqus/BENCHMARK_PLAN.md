@@ -1217,3 +1217,34 @@ If B11b / B11d come out near 1.2 / 1.33 the neighbour sum should use a weaker ra
 | H2a C4 r 0.8 EPU | 10.483 / 12.4 | 7.760 / 17.5 | 8.099 / 17.4 |
 
 **Bookkeeping added the same day:** `CLAUDE.md` (repo rules: every background / long job reports to `run_status.log`), `tests/run_logged.py` (wrapper / watcher for any command), run_status reporting inside every long script.
+
+### Results 2026-10-19: B10 (C4), B11 (unequal radii), B9d (long hold), F2 / H2 (impact in the CURRENT FHS geometry), and what they do to the joint model
+
+**Static specimens (hold-window mean, error = ours / solid - 1; `results/B10_B11_summary.md`; compare.py had a name clash B10 / B11 vs B1 that hid the solid rows, fixed):**
+
+| case | solid / bare | zone k = 3.5 | JOINT_FHS (lambda = r) | rule R5 (set-3 fit) |
+|---|---|---|---|---|
+| **B10a C4 r 0.8 (design lattice)** | **1.975** | -22.2 % | -19.9 % | **-23.3 %** |
+| B10b C4 r 0.6 | 1.462 | -9.6 % | -3.0 % | -10.6 % |
+| B10c graded 1.0 / 0.6 | 1.882 | -21.4 % | -16.3 % | -16.3 % |
+| B10d graded 0.6 / 1.0 | 1.871 | -20.8 % | -15.7 % | -15.7 % |
+| B11a T 45 deg, col 1.0 / obl 0.6 | 1.167 | -4.3 % | -8.5 % | -5.7 % |
+| B11b T 45 deg, col 0.6 / obl 1.0 | 1.269 | -7.1 % | -5.6 % | **+3.5 %** |
+| B11c T 30 deg, col 1.0 / obl 0.6 | 1.222 | -2.8 % | -9.3 % | **-2.5 %** |
+| B11d T 30 deg, col 0.6 / obl 1.0 | 1.460 | -13.8 % | -8.6 % | **+0.9 %** |
+| B9d C12 (1.2 ms hold) | 1.409 | +2.0 % | -3.0 % | +4.5 % |
+
+- **Unequal radii: the quadratic radius ratio (r_b / r_a)^2 of the rule is confirmed** (B11b / d solid 1.269 / 1.460 vs R5 1.313 / 1.474, vs the predicted decision band "near 1.3 / 1.47 = quadratic is right"); R5 is within +-6 % on all four, JOINT_FHS under-predicts by 6-9 %.
+  This is what the design gradient dk / dr relies on.
+- **The C4 design lattice is under-predicted by every model by 16-23 %** (B10a, c, d; r 0.6 by 3-11 %). The solid windows are stable (B10a mean 21.38 N, halves 21.45 / 21.32, ringing 7 %), so it is not a measurement artefact. The solid's stiffening
+  rises steeply with r (1.46 at r 0.6 -> 1.98 at r 0.8); no model follows. C4 nodes: valence 3, angles 90 / 120 / 120 deg, strut lengths 6.35 / 6.35 / 2.63 mm (L/r = 3.3 for the short strut at r 0.8).
+- **Impact in the current geometry (valid solids; `results/F2H2_summary.md`), stroke error JOINT_FHS / R5:** F2a C4 +11.6 / +14.0 %, F2d C12 -0.6 / -4.6, F2e BCC r 1.0 +2.0 / +5.1, F2f BCC r 1.5 +3.4 / +7.6, F2g octet r 1.0 +6.6 / -0.1, F2h octet r 1.5 +15.2 / +1.3,
+  H2e BCC EPU -5.7 / -1.7, H2d C12 EPU -0.4 / -6.0, H2a C4 EPU +18.6 / +23.8; mean |error| 7.1 % for both. R5 is much better on the octet, worse on C12 and C4; the largest errors of both models are the C4 cells, consistent with the static C4 miss (our C4 is too soft, so the stroke is too long).
+  Peak force R5: F2d +42 % (the C12 peak), F2h +15 %, F2e +18 %.
+
+**Diagnostics on why the C4 cell is missed (offline, no new Abaqus runs):**
+- Refit of the rule on all 22 specimens (set 4, 6 and 7 parameters; `results/rule_fit4/`): in-sample rms 7.0 % / 7.4 %, max 17 % (B10a): the rule family cannot represent C4 and C12 / octet / BCC at once (the rate of change with the zone length scale differs: zl = 1.2 puts B10a at -0.5 % but B9d at +40 %). Neither the zone floor `lmin` nor the profile taper (`taper` 1 / 2) nor a plate-node scale helps (plate nodes change B10a by < 7 points).
+- **The slicing model with a weaker participation decay is better than the 6-parameter rule on most cells** (`results/slice_decay.md`, no fitted constant except lambda): at lambda = infinity it is within +-3.5 % on B5a/c/d, B9d, B10b, B11b, B11d, B8, B7 but over-predicts the BCC cell B6a by +18.5 % and still misses C4 r 0.8 (-13.5 %) and the graded C4 (-10 %);
+  rms over the 22 specimens 11.6 % (lambda = r, the recorded model), 9.2 % (2 r), 8.1 % (4 r), 7.7 % (8 r and none). The recorded lambda = r was chosen before any evaluation and never tuned; the static data prefer no decay (the impact data of 2026-10-05 had preferred lambda = r).
+  Neither the slicing model nor the rule is below ~7.7 % rms / 17-18 % worst case on the 22 static specimens: the remaining errors are structural: C4 r 0.8 under, BCC cell over, for both model families.
+- **Not yet checked:** whether the C4 r 0.8 solid itself is mesh-converged (h/r = 0.5; the stiffening of 1.98 may contain locking in the short necks); the short-strut Timoshenko limit (L/r = 3.3); the overlap of the two joints of the 2.63 mm strut at r 0.8.

@@ -21,7 +21,7 @@ def run_model(args):
     torch.set_num_threads(1)
     import cases
     sp = cases.CASES[case]['spec']
-    fn = getattr(cases, fr.RUNNER[case[:2]])
+    fn = getattr(cases, fr.runner_name(case))
     if kind == 'zone':
         import jointSection
         from latticeSetup import joint_factors
@@ -53,7 +53,7 @@ def main():
               ('JOINT_FHS+plate_layer', 'fhs_layer', None, None)]
     first = json.loads((ROOT / 'results' / 'rule_fit' / 'M3.json').read_text())['params']
     models.append(('first rule M3 (B3/B5/B6 fit)', 'rule1', first, None))
-    out = ROOT / 'results' / ('rule_fit2' if fr.SET == '2' else 'rule_fit3')
+    out = ROOT / 'results' / {'2': 'rule_fit2', '3': 'rule_fit3', '4': 'rule_fit4'}[fr.SET]
     for f in sorted(out.glob('R*.json')):
         d = json.loads(f.read_text())
         models.append((f.stem + (' (all, in sample)' if not d['hold'] else ' (held out)'), 'rule', d['params'], d['hold']))
