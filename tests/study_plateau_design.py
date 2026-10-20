@@ -45,14 +45,20 @@ def rows(gv):
 base = dict(lat=lat, symType=SYM, mat=project_material(), T=T,
             rig_kw=dict(law={'kind': 'crit_damped', 'F_ref': 2000.0, 'delta_ref': 0.2}, start='co_moving', gap0=0.1,
                         energy_J=0.75), x_range=R_RANGE)
-JOINT_K = float(os.environ.get('JOINT_K', 0)) or None      # geometric joint stiffening (abaqus B2a: k = 3.5)
+# Joint stiffening: default = validated closed-form rule jointRule.PRESETS['R5_C4'] (env JOINT=R5|R5_C4|R5_all22|none);
+# JOINT_K=3.5 selects the old constant-k zone model (kept for comparison with earlier notes/9 runs).
+JOINT_K = float(os.environ.get('JOINT_K', 0)) or None
+JOINT = 'k' if JOINT_K else os.environ.get('JOINT', 'R5_C4')
 if JOINT_K:
     base['rig_kw']['joint'] = {'k': JOINT_K}
+elif JOINT != 'none':
+    import jointRule
+    base['rig_kw']['joint'] = dict(jointRule.PRESETS[JOINT])
 target = plateau_target(F_PLATEAU, D_RISE, D_END)
 spec = dict(base, terms=lambda rig: make_terms(rig, target), outer=lambda rig: fd_mse_outer(target))
 g0 = [float(v) for v in sys.argv[3].split(',')] if len(sys.argv) > 3 else [0.80, 0.80, 0.80]
 MAXIT = int(sys.argv[4]) if len(sys.argv) > 4 else None
-TAG = (f'{F_PLATEAU:.0f}N_' if F_PLATEAU != 80.0 else '') + (f'joint{JOINT_K:g}_' if JOINT_K else '') + OPT + ('' if len(sys.argv) <= 3 else '_from_' + '_'.join(f'{v:.3f}' for v in g0))
+TAG = (f'{F_PLATEAU:.0f}N_' if F_PLATEAU != 80.0 else '') + (f'joint{JOINT_K:g}_' if JOINT_K else (f'{JOINT}_' if JOINT not in ('R5_C4',) and JOINT != 'none' else ('bare_' if JOINT == 'none' else ''))) + OPT + ('' if len(sys.argv) <= 3 else '_from_' + '_'.join(f'{v:.3f}' for v in g0))
 
 hist = {'J': [], 'g': [], 'time': []}
 memo, J0 = {}, {}
@@ -155,7 +161,7 @@ md = [
     f'- Objective: normalised MSE of the impactor force–stroke loading branch against the target. '
     f'Design: Midplane symmetry, 3 group radii, normalised x in [0, 1] (radius = {R_RANGE[0]} + {R_RANGE[1]-R_RANGE[0]:.1f} x).',
     f'- Optimizer: {OPT}; gradients: checkpointed discrete adjoint (exact). Start {g0}. Contact exclusion: smooth (C1) unless noted. '
-    f'Joint stiffening: {"k = %g (geometric zones, latticeSetup.joint_factors)" % JOINT_K if JOINT_K else "none (bare beams)"}.', '',
+    f'Joint stiffening: {"k = %g (geometric zones, latticeSetup.joint_factors)" % JOINT_K if JOINT_K else ("none (bare beams)" if JOINT == "none" else "closed-form rule jointRule.PRESETS[%r] (smooth, differentiable; notes/18)" % JOINT)}.', '',
     f'![plateau](../ResultsFig/explicit/{fp.name})', '',
     '| design | radii [mm] | peak F [N] | max stroke [mm] | loading energy [J] | crush efficiency | plateau mean/max |',
     '|---|---|---|---|---|---|---|',

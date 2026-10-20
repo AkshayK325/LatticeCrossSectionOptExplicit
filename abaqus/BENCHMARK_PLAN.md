@@ -1405,3 +1405,7 @@ The presets are the smooth form; do not use `smooth = 0` in an optimisation (kin
 - **Solid-only observation (no model needed):** raising r_short by 0.2 raises the C4 reaction by x1.40 / x1.39 at r_long 0.6 (0.6 -> 0.8 -> 1.0) and by x1.25 / x1.30 at r_long 0.8; raising r_long 0.6 -> 0.8 raises it by x2.8 / x2.5 / x2.3 for r_short 0.6 / 0.8 / 1.0.
 
 **Conclusion on the C4 correction:** `PRESETS['R5_C4']` is validated for C4-type lattices (valence-3 nodes with 90 / 120 / 120 deg angles and 2.6 mm short struts) to about +-10 % in statics (blind 5.9 % rms), and leaves every other topology unchanged. It is NOT validated outside that family; its onset sits at the C12 boundary; the impact peak force of C4 gets worse (+49 % / +25 %); B12 (Y-pair series) remains an optional extra.
+
+
+## Plateau-design integration (2026-10-20)
+`tests/study_plateau_design.py` defaults to the `R5_C4` joint preset. Gradient verification on the real plateau problem: `tests/check_plateau_gradients.py` -> `abaqus/results/plateau_gradient_check_R5_C4.md` (adjoint = unrolled AD 6e-16; = FD to 1e-8 where J is smooth; rough J at unequal radii on the full drop, FD unreliable there), `tests/study_courant_sensitivity.py` -> `courant_sensitivity.md`, test `tests/test_plateau_joint_gradient.py`. No Abaqus run needed.
