@@ -1383,3 +1383,25 @@ The calibration script (`short_strut_calibration.py`) and `b13_predict.py` are r
 
 **How to use it in the optimiser:** `rig = drop_rig(lat, radii(x, ...), law, mat=mat, joint=jointRule.PRESETS['R5_C4'])`; the gradient w.r.t. the design `x` then includes how the radii move the joint stiffening. Use `PRESETS['R5']` for lattices without short (L / r < 4.6) struts.
 The presets are the smooth form; do not use `smooth = 0` in an optimisation (kinks).
+
+### Results 2026-10-19: B13 (C4 with decoupled short / long strut radii; all four runs completed; solid hold-window means, ringing 7-11 %, halves agree < 1 %)
+
+| case | r long | r short | solid [N] | solid / bare | JOINT_FHS (lambda = r) | JOINT_FHS (no decay) | rule R5 | R5 refit (22) | **R5 + short-strut law (blind)** |
+|---|---|---|---|---|---|---|---|---|---|
+| B10b | 0.6 | 0.6 | 6.111 | 1.462 | -3.0 % | +2.0 % | -10.6 % | -6.2 % | -9.4 % (calibration set) |
+| B13a | 0.6 | 0.8 | 8.639 | 1.682 | -12.2 % | -7.6 % | -19.0 % | -16.9 % | **+2.1 %** |
+| B13b | 0.6 | 1.0 | 12.033 | 2.155 | -14.0 % | -8.9 % | -14.4 % | -12.4 % | **+7.5 %** |
+| B10a | 0.8 | 0.8 | 21.383 | 1.975 | -19.9 % | -13.5 % | -23.3 % | -17.2 % | -1.7 % (calibration set) |
+| B13c | 0.8 | 0.6 | 17.067 | 2.094 | -11.4 % | -2.4 % | -13.4 % | -9.2 % | **-8.6 %** |
+| B13d | 0.8 | 1.0 | 27.708 | 2.101 | -20.6 % | -14.6 % | -27.5 % | -22.0 % | **-1.7 %** |
+
+- **The stopgap passes its blind test:** the short-strut law (gain 1.5, onset L / r = 4.6) was calibrated on B10a-d only; on the four B13 solids it is within +7.5 / -8.6 % (rms 5.9 %), against 13-28 % low for R5 alone. Decision rule 1 (within +-8 %) is met on 3 of 4 and missed by 0.6 point on B13c.
+  The only competitor that comes close is the geometry-based slicing model without participation decay (-2.4 ... -14.6 %), which is not differentiable.
+- **Law refit on all eight C4 solids** (`results/short_law_fit.md`, grid over gain and onset, controls = C12 B9c / B9d, unequal-radius T-joints B11a-d, octet B9b): the optimum is flat; best (gain 1.75, onset 4.6) rms 5.9 % vs the shipped (1.5, 4.6) 6.0 %, so the preset is kept. The onset is at the edge of the allowed range (4.6 protects C12, whose shortest struts are L / r = 4.64); controls stay at 3.1-3.2 % rms
+  for every gain up to 2.0. Leave-one-out over the eight C4 solids: **6.1 % rms, 10.5 % worst** (B13b +10.5, B13c -9.3, B10b -9.2).
+- **What the multiplier m (short struts, on top of R5; `results/short_strut_calibration.md`) says about the physics:** it depends mainly on the short strut's own radius, not on L alone:
+  r_short 0.6: m = 2.09 (r_long 0.6) and 2.04 (r_long 0.8), i.e. independent of the long struts; r_short 0.8: 2.73 (r_long 0.6) and 3.16 (r_long 0.8); r_short 1.0: 2.42 (r_long 0.6) and 4.40 (r_long 0.8). The coupling to the long struts' radius appears only for the thick short struts;
+  m is a lumped correction on top of R5 (whose own end zones are too soft for thick struts), so this is a residual of the model form, not a separate law. It is the origin of the +-10 % that the law leaves.
+- **Solid-only observation (no model needed):** raising r_short by 0.2 raises the C4 reaction by x1.40 / x1.39 at r_long 0.6 (0.6 -> 0.8 -> 1.0) and by x1.25 / x1.30 at r_long 0.8; raising r_long 0.6 -> 0.8 raises it by x2.8 / x2.5 / x2.3 for r_short 0.6 / 0.8 / 1.0.
+
+**Conclusion on the C4 correction:** `PRESETS['R5_C4']` is validated for C4-type lattices (valence-3 nodes with 90 / 120 / 120 deg angles and 2.6 mm short struts) to about +-10 % in statics (blind 5.9 % rms), and leaves every other topology unchanged. It is NOT validated outside that family; its onset sits at the C12 boundary; the impact peak force of C4 gets worse (+49 % / +25 %); B12 (Y-pair series) remains an optional extra.

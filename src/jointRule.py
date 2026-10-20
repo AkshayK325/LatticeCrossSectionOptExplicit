@@ -181,8 +181,9 @@ def rule_factors(lat, r_elem, short_gain=0.0, short_l0=5.5, smooth=0.0, **kw):
 # mu = 1: the EPU 45 factor fitted on the fast prescribed ramps does not transfer to impact (notes/18 section 9).
 PRESETS = {
     'R5': dict(mode='rule', a=3.4462742365415906, zl=0.7732454540044637, gamma=0.002556182131193757, b=0.15346978546753595, p=-0.771172326210512, wsat=2.4686884460414977, smooth=0.05),
-    # PROVISIONAL (notes/18 section 18): R5 + the short-strut law (gain 1.5, onset L / r = 4.6) calibrated on 4 C4 solids; fixes the C4 statics (22-specimen rms 3.6 %, max 9.4 %) and the C4 impact stroke / energy
-    # (F2a -3.3 %, H2a +0.2 %) but worsens the C4 impact peak force (+49 % / +25 %); independent test = B13.
+    # R5 + the short-strut law (gain 1.5, onset L / r = 4.6), calibrated on the C4 solids B10a-d and tested BLIND on B13a-d (decoupled short / long radii): errors +2.1, +7.5, -8.6, -1.7 %
+    # (rms 5.9 %); leave-one-out over the eight C4 solids 6.1 % rms, 10.5 % worst; the 22-specimen controls (C12, unequal-radius T-joints, octet) unchanged. Use for C4-type lattices (valence-3 nodes,
+    # 2.6 mm short struts). Known limits: the C4 impact peak force is worse (+49 % / +25 %), the multiplier also depends on the long struts' radius at the largest short-strut radius (notes/18 section 20).
     'R5_C4': dict(mode='rule', a=3.4462742365415906, zl=0.7732454540044637, gamma=0.002556182131193757, b=0.15346978546753595, p=-0.771172326210512, wsat=2.4686884460414977, short_gain=1.5, short_l0=4.6, smooth=0.05),
     'R5_all22': dict(mode='rule', a=2.993269531223047, zl=0.9297752637234049, gamma=0.061641144032001334, b=0.12074977714682034, p=-0.29195371444849794, wsat=3.017669602138089, smooth=0.05),
 }
