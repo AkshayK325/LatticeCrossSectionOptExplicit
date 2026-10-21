@@ -212,3 +212,5 @@ run_status.log.json.lock
 summary/
 /graphify-out
 abaqus/csv/*_field_U*.csv
+
+/PaperWriting
