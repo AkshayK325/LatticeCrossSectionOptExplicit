@@ -18,6 +18,9 @@
 - **"Check the run" / "check results":** read `run_status.log` first, then the process list, then the result files.
 - A job on another machine (Abaqus) cannot be seen from here: say so, and write its expected outputs and run order in `abaqus/BENCHMARK_PLAN.md`.
 
+## 1b. Which runs are needed (read `notes/0_1_GlobalRunPolicy.md` before planning or launching any run)
+Run only what can change a decision: six-question gate, verification ladder (analytic/own code -> cheap Abaqus -> one solid cell -> patch), tolerance budget fixed up front, no tuning on the validation case, one start per optimisation, mesh studies only on cheap shell cases. Register of planned runs and the "not run now" list are in that file; update it at every launch and result.
+
 ## 2. Other standing rules (details in the auto-memory; repeated here because they are costly to forget)
 - Git: commit locally and often, never push, no Claude attribution (user is the sole author). `notes/` and `summary/` are git-ignored: never `git add -f` them.
 - Every `notes/*.md` starts with the link to `notes/0_0_GlobalMasterPrompt.md`.

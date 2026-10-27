@@ -1409,3 +1409,7 @@ The presets are the smooth form; do not use `smooth = 0` in an optimisation (kin
 
 ## Plateau-design integration (2026-10-20)
 `tests/study_plateau_design.py` defaults to the `R5_C4` joint preset. Gradient verification on the real plateau problem: `tests/check_plateau_gradients.py` -> `abaqus/results/plateau_gradient_check_R5_C4.md` (adjoint = unrolled AD 6e-16; = FD to 1e-8 where J is smooth; rough J at unequal radii on the full drop, FD unreliable there), `tests/study_courant_sensitivity.py` -> `courant_sensitivity.md`, test `tests/test_plateau_joint_gradient.py`. No Abaqus run needed.
+
+
+## Helmet patch (shell + lattice liner) reference cases (2026-10-26)
+Generator `abaqus/helmet_cases.py` (not registered in `cases.CASES`: our side does not exist yet). Cases, run order, pass criteria and the decision each one informs: `notes/19_HelmetShellPlan.md` and `notes/0_1_GlobalRunPolicy.md` §5. 🟦 inp ready, waiting for Abaqus: **HS1a, HS1b, HS1c** (shell bowl between free head sphere and fixed anvil sphere, shell mesh 4/2/1 mm; run HS1a first), **HS2a** (F2a cell on a tied S4R shell plate with hemispherical anvil; baseline = existing F2a). Expected outputs: `<job>_history.csv` via `extract_odb.py`; copy CSV to `abaqus/csv/`, `.sta/.dat/.msg` to `abaqus/logs/`. Not generated on purpose: HS3 (curved lattice solid) until our flat-vs-curved sensitivity says it is needed.
