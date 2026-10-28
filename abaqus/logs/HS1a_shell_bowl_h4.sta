@@ -1,0 +1,178 @@
+
+The double precision Abaqus/Package executable will be used in this analysis.
+
+Abaqus/Explicit 2024                             DATE 28-Oct-2026  TIME 17:05:27
+
+***WARNING: In step 1, some facet thicknesses for general contact were reduced
+            from the parent element or specified values due to a large
+            thickness compared to facet dimensions.  The most significant
+            thickness scaling factor was 0.69675 for a facet on parent element
+            1.  An element set named "WarnElemGContThickReduce" has been
+            created to locate the regions of reduced thickness.
+
+-------------------------------------------------------------------------------
+           DOMAIN DECOMPOSITION INFORMATION
+-------------------------------------------------------------------------------
+
+
+     DOMAIN 1 HAS 618 ELEMENTS AND 711 NODES with WEIGHT 12.503
+
+     DOMAIN 2 HAS 614 ELEMENTS AND 707 NODES with WEIGHT 12.502
+
+     DOMAIN 3 HAS 613 ELEMENTS AND 707 NODES with WEIGHT 12.494
+
+     DOMAIN 4 HAS 620 ELEMENTS AND 713 NODES with WEIGHT 12.503
+
+     DOMAIN 5 HAS 618 ELEMENTS AND 711 NODES with WEIGHT 12.496
+
+     DOMAIN 6 HAS 615 ELEMENTS AND 708 NODES with WEIGHT 12.501
+
+     DOMAIN 7 HAS 615 ELEMENTS AND 708 NODES with WEIGHT 12.504
+
+     DOMAIN 8 HAS 620 ELEMENTS AND 713 NODES with WEIGHT 12.496
+
+
+-------------------------------------------------------------------------------
+ MODEL INFORMATION (IN GLOBAL X-Y COORDINATES)
+-------------------------------------------------------------------------------
+
+   Total mass in model = 4.94340E-05
+   Center of mass of model = (-2.056153E-16,-6.853845E-17, 6.554878E+01)
+
+    Moments of Inertia :
+                 About Center of Mass              About Origin
+      I(XX)          4.724144E-02                  2.596418E-01
+      I(YY)          4.724144E-02                  2.596418E-01
+      I(ZZ)          6.067070E-03                  6.067070E-03
+      I(XY)         -5.421011E-20                 -5.421011E-20
+      I(YZ)         -3.169556E-19                 -9.486769E-20
+      I(ZX)         -7.069213E-19                 -4.065758E-20
+
+-------------------------------------------------------------------------------
+ STABLE TIME INCREMENT INFORMATION
+-------------------------------------------------------------------------------
+
+
+  The stable time increment estimate for each element is based on
+  linearization about the initial state.
+
+
+   Initial time increment = 1.55457E-06
+
+   Statistics for all elements:
+      Mean = 1.78267E-06
+      Standard deviation = 9.30190E-08
+
+   Most critical elements:
+    Element number   Rank    Time increment   Increment ratio
+   ----------------------------------------------------------
+           1          1       1.554574E-06      1.000000E+00
+          18          2       1.554574E-06      1.000000E+00
+         307          3       1.554574E-06      1.000000E+00
+         324          4       1.554574E-06      1.000000E+00
+          17          5       1.590308E-06      9.775297E-01
+         308          6       1.590308E-06      9.775297E-01
+           2          7       1.590308E-06      9.775297E-01
+         323          8       1.590308E-06      9.775297E-01
+          19          9       1.590308E-06      9.775297E-01
+          36         10       1.590308E-06      9.775297E-01
+
+-------------------------------------------------------------------------------
+
+  INFORMATION REGARDING INITIAL CONTACT OVERCLOSURES FOR NEWLY DEFINED GENERAL
+  CONTACT INTERACTIONS IN STEP 1
+
+-------------------------------------------------------------------------------
+
+  No initial node-face or edge-edge overclosures found.
+
+
+  No nodal position adjustments have been made.
+
+
+  No unresolved initial node-face or edge-edge overclosures found.
+
+
+***NOTE: You can view the deformed configuration due to the resolution of
+         initial overclosures.  In increment 0, draw the deformed shape or
+         draw a symbol plot of vector displacements.
+
+------------------------------------------------------------------------------
+
+Abaqus/Explicit 2024                             DATE 28-Oct-2026  TIME 17:05:31
+
+The double precision Abaqus/Explicit executable will be used in this analysis.
+
+The model has been decomposed into 8 domains.
+Domain level parallelization will be used with 8 processors each hosting an MPI rank.
+
+-------------------------------------------------------------------------------
+ SOLUTION PROGRESS
+-------------------------------------------------------------------------------
+
+ STEP 1  ORIGIN 0.0000
+
+  Total memory used for step 1 is approximately 33.5 megabytes.
+  Global time estimation algorithm will be used.
+  Scaling factor:  1.0000
+              STEP     TOTAL      WALL      STABLE    CRITICAL    KINETIC      TOTAL
+INCREMENT     TIME      TIME      TIME   INCREMENT     ELEMENT     ENERGY     ENERGY
+        0  0.000E+00 0.000E+00  00:00:00 1.555E-06         324  2.000E+01  2.000E+01
+Output Field Frame Number     0, of     10, at step time 0.000E+00
+       45  7.618E-05 7.618E-05  00:00:00 1.773E-06          18  1.807E+01  2.003E+01
+       87  1.506E-04 1.506E-04  00:00:00 1.773E-06         324  1.859E+01  2.002E+01
+Output Field Frame Number     1, of     10, at step time 1.506E-04
+      130  2.269E-04 2.269E-04  00:00:00 1.773E-06           1  1.858E+01  2.002E+01
+      172  3.014E-04 3.014E-04  00:00:01 1.773E-06           1  1.834E+01  2.002E+01
+Output Field Frame Number     2, of     10, at step time 3.014E-04
+      215  3.776E-04 3.776E-04  00:00:01 1.773E-06         324  1.807E+01  2.002E+01
+      256  4.503E-04 4.503E-04  00:00:01 1.773E-06          18  1.655E+01  2.003E+01
+Output Field Frame Number     3, of     10, at step time 4.503E-04
+      299  5.265E-04 5.265E-04  00:00:01 1.773E-06         307  1.483E+01  2.002E+01
+      341  6.010E-04 6.010E-04  00:00:01 1.773E-06         324  1.238E+01  2.002E+01
+Output Field Frame Number     4, of     10, at step time 6.010E-04
+      384  6.772E-04 6.772E-04  00:00:01 1.773E-06          18  1.139E+01  2.001E+01
+      426  7.517E-04 7.517E-04  00:00:01 1.773E-06          18  1.107E+01  2.001E+01
+Output Field Frame Number     5, of     10, at step time 7.517E-04
+
+***WARNING: Some nodes involved in general contact have penetrated their
+            tracked faces by more than 50.000 percent of the typical element
+            dimension in the general contact domain, 2.9017. Please check the
+            node set "InfoNodeDeepPenetFirst". Please make sure that these
+            nodes and their contacting faces have sufficient mass to allow the
+            code to calculate realistic contact penalties for enforcing the
+            contact constraint.
+
+      469  8.280E-04 8.280E-04  00:00:01 1.773E-06         324  9.151E+00  2.001E+01
+      510  9.006E-04 9.006E-04  00:00:01 1.773E-06         324  4.888E+00  2.002E+01
+Output Field Frame Number     6, of     10, at step time 9.006E-04
+      553  9.763E-04 9.763E-04  00:00:01 1.690E-06           1  3.842E+00  2.005E+01
+      596  1.051E-03 1.051E-03  00:00:01 1.757E-06           1  5.918E+00  2.002E+01
+Output Field Frame Number     7, of     10, at step time 1.051E-03
+      639  1.127E-03 1.127E-03  00:00:01 1.757E-06         324  6.546E+00  2.003E+01
+      681  1.201E-03 1.201E-03  00:00:01 1.757E-06          18  6.091E+00  2.002E+01
+Output Field Frame Number     8, of     10, at step time 1.201E-03
+      724  1.276E-03 1.276E-03  00:00:01 1.757E-06         307  6.711E+00  2.003E+01
+      767  1.352E-03 1.352E-03  00:00:01 1.757E-06         324  8.192E+00  2.002E+01
+Output Field Frame Number     9, of     10, at step time 1.352E-03
+      810  1.427E-03 1.427E-03  00:00:01 1.757E-06         324  9.964E+00  2.003E+01
+      852  1.500E-03 1.500E-03  00:00:01 1.757E-06          18  1.109E+01  2.002E+01
+
+***WARNING: All  nodes involved in general contact that have undergone deep
+            penetration of their tracked faces during this step have been
+            listed in node set "InfoNodeDeepPenetAll". Please make sure that
+            these nodes and their contacting faces have sufficient mass to
+            allow the code to calculate realistic contact penalties for
+            enforcing the contact constraint.
+
+Restart Number  1 at 1.50000E-03
+Output Field Frame Number    10, of     10, at step time 1.500E-03
+  EXPLICIT EXECUTABLE TIME SUMMARY
+       USER TIME (SEC)      =  0.70000
+       SYSTEM TIME (SEC)    =  0.20000
+       WALLCLOCK TIME (SEC) =            1
+              INIT (SEC) =          0
+              MAIN (SEC) =          1
+
+  THE ANALYSIS HAS COMPLETED SUCCESSFULLY
+

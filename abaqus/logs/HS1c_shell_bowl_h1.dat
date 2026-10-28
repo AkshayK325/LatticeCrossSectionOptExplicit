@@ -1,0 +1,160 @@
+1
+
+   Abaqus 2024                                  Date 28-Oct-2026   Time 17:05:58
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          HS1c: spherical shell bowl (R 80, t 2, S4R h 1 mm) between a free rigid head sphere (40 g, 1 m/s) and a fixed rigid anvil sphere R 48; elastic, frictionless                                                                                                                                                                                                                                                                                                                                                                    
+  *ELEMENT, TYPE=S4R, ELSET=SHELL
+  *ELEMENT, TYPE=R3D4, ELSET=ANVIL
+  *ELEMENT, TYPE=R3D4, ELSET=HEAD
+  *ELEMENT, TYPE=MASS, ELSET=HEADM
+  *MATERIAL, NAME=PCSHELL
+  *DENSITY
+  *ELASTIC
+  *MASS, ELSET=HEADM
+  *SHELL SECTION, ELSET=SHELL, MATERIAL=PCSHELL, OFFSET=0.5
+  *SHELL SECTION, ELSET=SHELL, MATERIAL=PCSHELL, OFFSET=0.5
+  *MASS, ELSET=HEADM
+  *RIGID BODY, REF NODE=199990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=299990, ELSET=HEAD
+  *RIGID BODY, REF NODE=199990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=299990, ELSET=HEAD
+  *RIGID BODY, REF NODE=199990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=299990, ELSET=HEAD
+  *RIGID BODY, REF NODE=199990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=299990, ELSET=HEAD
+  *RIGID BODY, REF NODE=199990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=299990, ELSET=HEAD
+  *SURFACE INTERACTION, NAME=SI
+  *FRICTION
+  *RIGID BODY, REF NODE=199990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=299990, ELSET=HEAD
+  *RIGID BODY, REF NODE=199990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=299990, ELSET=HEAD
+  *BOUNDARY
+  *RIGID BODY, REF NODE=199990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=299990, ELSET=HEAD
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  *FRICTION
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  *OUTPUT, FIELD, NUMBER INTERVAL=10
+  *OUTPUT, HISTORY, TIME INTERVAL=5e-06
+  *STEP, NAME=DROP, NLGEOM=YES
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *OUTPUT, FIELD, NUMBER INTERVAL=10
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=5e-06
+  *NODE OUTPUT, NSET=HEADREF
+  *NODE OUTPUT, NSET=ANVILREF
+  *NODE OUTPUT, NSET=SHC
+  *ENERGY OUTPUT
+  *END STEP
+  *SURFACE INTERACTION, NAME=SI
+  *FRICTION
+  *BOUNDARY
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *CONTACT
+  *CONTACT INCLUSIONS, ALL EXTERIOR
+  *CONTACT PROPERTY ASSIGNMENT
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                  9233
+          NUMBER OF NODES IS                                     9565
+          NUMBER OF NODES DEFINED BY THE USER                    9565
+          TOTAL NUMBER OF VARIABLES IN THE MODEL                42984
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =     0.10    
+       SYSTEM TIME (SEC)    =      0.0    
+       TOTAL CPU TIME (SEC) =     0.10    
+       WALLCLOCK TIME (SEC) =            0

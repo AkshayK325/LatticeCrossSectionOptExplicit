@@ -1,0 +1,237 @@
+1
+
+   Abaqus 2024                                  Date 28-Oct-2026   Time 17:06:22
+   For use by UNIVERSITY OF WISCONSIN SYSTEM under license from Dassault Systemes or its subsidiary.
+
+
+
+                         The Abaqus Software is a product of:
+
+                           Dassault Systemes SIMULIA Corp.
+                           1301 Atwood Avenue, Suite 101W
+                              Johnston, RI 02919, USA
+ 
+
+
+                   The Abaqus Software is available only under license
+                   from Dassault Systemes or its subsidiary and may be
+                   used or reproduced only in accordance with the terms
+                   of such license.
+ 
+                          On machine DESKTOP-61UVKRP 
+                          you are authorized to run
+                          Abaqus/Explicit until 31-Aug-2027
+
+                          Your site id is: 200000000004499 
+
+
+ 
+                    For assistance or any other information you may
+                    obtain contact information for your local office
+                    from the world wide web at:
+
+                      https://www.3ds.com/products-services/simulia/services-support/
+
+ 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+                *                                                         * 
+                *                   *****************                     * 
+                *                   *  N O T I C E  *                     * 
+                *                   *****************                     * 
+                *                                                         * 
+                *                                                         * 
+                *                       Abaqus 2024                       * 
+                *                                                         * 
+                *       BUILD ID: 2023_09_21-07.55.25 RELr426 190762      * 
+                *                                                         * 
+                *                                                         * 
+                *  Please make sure you are using                         * 
+                *  release Abaqus 2024 manuals                            * 
+                *  plus the notes accompanying this release.              * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *                                                         * 
+                *   This program may not be used for commercial purposes  * 
+                *           without payment of a commercial fee.          * 
+                *                                                         * 
+                * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+
+ 
+
+
+
+     PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   *******************************************************
+
+
+ ***WARNING: Line #2 has been truncated.
+
+ ***WARNING: Line #5 has been truncated.
+
+     END PROCESSING PART, INSTANCE, AND ASSEMBLY INFORMATION
+   ***********************************************************
+
+
+
+
+     OPTIONS BEING PROCESSED
+   ***************************
+
+
+  *HEADING
+          HS2a: F2a (one C4 FHS cell, r 0.8, linear E 40 MPa, 0.083 J at 6 m/s) tied to a flat PC-class shell plate on a hemispherical anvil. F2a: ONE C4 unit cell (12.7 mm cube, 36 struts, r 0.8) as a SOLID with FHS node joints (the print geometry: Faired Hull-Subdivision, src/nodeJoint.py) instead of cylinders + joint spheres; gmsh tets from the FHS STL, C3D10M, h 0.4 mm; otherwise identical to B2a: bottom face clamped, top face tied to a rigid plate carrying the impactor (0.75/9 J at 6 m/s); linear elastic E = 40 
+  *ELEMENT, TYPE=C3D10M, ELSET=CELL
+  *ELEMENT, TYPE=MASS, ELSET=IMPMASS
+  *ELEMENT, TYPE=S4R, ELSET=SHELL
+  *ELEMENT, TYPE=R3D4, ELSET=ANVIL
+  *MATERIAL, NAME=PCSHELL
+  *DENSITY
+  *ELASTIC
+  *MATERIAL, NAME=EPU45_LIN
+  *DENSITY
+  *ELASTIC
+  *MASS, ELSET=IMPMASS
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *SHELL SECTION, ELSET=SHELL, MATERIAL=PCSHELL, OFFSET=0.5
+  *SECTION CONTROLS, NAME=SCDIST, DISTORTION CONTROL=YES
+
+ ***WARNING: THE PARAMETER DISTORTION CONTROL ON THE *SECTION CONTROLS OPTION 
+             IS RELEVANT FOR SOLID ELEMENTS WHEREVER APPLICABLE. THIS WARNING 
+             CAN BE IGNORED IF THE FEATURE IS APPLIED TO SOLID ELEMENTS ONLY.
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *SHELL SECTION, ELSET=SHELL, MATERIAL=PCSHELL, OFFSET=0.5
+  *MASS, ELSET=IMPMASS
+  *RIGID BODY, REF NODE=999990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=79487, TIE NSET=TOP
+  *RIGID BODY, REF NODE=999990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=79487, TIE NSET=TOP
+  *RIGID BODY, REF NODE=999990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=79487, TIE NSET=TOP
+  *RIGID BODY, REF NODE=999990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=79487, TIE NSET=TOP
+  *SURFACE, TYPE=NODE, NAME=LATBOT_S
+  *SURFACE, TYPE=ELEMENT, NAME=SHELLTOP
+  *SURFACE, TYPE=NODE, NAME=LATBOT_S
+  *SURFACE, TYPE=ELEMENT, NAME=SHELLTOP
+  *RIGID BODY, REF NODE=999990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=79487, TIE NSET=TOP
+  *TIE, NAME=LATTIE, ADJUST=NO, POSITION TOLERANCE=0.05
+  *SURFACE INTERACTION, NAME=CELLINT
+  *FRICTION
+  *RIGID BODY, REF NODE=999990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=79487, TIE NSET=TOP
+  *RIGID BODY, REF NODE=999990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=79487, TIE NSET=TOP
+  *BOUNDARY
+  *SOLID SECTION, ELSET=CELL, MATERIAL=EPU45_LIN, CONTROLS=SCDIST
+  *TIE, NAME=LATTIE, ADJUST=NO, POSITION TOLERANCE=0.05
+  *TIE, NAME=LATTIE, ADJUST=NO, POSITION TOLERANCE=0.05
+
+ ***NOTE:  Total of 1714 secondary nodes for tie definition LATTIE with main 
+          surface SHELLTOP and secondary surface LATBOT_S were tied.
+  *RIGID BODY, REF NODE=999990, ELSET=ANVIL
+  *RIGID BODY, REF NODE=79487, TIE NSET=TOP
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  *FRICTION
+  *INITIAL CONDITIONS, TYPE=VELOCITY
+  
+                               E L E M E N T   Q U A L I T Y  C H E C K S        
+  
+  
+ ***NOTES: DISTORTED ISOPARAMETRIC ELEMENTS: ANGLE BETWEEN ISOPARAMETRIC LINES 
+           IS LESS THAN 45 DEGREES OR GREATER THAN 135 DEGREES.
+  
+           TETRAHEDRAL QUALITY MEASURE: VOLUME OF TETRAHEDRON DIVIDED BY THE 
+           VOLUME OF EQUILATERAL TETRAHEDRON WITH SAME CIRCUMSPHERE RADIUS; 
+           0 FOR DEGENERATE TETRAHEDRON AND 1 FOR EQUILATERIAL TETRAHEDRON. IT 
+           IS RECOMMENDED THAT THE TETRAHEDRAL QUALITY MEASURE BE GREATER THAN 
+           0.02, THE MIN INTERIOR (DIHEDRAL) ANGLE BE GREATER THAN 10 DEGREES, 
+           AND THE MAX INTERIOR (DIHEDRAL) ANGLE BE LESS THAN 160 DEGREES. 
+  
+           MODIFIED TETRAHEDRAL QUALITY MEASURE: ANGLES BETWEEN THE TWO LINE 
+           SEGMENTS ON EACH EDGE; THE EDGES OF MODIFIED TETRAHEDRAL SHOULD BE 
+           AS STRAIGHT AS POSSIBLE. IT IS RECOMMENDED THAT THE ANGLE BETWEEN 
+           THE TWO LINE SEGMENTS ON EACH EDGE IS BETWEEN 160 AND 180 DEGREES. 
+  
+           TRIANGULAR QUALITY MEASURE: AREA OF TRIANGLE DIVIDED BY THE AREA OF 
+           EQUILATERAL TRIANGLE WITH SAME CIRCUMCIRCLE RADIUS; 0 FOR DEGENERATE 
+           TRIANGLE AND 1 FOR EQUILATERAL TRIANGLE. IT IS RECOMMENDED THAT THE
+           TRIANGULAR QUALITY MEASURE BE GREATER THAN 0.01, THE MIN INTERIOR 
+           ANGLE BE GREATER THAN 10 DEGREES, AND THE MAX INTERIOR ANGLE BE LESS 
+           THAN 160 DEGREES. 
+  
+           NODAL ADJUSTMENTS ARISING FROM CONTACT INTERACTIONS AND/OR TIE 
+           CONSTRAINTS CAN CAUSE SEVERE ELEMENT DISTORTION. IT MAY BE NECESSARY 
+           TO REMESH IN ORDER TO REDUCE THE AMOUNT OF ADJUSTMENT. 
+
+ ***WARNING: 4 elements are distorted. Either the isoparametric angles are out 
+             of the suggested limits or the triangular or tetrahedral quality 
+             measure is bad. The elements have been identified in element set 
+             WarnElemDistorted.
+  
+ --------------------------------------------------------------------------------
+ Distorted tetrahedral elements
+  
+  Element  Quality measure     Min angle        Max angle     Adjusted nodes 
+ --------- ---------------- ---------------- ---------------- -------------- 
+     23686        0.0165625          13.1937          144.861       NO       
+     27732        0.0104502          9.81656          160.078       NO       
+     28952        0.0187389          17.9562          134.859       NO       
+     34021       0.00521859          15.7411          157.675       NO       
+  
+  
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *OUTPUT, HISTORY, TIME INTERVAL=1e-05
+  *STEP, NAME=DROP, NLGEOM=YES
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *FIXED MASS SCALING, DT=3.37271e-08, TYPE=BELOW MIN
+  *OUTPUT, FIELD, NUMBER INTERVAL=20
+  *NODE OUTPUT
+  *OUTPUT, HISTORY, TIME INTERVAL=1e-05
+  *NODE OUTPUT, NSET=REF
+  *NODE OUTPUT, NSET=ANVILREF
+  *NODE OUTPUT, NSET=SHC
+  *ENERGY OUTPUT
+  *END STEP
+  *SURFACE, TYPE=NODE, NAME=LATBOT_S
+  *SURFACE, TYPE=ELEMENT, NAME=SHELLTOP
+  *TIE, NAME=LATTIE, ADJUST=NO, POSITION TOLERANCE=0.05
+  *SURFACE INTERACTION, NAME=CELLINT
+  *FRICTION
+  *BOUNDARY
+  *STEP, NAME=DROP, NLGEOM=YES
+  *DYNAMIC, EXPLICIT
+  *CONTACT
+  *CONTACT INCLUSIONS, ALL EXTERIOR
+  *CONTACT EXCLUSIONS
+  *CONTACT PROPERTY ASSIGNMENT
+  *END STEP
+
+
+
+                            P R O B L E M   S I Z E
+
+
+          NUMBER OF ELEMENTS IS                                 47247
+          NUMBER OF NODES IS                                   126848
+          NUMBER OF NODES DEFINED BY THE USER                   81458
+          NUMBER OF INTERNAL NODES GENERATED BY THE PROGRAM     45390
+          TOTAL NUMBER OF VARIABLES IN THE MODEL               386808
+          (DEGREES OF FREEDOM PLUS MAX NO. OF ANY LAGRANGE MULTIPLIER
+           VARIABLES. INCLUDE *PRINT,SOLVE=YES TO GET THE ACTUAL NUMBER.)
+
+
+
+                              END OF USER INPUT PROCESSING
+
+
+
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =      1.2    
+       SYSTEM TIME (SEC)    =      0.0    
+       TOTAL CPU TIME (SEC) =      1.2    
+       WALLCLOCK TIME (SEC) =            1
